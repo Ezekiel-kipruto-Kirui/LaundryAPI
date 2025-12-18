@@ -1,0 +1,33 @@
+{
+  "name": "laundry",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "devDependencies": {
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3",
+    "tailwindcss": "^4.1.17"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Ezekiel-kipruto-Kirui/laundry12.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/Ezekiel-kipruto-Kirui/laundry12/issues"
+  },
+  "homepage": "https://github.com/Ezekiel-kipruto-Kirui/laundry12#readme",
+  "dependencies": {
+    "@tanstack/react-query": "^5.90.11",
+    "lucide-react": "^0.555.0",
+    "react": "^19.2.1",
+    "react-dom": "^19.2.1",
+    "react-router-dom": "^7.10.0"
+  }
+}

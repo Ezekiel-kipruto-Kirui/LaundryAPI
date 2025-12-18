@@ -1,0 +1,1 @@
+web: gunicorn LaundryCofig.wsgi:application

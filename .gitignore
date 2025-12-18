@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*.sqlite3
+
+# Virtualenv
+venv/
+env/
+.env
+NPM_BIN_PATH/
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-error.log*
+
+# Build files
+theme/static/css/dist/
+# Node.js dependencies
+node_modules/
+
+# Build artifacts
+theme/static/css/dist/
+theme/static_src/package-lock.json
+
+# Local environment / system-specific configs
+*.cmd
+*.bat
+
+
+# Django stuff
+staticfiles/
+media/
+
+# OS files
+.DS_Store
+Thumbs.db
+
