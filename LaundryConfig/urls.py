@@ -24,7 +24,7 @@ from rest_framework_simplejwt.views import TokenRefreshView
 from django.views.generic import TemplateView
 from .authentication import EmailTokenObtainPairView
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
-from LaundryApp.views import CurrentUserView
+from LaundryApp.views import CurrentUserView,sendsms_view 
 import os
 
 
@@ -39,10 +39,8 @@ urlpatterns = [
     path('api/token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     path('api/me/',CurrentUserView.as_view()),
-    
-    # User endpoints
+    path('api/send-sms/', sendsms_view),
     path('api/users/me/', CurrentUserView.as_view(), name='current_user'),
-      # Your existing user routes
     path('assets/<path:path>', serve, {'document_root': os.path.join(settings.BASE_DIR, 'Front-end', 'dist', 'assets')}),
     re_path(r'^(?!api/|admin/|static/|assets/).*$', serve_react_app),  # Catch-all for React routes
     #re_path(r'^.*$', TemplateView.as_view(template_name="index.html"))

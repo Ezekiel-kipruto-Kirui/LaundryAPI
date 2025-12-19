@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Customer, Order, OrderItem } from '../services/types';
+import { Customer, Order } from '../services/types';
 import {
     Users,
     Edit,
@@ -18,13 +18,17 @@ import {
     Calendar,
     DollarSign,
     UserCircle,
-    FileText
+    FileText,
+    MessageSquare,
+    Send,
+    AlertCircle
 } from 'lucide-react';
-import { fetchApi } from '@/services/api';
+import { API_BASE_URL } from '@/services/url';
 
 // --- API Endpoints ---
-const API_CUSTOMERS_URL = "customers/";
-const API_ORDERS_URL = "Laundry/orders/"; // Updated to use correct route
+const API_CUSTOMERS_URL = `${API_BASE_URL}/Laundry/customers/`;
+const API_ORDERS_URL = `${API_BASE_URL}/Laundry/orders/`;
+const API_SMS_URL = `${API_BASE_URL}/send-sms/`;
 
 // --- Types for Pagination ---
 interface PaginatedResponse<T> {
@@ -44,6 +48,115 @@ interface PaginatedCustomersResponse extends PaginatedResponse<Customer> {
 interface PaginatedOrdersResponse extends PaginatedResponse<Order> {
     results: Order[];
 }
+
+// Type assertion helper for customer objects
+const assertCustomer = (customer: any): Customer => {
+    return {
+        id: customer?.id || 0,
+        name: customer?.name || 'Unknown',
+        phone: customer?.phone || '',
+        order_count: customer?.order_count || 0,
+        total_spent: customer?.total_spent || '0',
+        last_order_date: customer?.last_order_date || null
+    };
+};
+
+// SMS Send Modal Component
+const SMSModal = ({ 
+    isOpen, 
+    onClose, 
+    onSend, 
+    customerCount,
+    isSending 
+}: { 
+    isOpen: boolean; 
+    onClose: () => void; 
+    onSend: (message: string) => void;
+    customerCount: number;
+    isSending: boolean;
+}) => {
+    const [message, setMessage] = useState('');
+    const [charCount, setCharCount] = useState(0);
+
+    const handleMessageChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+        const value = e.target.value;
+        setMessage(value);
+        setCharCount(value.length);
+    };
+
+    const handleSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        if (message.trim() && customerCount > 0) {
+            onSend(message);
+        }
+    };
+
+    if (!isOpen) return null;
+
+    return (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+            <div className="bg-white rounded-2xl shadow-xl w-full max-w-md">
+                <div className="px-6 py-4 border-b border-gray-200 bg-blue-50">
+                    <div className="flex items-center">
+                        <MessageSquare className="w-5 h-5 text-blue-600 mr-2" />
+                        <h2 className="text-xl font-semibold text-gray-900">Send SMS to All Customers</h2>
+                    </div>
+                </div>
+                <form onSubmit={handleSubmit} className="p-6">
+                    <div className="mb-4">
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                            Message to send (All customers in database)
+                        </label>
+                        <textarea
+                            value={message}
+                            onChange={handleMessageChange}
+                            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent h-40"
+                            placeholder="Type your message here..."
+                            required
+                            maxLength={160}
+                        />
+                        <div className="flex justify-between mt-2">
+                            <span className="text-xs text-gray-500">
+                                Characters: {charCount}/160
+                            </span>
+                            <span className="text-xs text-gray-500">
+                                SMS parts: {Math.ceil(charCount / 160)}
+                            </span>
+                        </div>
+                    </div>
+
+                    <div className="flex justify-end space-x-3 pt-4 border-t border-gray-200">
+                        <button
+                            type="button"
+                            onClick={onClose}
+                            className="px-6 py-2 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors duration-200"
+                            disabled={isSending}
+                        >
+                            Cancel
+                        </button>
+                        <button
+                            type="submit"
+                            disabled={isSending || !message.trim()}
+                            className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition-colors duration-200 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
+                        >
+                            {isSending ? (
+                                <>
+                                    <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                                    Sending...
+                                </>
+                            ) : (
+                                <>
+                                    <Send className="w-4 h-4 mr-2" />
+                                    Send SMS to All Customers
+                                </>
+                            )}
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    );
+};
 
 // Card Component for Dashboard Metrics
 const Card = ({ icon: Icon, title, value, colorClass }: { icon: React.ElementType, title: string, value: string | number, colorClass: string }) => {
@@ -78,7 +191,7 @@ const CustomerFormModal = ({ customer, onSave, onClose }: { customer: Customer |
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
         onSave({
-            ...(customer || { id: 0, phone: '', name: '', orders: [] }),
+            ...(customer || { id: 0, phone: '', name: '', order_count: 0, total_spent: '0', last_order_date: null }),
             name,
             phone,
         });
@@ -192,9 +305,12 @@ const CustomerDetailModal = ({ customer, orders, onClose, onEdit, onDelete }: {
     onEdit: () => void,
     onDelete: () => void
 }) => {
-    const customerOrders = orders.filter(order => order.customer.id === customer.id);
+    const customerOrders = orders.filter(order => {
+        const orderCustomer = assertCustomer(order.customer);
+        return orderCustomer.id === customer.id;
+    });
 
-    // Calculate customer statistics - FIXED: Use total_price from order, not total_item_price
+    // Calculate customer statistics using order.total_price from API
     const totalSpent = customerOrders.reduce((sum, order) =>
         sum + parseFloat(order.total_price || '0'), 0
     ).toFixed(2);
@@ -364,70 +480,73 @@ const CustomerDetailModal = ({ customer, orders, onClose, onEdit, onDelete }: {
                                             </tr>
                                         </thead>
                                         <tbody className="bg-white divide-y divide-gray-200">
-                                            {customerOrders.map((order) => (
-                                                <tr key={order.id} className="hover:bg-gray-50 transition-colors duration-150">
-                                                    <td className="px-6 py-4 whitespace-nowrap">
-                                                        <div className="text-sm font-medium text-blue-600">{order.uniquecode}</div>
-                                                    </td>
-                                                    <td className="px-6 py-4 whitespace-nowrap">
-                                                        <div className="text-sm text-gray-900">{order.shop || 'N/A'}</div>
-                                                    </td>
-                                                    <td className="px-6 py-4 whitespace-nowrap">
-                                                        <OrderStatusBadge status={order.order_status} />
-                                                    </td>
-                                                    <td className="px-6 py-4 whitespace-nowrap">
-                                                        <PaymentStatusBadge status={order.payment_status} />
-                                                        {order.payment_type && order.payment_type !== 'None' && (
-                                                            <div className="text-xs text-gray-500 mt-1">
-                                                                {order.payment_type}
-                                                            </div>
-                                                        )}
-                                                    </td>
-                                                    <td className="px-6 py-4 whitespace-nowrap">
-                                                        <div className="text-sm font-semibold text-gray-900">
-                                                            {formatCurrency(order.total_price)}
-                                                        </div>
-                                                        {parseFloat(order.balance) > 0 && (
-                                                            <div className="text-xs text-red-500">
-                                                                Balance: {formatCurrency(order.balance)}
-                                                            </div>
-                                                        )}
-                                                    </td>
-                                                    <td className="px-6 py-4 whitespace-nowrap">
-                                                        <div className="text-sm text-gray-900">
-                                                            {formatDate(order.created_at)}
-                                                        </div>
-                                                    </td>
-                                                    <td className="px-6 py-4 whitespace-nowrap">
-                                                        <div className="text-sm text-gray-900">
-                                                            {formatDate(order.delivery_date)}
-                                                        </div>
-                                                    </td>
-                                                    <td className="px-6 py-4 whitespace-nowrap">
-                                                        <div className="text-sm text-gray-900">
-                                                            {order.updated_by ? (
-                                                                formatDate(order.updated_at || '')
-                                                            ) : (
-                                                                <span className="text-gray-400">Not cleared</span>
-                                                            )}
-                                                        </div>
-                                                    </td>
-                                                    <td className="px-6 py-4 whitespace-nowrap">
-                                                        <div className="text-sm text-gray-900">
-                                                            {order.updated_by ? (
-                                                                <div>
-                                                                    <div>{order.updated_by.first_name}</div>
-                                                                    <div className="text-xs text-gray-500">
-                                                                        {order.updated_by.user_type || 'Staff'}
-                                                                    </div>
+                                            {customerOrders.map((order) => {
+                                                const orderCustomer = assertCustomer(order.customer);
+                                                return (
+                                                    <tr key={order.id} className="hover:bg-gray-50 transition-colors duration-150">
+                                                        <td className="px-6 py-4 whitespace-nowrap">
+                                                            <div className="text-sm font-medium text-blue-600">{order.uniquecode}</div>
+                                                        </td>
+                                                        <td className="px-6 py-4 whitespace-nowrap">
+                                                            <div className="text-sm text-gray-900">{order.shop || 'N/A'}</div>
+                                                        </td>
+                                                        <td className="px-6 py-4 whitespace-nowrap">
+                                                            <OrderStatusBadge status={order.order_status} />
+                                                        </td>
+                                                        <td className="px-6 py-4 whitespace-nowrap">
+                                                            <PaymentStatusBadge status={order.payment_status} />
+                                                            {order.payment_type && order.payment_type !== 'None' && (
+                                                                <div className="text-xs text-gray-500 mt-1">
+                                                                    {order.payment_type}
                                                                 </div>
-                                                            ) : (
-                                                                <span className="text-gray-400">N/A</span>
                                                             )}
-                                                        </div>
-                                                    </td>
-                                                </tr>
-                                            ))}
+                                                        </td>
+                                                        <td className="px-6 py-4 whitespace-nowrap">
+                                                            <div className="text-sm font-semibold text-gray-900">
+                                                                {formatCurrency(order.total_price)}
+                                                            </div>
+                                                            {parseFloat(order.balance) > 0 && (
+                                                                <div className="text-xs text-red-500">
+                                                                    Balance: {formatCurrency(order.balance)}
+                                                                </div>
+                                                            )}
+                                                        </td>
+                                                        <td className="px-6 py-4 whitespace-nowrap">
+                                                            <div className="text-sm text-gray-900">
+                                                                {formatDate(order.created_at)}
+                                                            </div>
+                                                        </td>
+                                                        <td className="px-6 py-4 whitespace-nowrap">
+                                                            <div className="text-sm text-gray-900">
+                                                                {formatDate(order.delivery_date)}
+                                                            </div>
+                                                        </td>
+                                                        <td className="px-6 py-4 whitespace-nowrap">
+                                                            <div className="text-sm text-gray-900">
+                                                                {order.updated_by ? (
+                                                                    formatDate(order.updated_at || '')
+                                                                ) : (
+                                                                    <span className="text-gray-400">Not cleared</span>
+                                                                )}
+                                                            </div>
+                                                        </td>
+                                                        <td className="px-6 py-4 whitespace-nowrap">
+                                                            <div className="text-sm text-gray-900">
+                                                                {order.updated_by ? (
+                                                                    <div>
+                                                                        <div>{order.updated_by.first_name}</div>
+                                                                        <div className="text-xs text-gray-500">
+                                                                            {order.updated_by.user_type || 'Staff'}
+                                                                        </div>
+                                                                    </div>
+                                                                ) : (
+                                                                    <span className="text-gray-400">N/A</span>
+                                                                )}
+                                                            </div>
+                                                        </td>
+                                                    </tr>
+                                                );
+                                            })}
                                         </tbody>
                                     </table>
                                 </div>
@@ -478,15 +597,108 @@ const CustomerDetailModal = ({ customer, orders, onClose, onEdit, onDelete }: {
     );
 };
 
+// Helper function for API calls
+const apiFetch = async <T,>(url: string, options: RequestInit = {}): Promise<T> => {
+    const token = localStorage.getItem('access_token');
+    
+    const defaultHeaders = {
+        'Content-Type': 'application/json',
+        ...(token && { 'Authorization': `Bearer ${token}` }),
+    };
+
+    const response = await fetch(url, {
+        ...options,
+        headers: {
+            ...defaultHeaders,
+            ...options.headers,
+        },
+    });
+
+    if (!response.ok) {
+        if (response.status === 401) {
+            throw new Error('Unauthorized');
+        }
+        const errorText = await response.text();
+        console.error(`API Error ${response.status}:`, errorText);
+        throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+    }
+
+    return response.json();
+};
+
+// Helper function to fetch ALL orders with pagination
+const fetchAllOrdersWithPagination = async (): Promise<Order[]> => {
+    let allOrders: Order[] = [];
+    let nextUrl: string | null = `${API_ORDERS_URL}?page_size=100`;
+    let pageCount = 0;
+    const MAX_PAGES = 20;
+
+    console.log('Starting to fetch all orders...');
+
+    while (nextUrl && pageCount < MAX_PAGES) {
+        try {
+            console.log(`Fetching orders page ${pageCount + 1}: ${nextUrl}`);
+            const response = await apiFetch<PaginatedOrdersResponse>(nextUrl);
+            
+            if (response.results && Array.isArray(response.results)) {
+                console.log(`Page ${pageCount + 1}: Found ${response.results.length} orders`);
+                
+                // Process each order to ensure customer data is properly structured
+                const processedOrders = response.results.map(order => {
+                    const customer = assertCustomer(order.customer);
+                    
+                    return {
+                        ...order,
+                        customer: customer
+                    };
+                });
+                
+                allOrders = [...allOrders, ...processedOrders];
+                nextUrl = response.next;
+                pageCount++;
+                
+                console.log(`Total orders so far: ${allOrders.length}`);
+                
+                if (!nextUrl) {
+                    console.log('No more pages to fetch');
+                }
+            } else {
+                console.error('Invalid response format - missing results array:', response);
+                break;
+            }
+        } catch (error) {
+            console.error('Error fetching orders page:', error);
+            break;
+        }
+    }
+
+    console.log(`Finished fetching orders. Total: ${allOrders.length} orders`);
+    
+    // Debug: Show sample order structure
+    if (allOrders.length > 0) {
+        console.log('Sample order structure:', {
+            id: allOrders[0].id,
+            customer: allOrders[0].customer,
+            total_price: allOrders[0].total_price
+        });
+    }
+
+    return allOrders;
+};
+
 export default function CustomersPage() {
     const [customers, setCustomers] = useState<Customer[]>([]);
+    const [allCustomers, setAllCustomers] = useState<Customer[]>([]);
     const [orders, setOrders] = useState<Order[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [searchQuery, setSearchQuery] = useState('');
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
+    const [isSMSModalOpen, setIsSMSModalOpen] = useState(false);
+    const [isSendingSMS, setIsSendingSMS] = useState(false);
     const [currentCustomer, setCurrentCustomer] = useState<Customer | null>(null);
+    const [ordersLoading, setOrdersLoading] = useState(false);
 
     // Pagination state
     const [pagination, setPagination] = useState({
@@ -498,23 +710,93 @@ export default function CustomersPage() {
         previous: null as string | null
     });
 
-    // Dashboard Calculations
-    const totalCustomers = pagination.totalItems;
-    const displayedCustomers = customers;
+    // Helper function to fetch ALL customers (bypassing pagination)
+    const fetchAllCustomers = useCallback(async (): Promise<Customer[]> => {
+        try {
+            let allCustomers: Customer[] = [];
+            let nextUrl: string | null = `${API_CUSTOMERS_URL}?page_size=100`;
+
+            // Fetch all pages of customers
+            while (nextUrl) {
+                const response = await apiFetch<PaginatedCustomersResponse>(nextUrl);
+                
+                if (response.results && Array.isArray(response.results)) {
+                    allCustomers = [...allCustomers, ...response.results];
+                    nextUrl = response.next;
+                } else {
+                    console.error('Invalid response format:', response);
+                    break;
+                }
+
+                // Break if we have too many customers
+                if (allCustomers.length > 1000) break;
+            }
+
+            return allCustomers;
+        } catch (err: any) {
+            console.error("Error fetching all customers:", err);
+            throw err;
+        }
+    }, []);
+
+    // Function to fetch ALL orders
+    const fetchAllOrders = useCallback(async () => {
+        setOrdersLoading(true);
+        try {
+            const allOrders = await fetchAllOrdersWithPagination();
+            setOrders(allOrders);
+            console.log(`Successfully loaded ${allOrders.length} orders`);
+        } catch (err: any) {
+            console.error("Error fetching all orders:", err);
+            if (err.message === "Unauthorized") {
+                setError("Session expired. Please login again.");
+            } else {
+                console.error("Error fetching orders:", err);
+                setError(`Failed to load orders: ${err.message}`);
+            }
+        } finally {
+            setOrdersLoading(false);
+        }
+    }, []);
 
     // Helper function to calculate customer statistics from orders
     const calculateCustomerStats = useCallback((customerId: number) => {
-        const customerOrders = orders.filter(order => order.customer.id === customerId);
+        if (!orders || orders.length === 0) {
+            return {
+                orderCount: 0,
+                totalBilled: '0.00',
+                lastOrderDate: null
+            };
+        }
 
-        // Calculate total billed from order.total_price
+        const customerOrders = orders.filter(order => {
+            const customer = assertCustomer(order.customer);
+            return customer.id === customerId;
+        });
+
+        console.log(`Calculating stats for customer ${customerId}: Found ${customerOrders.length} orders`);
+
+        // Calculate total billed from order.total_price from API
         const totalBilled = customerOrders.reduce((sum, order) => {
-            return sum + parseFloat(order.total_price || '0');
+            const price = parseFloat(order.total_price || '0');
+            if (isNaN(price)) {
+                console.warn(`Invalid price for order ${order.id}: ${order.total_price}`);
+                return sum;
+            }
+            return sum + price;
         }, 0);
+
+        // Get the most recent order date
+        const lastOrderDate = customerOrders.length > 0
+            ? customerOrders.sort((a, b) => 
+                new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+            )[0]?.created_at
+            : null;
 
         return {
             orderCount: customerOrders.length,
             totalBilled: totalBilled.toFixed(2),
-            lastOrderDate: customerOrders[0]?.created_at || null
+            lastOrderDate: lastOrderDate
         };
     }, [orders]);
 
@@ -534,20 +816,25 @@ export default function CustomersPage() {
                 params.append('search', search);
             }
 
-            const response = await fetchApi<PaginatedCustomersResponse>(
-                `${API_CUSTOMERS_URL}?${params}`,
-                { method: 'GET' },
-                'laundry'
-            );
+            const url = `${API_CUSTOMERS_URL}?${params}`;
+            console.log(`Fetching customers from: ${url}`);
+            
+            const response = await apiFetch<PaginatedCustomersResponse>(url);
+
+            if (!response.results || !Array.isArray(response.results)) {
+                throw new Error('Invalid response format');
+            }
 
             // Transform data with stats calculated from orders
             const transformedData = response.results.map((customer: Customer) => {
                 const stats = calculateCustomerStats(customer.id);
 
+                console.log(`Customer ${customer.id} (${customer.name}): ${stats.orderCount} orders, KSh ${stats.totalBilled}`);
+
                 return {
                     ...customer,
                     order_count: stats.orderCount,
-                    total_spent: stats.totalBilled, // This will now show actual billed amount
+                    total_spent: stats.totalBilled,
                     last_order_date: stats.lastOrderDate
                 };
             });
@@ -555,7 +842,7 @@ export default function CustomersPage() {
             setCustomers(transformedData);
 
             // Handle both response formats (count vs total_items)
-            const totalItems = response.count || (response as any).total_items || 0;
+            const totalItems = response.count || 0;
             const totalPages = response.total_pages || Math.ceil(totalItems / pagination.pageSize) || 1;
             const currentPage = response.current_page || page;
             const pageSize = response.page_size || pagination.pageSize;
@@ -581,47 +868,114 @@ export default function CustomersPage() {
         }
     }, [orders, pagination.pageSize, calculateCustomerStats]);
 
-    const fetchAllOrders = useCallback(async () => {
+    // SMS Sending Function - fetches ALL customers when sending
+    const sendBulkSMS = async (message: string) => {
+        setIsSendingSMS(true);
+        setError(null);
+
         try {
-            // Fetch orders with correct API route
-            let allOrders: Order[] = [];
-            let nextUrl: string | null = `${API_ORDERS_URL}?page_size=100`;
-
-            // Handle pagination for orders
-            while (nextUrl) {
-                const response = await fetchApi<PaginatedOrdersResponse>(
-                    nextUrl,
-                    { method: 'GET' },
-                    'laundry'
-                );
-
-                allOrders = [...allOrders, ...response.results];
-                nextUrl = response.next;
-
-                // Break if we have a lot of orders to prevent infinite loops
-                if (allOrders.length > 500) break;
+            // Fetch ALL customers from database (bypassing pagination)
+            const allCustomersData = await fetchAllCustomers();
+            
+            if (allCustomersData.length === 0) {
+                alert("No customers found in the database.");
+                return;
             }
 
-            setOrders(allOrders);
+            // Extract all customer phone numbers
+            const phoneNumbers = allCustomersData
+                .map(customer => customer.phone)
+                .filter(phone => phone && phone.trim() !== '');
+            
+            if (phoneNumbers.length === 0) {
+                alert("No valid phone numbers found among customers.");
+                return;
+            }
+
+            // Send SMS to each customer
+            let successCount = 0;
+            let failCount = 0;
+
+            for (const phoneNumber of phoneNumbers) {
+                try {
+                    const response = await apiFetch<any>(API_SMS_URL, {
+                        method: 'POST',
+                        body: JSON.stringify({
+                            to_number: phoneNumber,
+                            message: message
+                        })
+                    });
+
+                    if (response.success || response.sid) {
+                        successCount++;
+                    } else {
+                        failCount++;
+                        console.error(`Failed to send SMS to ${phoneNumber}:`, response.error);
+                    }
+
+                    // Add a small delay between requests to avoid rate limiting
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                } catch (err) {
+                    failCount++;
+                    console.error(`Error sending SMS to ${phoneNumber}:`, err);
+                }
+            }
+
+            // Show results
+            alert(`SMS sending completed!\n\nTotal Customers: ${allCustomersData.length}\nPhone Numbers Found: ${phoneNumbers.length}\nSuccessfully Sent: ${successCount}\nFailed: ${failCount}`);
+
+            // Close SMS modal after sending
+            setIsSMSModalOpen(false);
+
         } catch (err: any) {
-            console.error("Error fetching all orders:", err);
-            if (err.message === "Unauthorized") {
-                setError("Session expired. Please login again.");
-            } else {
-                console.error("Error fetching orders:", err);
-            }
+            console.error("Error sending SMS:", err);
+            setError(`Failed to send SMS: ${err instanceof Error ? err.message : 'Unknown error'}`);
+            alert("Failed to send SMS. Please try again.");
+        } finally {
+            setIsSendingSMS(false);
         }
+    };
+
+    // Initial data loading
+    useEffect(() => {
+        const loadInitialData = async () => {
+            setLoading(true);
+            try {
+                console.log('Loading initial data...');
+                
+                // Fetch all customers initially for SMS functionality
+                console.log('Fetching all customers...');
+                const allCust = await fetchAllCustomers();
+                setAllCustomers(allCust);
+                console.log(`Fetched ${allCust.length} customers`);
+                
+                // Fetch orders first (this is crucial)
+                console.log('Fetching all orders...');
+                await fetchAllOrders();
+                
+                // Fetch paginated customers (this will now have access to orders data)
+                console.log('Fetching paginated customers...');
+                await fetchCustomers(1, '');
+                
+                console.log('Initial data loading complete');
+            } catch (err) {
+                console.error("Error loading initial data:", err);
+                setError("Failed to load initial data. Please refresh the page.");
+            } finally {
+                setLoading(false);
+            }
+        };
+        
+        loadInitialData();
     }, []);
 
     useEffect(() => {
-        fetchAllOrders();
-    }, [fetchAllOrders]);
+        if (!loading && !ordersLoading) {
+            fetchCustomers(pagination.currentPage, searchQuery);
+        }
+    }, [pagination.currentPage, searchQuery, ordersLoading]);
 
-    useEffect(() => {
-        fetchCustomers(pagination.currentPage, searchQuery);
-    }, [pagination.currentPage, searchQuery, fetchCustomers]);
-
-    // CRUD Handlers using fetchApi
+    // CRUD Handlers
     const saveCustomer = async (customerData: Customer) => {
         setLoading(true);
         const isNew = customerData.id === 0;
@@ -629,20 +983,20 @@ export default function CustomersPage() {
         const method = isNew ? 'POST' : 'PUT';
 
         try {
-            await fetchApi<Customer>(
-                url,
-                {
-                    method,
-                    body: JSON.stringify({
-                        name: customerData.name,
-                        phone: customerData.phone,
-                        created_by: 1 // This should come from your auth system
-                    })
-                },
-                'laundry'
-            );
+            await apiFetch<any>(url, {
+                method,
+                body: JSON.stringify({
+                    name: customerData.name,
+                    phone: customerData.phone,
+                    created_by: 1 // This should come from your auth system
+                })
+            });
 
+            // Refresh both paginated and all customers
+            const allCust = await fetchAllCustomers();
+            setAllCustomers(allCust);
             await fetchCustomers(pagination.currentPage, searchQuery);
+            
             setIsModalOpen(false);
             alert(`Customer ${isNew ? 'created' : 'updated'} successfully!`);
         } catch (err: any) {
@@ -664,13 +1018,15 @@ export default function CustomersPage() {
 
         setLoading(true);
         try {
-            await fetchApi<void>(
-                `${API_CUSTOMERS_URL}${id}/`,
-                { method: 'DELETE' },
-                'laundry'
-            );
+            await apiFetch<void>(`${API_CUSTOMERS_URL}${id}/`, {
+                method: 'DELETE'
+            });
 
+            // Refresh both paginated and all customers
+            const allCust = await fetchAllCustomers();
+            setAllCustomers(allCust);
             await fetchCustomers(pagination.currentPage, searchQuery);
+            
             setIsDetailModalOpen(false);
             alert(`Customer ${name} deleted successfully.`);
         } catch (err: any) {
@@ -700,7 +1056,7 @@ export default function CustomersPage() {
     // Search Handler - triggers backend search
     const handleSearch = (e: React.FormEvent) => {
         e.preventDefault();
-        setPagination(prev => ({ ...prev, currentPage: 1 })); // Reset to first page on new search
+        setPagination(prev => ({ ...prev, currentPage: 1 }));
     };
 
     // Pagination handlers
@@ -726,6 +1082,7 @@ export default function CustomersPage() {
                 <div className="text-center p-8 text-gray-500">
                     <RefreshCw className="animate-spin h-8 w-8 mx-auto mb-4 text-blue-500" />
                     <p>Loading customer data...</p>
+                    {ordersLoading && <p className="text-sm mt-2">Loading orders...</p>}
                 </div>
             </div>
         </div>
@@ -734,6 +1091,15 @@ export default function CustomersPage() {
     return (
         <div className="min-h-screen bg-gray-50 py-8">
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                {/* Debug Info (can be removed in production) */}
+                <div className="mb-4 text-xs text-gray-500">
+                    <div className="flex space-x-4">
+                        <span>Orders Loaded: {orders.length}</span>
+                        <span>Customers: {customers.length}</span>
+                        <span>Total Orders in DB: {orders.reduce((sum, order) => sum + (assertCustomer(order.customer).id ? 1 : 0), 0)}</span>
+                    </div>
+                </div>
+
                 {/* Search Section */}
                 <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 mb-8">
                     <div className="flex flex-col sm:flex-row gap-4">
@@ -743,6 +1109,14 @@ export default function CustomersPage() {
                         >
                             <PlusCircle className="w-5 h-5 mr-2" />
                             Add New Customer
+                        </button>
+                        <button
+                            onClick={() => setIsSMSModalOpen(true)}
+                            className="inline-flex items-center justify-center px-6 py-3 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-lg transition-colors duration-200 shadow-sm"
+                            disabled={loading}
+                        >
+                            <MessageSquare className="w-5 h-5 mr-2" />
+                            Send SMS to All ({allCustomers.length} customers)
                         </button>
                         <form onSubmit={handleSearch} className="flex-1 flex gap-2">
                             <div className="flex-1 relative">
@@ -766,24 +1140,34 @@ export default function CustomersPage() {
                     </div>
                 </div>
 
+                {/* Error Display */}
+                {error && (
+                    <div className="mb-8 p-4 bg-red-100 border border-red-400 text-red-700 rounded-lg">
+                        <div className="flex items-center">
+                            <AlertCircle className="w-5 h-5 mr-2" />
+                            <span>{error}</span>
+                        </div>
+                    </div>
+                )}
+
                 {/* Quick Stats with Server-served Information */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
                     <Card
                         icon={Users}
                         title="Total Customers"
-                        value={totalCustomers}
+                        value={pagination.totalItems}
                         colorClass="blue"
                     />
                     <Card
                         icon={ShoppingBag}
                         title="Current Page Results"
-                        value={displayedCustomers.length}
+                        value={customers.length}
                         colorClass="green"
                     />
                     <Card
                         icon={ChartLine}
-                        title={`Page ${pagination.currentPage} of ${pagination.totalPages}`}
-                        value={`Served by Server`}
+                        title="Total Orders"
+                        value={orders.length}
                         colorClass="purple"
                     />
                 </div>
@@ -798,12 +1182,23 @@ export default function CustomersPage() {
                                 <div className="text-sm text-gray-600 mt-1">
                                     Page {pagination.currentPage} of {pagination.totalPages} •
                                     Total: {pagination.totalItems} customers •
-                                    Served by: <span className="font-semibold">Backend Pagination</span>
+                                    Showing: {customers.length} on this page •
+                                    Orders: {orders.length} loaded
                                 </div>
                             </div>
-                            <span className="text-sm text-gray-600 mt-2 sm:mt-0">
-                                Showing {displayedCustomers.length} per page
-                            </span>
+                            <div className="flex items-center space-x-4 mt-2 sm:mt-0">
+                                <span className="text-sm text-gray-600">
+                                    Total in DB: {allCustomers.length}
+                                </span>
+                                <button
+                                    onClick={() => setIsSMSModalOpen(true)}
+                                    className="inline-flex items-center px-3 py-1 bg-green-100 hover:bg-green-200 text-green-800 rounded-lg text-sm font-medium transition-colors duration-200"
+                                    title="Send SMS to all customers in database"
+                                >
+                                    <MessageSquare className="w-3 h-3 mr-1" />
+                                    Send SMS ({allCustomers.length})
+                                </button>
+                            </div>
                         </div>
                     </div>
 
@@ -833,97 +1228,112 @@ export default function CustomersPage() {
                                 </tr>
                             </thead>
                             <tbody className="bg-white divide-y divide-gray-200">
-                                {displayedCustomers.length > 0 ? (
-                                    displayedCustomers.map((customer) => (
-                                        <tr key={customer.id} className="hover:bg-gray-50 transition-colors duration-150">
-                                            {/* Name */}
-                                            <td className="px-6 py-4 whitespace-nowrap">
-                                                <div className="flex items-center">
-                                                    <div className="w-10 h-10 bg-blue-500 rounded-full flex items-center justify-center mr-4 flex-shrink-0">
-                                                        <User className="text-white w-5 h-5" />
-                                                    </div>
-                                                    <div>
-                                                        <div className="text-sm font-medium text-gray-900">
-                                                            {customer.name}
+                                {customers.length > 0 ? (
+                                    customers.map((customer) => {
+                                        const customerOrders = orders.filter(order => {
+                                            const orderCustomer = assertCustomer(order.customer);
+                                            return orderCustomer.id === customer.id;
+                                        });
+                                        const totalBilled = customerOrders.reduce((sum, order) => 
+                                            sum + parseFloat(order.total_price || '0'), 0
+                                        ).toFixed(2);
+                                        const lastOrderDate = customerOrders.length > 0
+                                            ? customerOrders.sort((a, b) => 
+                                                new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+                                            )[0]?.created_at
+                                            : null;
+
+                                        return (
+                                            <tr key={customer.id} className="hover:bg-gray-50 transition-colors duration-150">
+                                                {/* Name */}
+                                                <td className="px-6 py-4 whitespace-nowrap">
+                                                    <div className="flex items-center">
+                                                        <div className="w-10 h-10 bg-blue-500 rounded-full flex items-center justify-center mr-4 flex-shrink-0">
+                                                            <User className="text-white w-5 h-5" />
                                                         </div>
-                                                        <div className="text-sm text-gray-500">
-                                                            ID: {customer.id}
+                                                        <div>
+                                                            <div className="text-sm font-medium text-gray-900">
+                                                                {customer.name}
+                                                            </div>
+                                                            <div className="text-sm text-gray-500">
+                                                                ID: {customer.id}
+                                                            </div>
                                                         </div>
                                                     </div>
-                                                </div>
-                                            </td>
+                                                </td>
 
-                                            {/* Phone */}
-                                            <td className="px-6 py-4 whitespace-nowrap">
-                                                <div className="text-sm text-gray-900">{customer.phone}</div>
-                                                <div className="text-sm text-gray-500">Primary contact</div>
-                                            </td>
+                                                {/* Phone */}
+                                                <td className="px-6 py-4 whitespace-nowrap">
+                                                    <div className="text-sm text-gray-900">{customer.phone}</div>
+                                                    <div className="text-sm text-gray-500">Primary contact</div>
+                                                </td>
 
-                                            {/* Orders */}
-                                            <td className="px-6 py-4 whitespace-nowrap">
-                                                <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-blue-100 text-blue-800">
-                                                    <ShoppingBag className="w-3 h-3 mr-1" />
-                                                    {customer.order_count || 0}
-                                                </span>
-                                            </td>
+                                                {/* Orders */}
+                                                <td className="px-6 py-4 whitespace-nowrap">
+                                                    <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-blue-100 text-blue-800">
+                                                        <ShoppingBag className="w-3 h-3 mr-1" />
+                                                        {customerOrders.length}
+                                                    </span>
+                                                </td>
 
-                                            {/* Total Billed */}
-                                            <td className="px-6 py-4 whitespace-nowrap">
-                                                <div className="text-sm font-semibold text-green-600">
-                                                    KSh {customer.total_spent || '0.00'}
-                                                </div>
-                                                <div className="text-xs text-gray-500">Lifetime value</div>
-                                            </td>
+                                                {/* Total Billed - Now correctly calculated from orders */}
+                                                <td className="px-6 py-4 whitespace-nowrap">
+                                                    <div className="text-sm font-semibold text-green-600">
+                                                        KSh {totalBilled}
+                                                    </div>
+                                                    <div className="text-xs text-gray-500">Lifetime value</div>
+                                                </td>
 
-                                            {/* Last Order */}
-                                            <td className="px-6 py-4 whitespace-nowrap">
-                                                <div className="text-sm text-gray-900">
-                                                    {customer.last_order_date ? (
-                                                        new Date(customer.last_order_date).toLocaleDateString('en-US', {
-                                                            month: 'short',
-                                                            day: 'numeric',
-                                                            year: 'numeric'
-                                                        })
-                                                    ) : (
-                                                        <span className="text-gray-400">Never</span>
-                                                    )}
-                                                </div>
-                                                <div className="text-xs text-gray-500">Last activity</div>
-                                            </td>
+                                                {/* Last Order */}
+                                                <td className="px-6 py-4 whitespace-nowrap">
+                                                    <div className="text-sm text-gray-900">
+                                                        {lastOrderDate ? (
+                                                            new Date(lastOrderDate).toLocaleDateString('en-US', {
+                                                                month: 'short',
+                                                                day: 'numeric',
+                                                                year: 'numeric'
+                                                            })
+                                                        ) : (
+                                                            <span className="text-gray-400">Never</span>
+                                                        )}
+                                                    </div>
+                                                    <div className="text-xs text-gray-500">Last activity</div>
+                                                </td>
 
-                                            {/* Actions */}
-                                            <td className="px-6 py-4 whitespace-nowrap">
-                                                <div className="flex items-center space-x-2">
-                                                    {/* View Details */}
-                                                    <button
-                                                        onClick={() => viewCustomerDetails(customer)}
-                                                        className="inline-flex items-center p-2 bg-blue-100 hover:bg-blue-200 text-blue-700 rounded-lg transition-colors duration-200"
-                                                        title="View Details"
-                                                    >
-                                                        <Eye className="w-4 h-4" />
-                                                    </button>
+                                                {/* Actions */}
+                                                <td className="px-6 py-4 whitespace-nowrap">
+                                                    <div className="flex items-center space-x-2">
+                                                        {/* View Details */}
+                                                        <button
+                                                            onClick={() => viewCustomerDetails(customer)}
+                                                            className="inline-flex items-center p-2 bg-blue-100 hover:bg-blue-200 text-blue-700 rounded-lg transition-colors duration-200"
+                                                            title="View Details"
+                                                        >
+                                                            <Eye className="w-4 h-4" />
+                                                        </button>
 
-                                                    {/* Edit */}
-                                                    <button
-                                                        onClick={() => editCustomer(customer)}
-                                                        className="inline-flex items-center p-2 bg-amber-100 hover:bg-amber-200 text-amber-700 rounded-lg transition-colors duration-200"
-                                                        title="Edit Customer"
-                                                    >
-                                                        <Edit className="w-4 h-4" />
-                                                    </button>
+                                                        {/* Edit */}
+                                                        <button
+                                                            onClick={() => editCustomer(customer)}
+                                                            className="inline-flex items-center p-2 bg-amber-100 hover:bg-amber-200 text-amber-700 rounded-lg transition-colors duration-200"
+                                                            title="Edit Customer"
+                                                        >
+                                                            <Edit className="w-4 h-4" />
+                                                        </button>
 
-                                                    {/* Delete */}
-                                                    <button
-                                                        onClick={() => deleteCustomer(customer.id, customer.name)}
-                                                        className="inline-flex items-center p-2 bg-red-100 hover:bg-red-200 text-red-700 rounded-lg transition-colors duration-200"
-                                                        title="Delete Customer"
-                                                    >
-                                                        <Trash2 className="w-4 h-4" />
-                                                    </button>
-                                                </div>
-                                            </td>
-                                        </tr>
-                                    ))
+                                                        {/* Delete */}
+                                                        <button
+                                                            onClick={() => deleteCustomer(customer.id, customer.name)}
+                                                            className="inline-flex items-center p-2 bg-red-100 hover:bg-red-200 text-red-700 rounded-lg transition-colors duration-200"
+                                                            title="Delete Customer"
+                                                        >
+                                                            <Trash2 className="w-4 h-4" />
+                                                        </button>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        );
+                                    })
                                 ) : (
                                     <tr>
                                         <td colSpan={6} className="px-6 py-12 text-center">
@@ -947,14 +1357,15 @@ export default function CustomersPage() {
                         </table>
                     </div>
 
-                    {/* Pagination - Now based on server response */}
+                    {/* Pagination */}
                     {pagination.totalPages > 1 && (
                         <div className="px-6 py-4 bg-gray-50 border-t border-gray-200">
                             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between space-y-3 sm:space-y-0">
                                 <div className="text-sm text-gray-700">
                                     Page {pagination.currentPage} of {pagination.totalPages} •
                                     Total: {pagination.totalItems} customers •
-                                    Served by: <span className="font-semibold">Backend API</span>
+                                    Showing: {customers.length} on this page •
+                                    Orders: {orders.length} loaded
                                 </div>
                                 <div className="flex space-x-2">
                                     <button
@@ -1037,6 +1448,15 @@ export default function CustomersPage() {
                     onDelete={() => deleteCustomer(currentCustomer.id, currentCustomer.name)}
                 />
             )}
+
+            {/* SMS Modal */}
+            <SMSModal
+                isOpen={isSMSModalOpen}
+                onClose={() => setIsSMSModalOpen(false)}
+                onSend={sendBulkSMS}
+                customerCount={allCustomers.length}
+                isSending={isSendingSMS}
+            />
         </div>
     );
 }

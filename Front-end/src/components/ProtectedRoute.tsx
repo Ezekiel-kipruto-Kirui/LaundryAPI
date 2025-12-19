@@ -1,6 +1,6 @@
 import * as React from "react";
 import { Navigate, useLocation } from 'react-router-dom';
-import { isAuthenticated, getUserRole, getSelectedShop } from '@/utils/auth';
+import { isAuthenticated, getUserRole, getSelectedShop, getSelectedShopType } from '@/utils/auth';
 import { ROUTES } from '@/services/Routes';
 
 interface ProtectedRouteProps {
@@ -17,7 +17,8 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
     const location = useLocation();
     const authenticated = isAuthenticated();
     const userRole = getUserRole();
-    const selectedShop = getSelectedShop();
+    const selectedShopType = getSelectedShopType(); // This returns 'laundry' | 'hotel' | null
+    const selectedShop = getSelectedShop(); // This returns 'Shop A' | 'Shop B' | null
 
     if (!authenticated) {
         return <Navigate to="/login" state={{ from: location }} replace />;
@@ -29,11 +30,11 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
     }
 
     // Check shop access for staff
-    if (userRole === 'staff' && shopType && selectedShop !== shopType) {
+    if (userRole === 'staff' && shopType && selectedShopType !== shopType) {
         // If staff tries to access wrong shop, redirect to their selected shop
-        if (selectedShop === 'laundry') {
+        if (selectedShopType === 'laundry') {
             return <Navigate to={ROUTES.laundryDashboard} replace />;
-        } else if (selectedShop === 'hotel') {
+        } else if (selectedShopType === 'hotel') {
             return <Navigate to={ROUTES.fooditems} replace />;
         }
         // If no shop selected, redirect to login to select shop

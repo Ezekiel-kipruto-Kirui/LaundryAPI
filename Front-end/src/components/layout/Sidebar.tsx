@@ -20,8 +20,7 @@ import { useEffect, useState } from "react";
 import { ROUTES } from "@/services/Routes";
 import {
   getUserRole,
-  getSelectedShop,
-  getSelectedShopType, // NEW: Import this
+  getSelectedShopType,
   getUserEmail,
   clearAuthData,
 } from "@/utils/auth";
@@ -35,13 +34,14 @@ type UserRole = 'admin' | 'staff';
 /* Navigation config                                                   */
 /* ------------------------------------------------------------------ */
 
-const mainNavItems = [
+// Admin-only top navigation
+const adminTopNavItems = [
   { to: ROUTES.dashboard, icon: LayoutDashboard, label: "General Dashboard", adminOnly: true },
   { to: ROUTES.reports, icon: BarChart3, label: "Performance Report", adminOnly: true },
-  { to: ROUTES.siteManagement, icon: Settings, label: "Site Management", adminOnly: true },
 ];
 
-const dropdownSections = [
+// Shop-specific navigation sections
+const shopSections = [
   {
     id: "laundry",
     label: "Laundry Activities",
@@ -66,6 +66,16 @@ const dropdownSections = [
   },
 ];
 
+// Admin-only bottom navigation (site management)
+const adminBottomNavItem = {
+  id: "site-management",
+  label: "Site Management",
+  icon: Settings,
+  items: [
+    { to: ROUTES.siteManagement, icon: Users, label: "Users & Permissions" },
+  ],
+};
+
 /* ------------------------------------------------------------------ */
 /* Sidebar                                                             */
 /* ------------------------------------------------------------------ */
@@ -74,12 +84,13 @@ export function Sidebar() {
   const navigate = useNavigate();
 
   const [role, setRole] = useState<UserRole | null>(null);
-  const [shop, setShop] = useState<'laundry' | 'hotel' | null>(null); // Updated to use shop type
+  const [shop, setShop] = useState<'laundry' | 'hotel' | null>(null);
   const [email, setEmail] = useState('');
 
   const [expandedSections, setExpandedSections] = useState({
     laundry: true,
     hotel: true,
+    'site-management': true,
   });
 
   /* ------------------------------------------------------------------ */
@@ -88,23 +99,25 @@ export function Sidebar() {
 
   useEffect(() => {
     const userRole = getUserRole();
-    const selectedShopType = getSelectedShopType(); // Use the new function
+    const selectedShopType = getSelectedShopType();
 
     setRole(userRole);
     setShop(selectedShopType);
     setEmail(getUserEmail());
 
     if (userRole === 'staff' && selectedShopType) {
-      // Expand only the section for the selected shop
+      // Staff: expand only their assigned shop section
       setExpandedSections({
         laundry: selectedShopType === 'laundry',
         hotel: selectedShopType === 'hotel',
+        'site-management': false, // Staff don't see this
       });
     } else if (userRole === 'admin') {
-      // Admin sees all sections expanded by default
+      // Admin: expand all sections
       setExpandedSections({
         laundry: true,
         hotel: true,
+        'site-management': true,
       });
     }
   }, []);
@@ -129,17 +142,14 @@ export function Sidebar() {
   /* Derived navigation                                                  */
   /* ------------------------------------------------------------------ */
 
-  const visibleMainNav = mainNavItems.filter(
-    item => !item.adminOnly || role === 'admin'
-  );
-
-  const visibleDropdowns = dropdownSections.filter(section => {
+  const visibleAdminTopNav = role === 'admin' ? adminTopNavItems : [];
+  const visibleShopSections = shopSections.filter(section => {
     if (role === 'admin') return true;
-    if (role === 'staff') {
-      return shop === section.id;
-    }
+    if (role === 'staff') return shop === section.id;
     return false;
   });
+
+  const showSiteManagement = role === 'admin';
 
   /* ------------------------------------------------------------------ */
   /* Handlers                                                           */
@@ -166,7 +176,7 @@ export function Sidebar() {
 
   /* ------------------------------------------------------------------ */
   /* Render                                                             */
-  /* ------------------------------------------------------------------ */
+/* ------------------------------------------------------------------ */
 
   return (
     <aside className="fixed left-0 top-0 z-40 h-screen w-64 bg-sidebar text-sidebar-foreground">
@@ -175,7 +185,7 @@ export function Sidebar() {
         {/* Logo */}
         <div className="flex h-16 items-center gap-3 border-b border-sidebar-border px-6">
           <div className="flex h-10 w-10 items-center justify-center rounded-full bg-sidebar-primary">
-            <img src="/logos/Clean-page-logo.png" className="h-10 w-10 rounded-full" />
+            <img src="/logos/Clean-page-logo.png" className="h-10 w-10 rounded-full" alt="Clean Page Laundry Logo" />
           </div>
           <div>
             <h1 className="text-md font-bold">Clean Page Laundry</h1>
@@ -185,8 +195,8 @@ export function Sidebar() {
         {/* Navigation */}
         <nav className="flex-1 px-3 py-4 overflow-y-auto">
 
-          {/* Main nav - Only shown to admin */}
-          {role === 'admin' && visibleMainNav.map(item => (
+          {/* Admin Top Navigation - General Dashboard & Performance Report */}
+          {visibleAdminTopNav.map(item => (
             <RouterNavLink
               key={item.to}
               to={item.to}
@@ -204,8 +214,8 @@ export function Sidebar() {
             </RouterNavLink>
           ))}
 
-          {/* Dropdowns */}
-          {visibleDropdowns.map(section => (
+          {/* Shop Sections - Laundry & Hotel Activities */}
+          {visibleShopSections.map(section => (
             <div key={section.id} className="mt-3">
               <button
                 onClick={() => toggleSection(section.id)}
@@ -243,6 +253,46 @@ export function Sidebar() {
               )}
             </div>
           ))}
+
+          {/* Admin Bottom Navigation - Site Management (after hotel activities) */}
+          {showSiteManagement && (
+            <div className="mt-3">
+              <button
+                onClick={() => toggleSection(adminBottomNavItem.id)}
+                className="flex w-full items-center justify-between rounded-lg px-4 py-3 text-sm font-medium opacity-70 hover:bg-sidebar-accent"
+              >
+                <div className="flex items-center gap-3">
+                  <adminBottomNavItem.icon className="h-5 w-5" />
+                  {adminBottomNavItem.label}
+                </div>
+                {expandedSections[adminBottomNavItem.id]
+                  ? <ChevronDown className="h-4 w-4" />
+                  : <ChevronRight className="h-4 w-4" />}
+              </button>
+
+              {expandedSections[adminBottomNavItem.id] && (
+                <div className="ml-6 mt-1 space-y-1 border-l pl-3">
+                  {adminBottomNavItem.items.map(item => (
+                    <RouterNavLink
+                      key={item.to}
+                      to={item.to}
+                      className={({ isActive }) =>
+                        cn(
+                          "flex items-center gap-3 rounded-lg px-3 py-2 text-sm",
+                          isActive
+                            ? "bg-sidebar-primary/20 border-l-2 border-sidebar-primary"
+                            : "opacity-60 hover:bg-sidebar-accent"
+                        )
+                      }
+                    >
+                      <item.icon className="h-4 w-4" />
+                      {item.label}
+                    </RouterNavLink>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </nav>
 
         {/* Footer */}

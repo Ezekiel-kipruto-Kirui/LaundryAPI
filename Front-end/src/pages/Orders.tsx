@@ -7,9 +7,11 @@ import {
   MoreVertical, Inbox, ChevronLeft, ChevronRight,
   Wallet, PlusCircle as PlusCircleIcon, CreditCard, XCircle,
   FileText, FileSpreadsheet, Printer, Loader2, EllipsisVertical,
-  MessageSquare, Send, Calendar, CheckSquare, Square, Phone
+  MessageSquare, Send, Calendar, CheckSquare, Square, Phone,
+  Database, AlertCircle, Users, Package, DollarSign
 } from 'lucide-react';
 import { Order, OrderItem } from "@/services/types";
+import { ROUTES } from "@/services/Routes";
 
 export const ORDERS_URL = `${API_BASE_URL}/Laundry/orders/`;
 export const SEND_SMS_URL = `${API_BASE_URL}/api/Laundry/send_sms/`;
@@ -35,17 +37,29 @@ const PAYMENT_STATUS_COLORS: { [key: string]: { bg: string; text: string; icon: 
 // SMS Dialog Modal Component
 const SMSDialogModal = ({
   selectedOrders,
+  allOrders = [],
   onSend,
-  onClose
+  onClose,
+  loadAllOrders,
+  loadingAll,
+  currentFilters
 }: {
   selectedOrders: Order[],
-  onSend: (message: string) => Promise<void>,
-  onClose: () => void
+  allOrders?: Order[],
+  onSend: (message: string, recipients: Order[]) => Promise<void>,
+  onClose: () => void,
+  loadAllOrders?: () => Promise<void>,
+  loadingAll?: boolean,
+  currentFilters?: any
 }) => {
   const [message, setMessage] = useState('');
   const [sending, setSending] = useState(false);
   const [previewMessage, setPreviewMessage] = useState('');
-
+  const [useAllOrders, setUseAllOrders] = useState(false);
+  
+  // Determine which orders to use
+  const ordersToUse = useAllOrders ? allOrders : selectedOrders;
+  
   const handleSend = async () => {
     if (!message.trim()) {
       alert('Please enter a message');
@@ -54,7 +68,7 @@ const SMSDialogModal = ({
 
     setSending(true);
     try {
-      await onSend(message);
+      await onSend(message, ordersToUse);
     } finally {
       setSending(false);
     }
@@ -62,9 +76,10 @@ const SMSDialogModal = ({
 
   // Generate default reminder message
   const generateDefaultMessage = () => {
-    const customerNames = selectedOrders.slice(0, 3).map(order => order.customer.name.split(' ')[0]);
+    const orders = ordersToUse.slice(0, 3);
+    const customerNames = orders.map(order => order.customer.name.split(' ')[0]);
     const nameList = customerNames.join(', ');
-    const extra = selectedOrders.length > 3 ? ` and ${selectedOrders.length - 3} others` : '';
+    const extra = ordersToUse.length > 3 ? ` and ${ordersToUse.length - 3} others` : '';
 
     return `Dear ${nameList}${extra}, this is a friendly reminder about your pending laundry order. Please visit us to collect your items. Thank you!`;
   };
@@ -74,13 +89,13 @@ const SMSDialogModal = ({
   };
 
   useEffect(() => {
-    if (selectedOrders.length === 1) {
-      const order = selectedOrders[0];
+    if (ordersToUse.length === 1) {
+      const order = ordersToUse[0];
       setPreviewMessage(`SMS will be sent to: ${order.customer.name} (${order.customer.phone})`);
     } else {
-      setPreviewMessage(`SMS will be sent to ${selectedOrders.length} customers`);
+      setPreviewMessage(`SMS will be sent to ${ordersToUse.length} customers`);
     }
-  }, [selectedOrders]);
+  }, [ordersToUse]);
 
   return (
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
@@ -92,13 +107,101 @@ const SMSDialogModal = ({
           </h2>
         </div>
         <div className="p-6">
+          {/* Current Filters Info */}
+          {currentFilters && (
+            <div className="mb-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
+              <p className="text-xs font-medium text-blue-800 mb-1">Current Filters:</p>
+              <div className="flex flex-wrap gap-1">
+                {currentFilters.search && (
+                  <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">Search: {currentFilters.search}</span>
+                )}
+                {currentFilters.paymentFilter && (
+                  <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">Payment: {currentFilters.paymentFilter}</span>
+                )}
+                {currentFilters.orderStatusFilter && (
+                  <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">Status: {currentFilters.orderStatusFilter}</span>
+                )}
+                {currentFilters.dateFilter.startDate && (
+                  <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">From: {currentFilters.dateFilter.startDate}</span>
+                )}
+                {currentFilters.dateFilter.endDate && (
+                  <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">To: {currentFilters.dateFilter.endDate}</span>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Load All Orders Option */}
+          {loadAllOrders && allOrders.length === 0 && (
+            <div className="mb-6 p-4 bg-blue-50 rounded-lg border border-blue-200">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-blue-800 font-medium mb-1">
+                    Want to send SMS to all customers?
+                  </p>
+                  <p className="text-xs text-blue-600">
+                    Load all orders to send SMS to all matching your current filters.
+                  </p>
+                </div>
+                <button
+                  onClick={loadAllOrders}
+                  disabled={loadingAll}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center"
+                >
+                  {loadingAll ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Loading...
+                    </>
+                  ) : (
+                    <>
+                      <Database className="w-4 h-4 mr-2" />
+                      Load All Orders
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* All Orders Toggle */}
+          {allOrders.length > 0 && (
+            <div className="mb-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
+              <label className="flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={useAllOrders}
+                  onChange={(e) => setUseAllOrders(e.target.checked)}
+                  className="sr-only"
+                />
+                <div className={`relative w-11 h-6 bg-gray-200 rounded-full transition-colors duration-200 ${useAllOrders ? 'bg-green-500' : ''}`}>
+                  <div className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform duration-200 ${useAllOrders ? 'transform translate-x-5' : ''}`}></div>
+                </div>
+                <div className="ml-3">
+                  <span className="text-sm font-medium text-gray-900">
+                    Send to all {allOrders.length} filtered orders
+                  </span>
+                  <p className="text-xs text-gray-500 mt-1">
+                    This will send SMS to all orders matching your current filters, not just selected ones.
+                  </p>
+                </div>
+              </label>
+            </div>
+          )}
+
           {/* Preview */}
           <div className="mb-6 p-4 bg-blue-50 rounded-lg border border-blue-200">
             <p className="text-sm text-blue-800 font-medium mb-2">SMS Preview:</p>
             <p className="text-sm text-blue-700">{previewMessage}</p>
             <p className="text-xs text-blue-600 mt-2">
-              Total recipients: {selectedOrders.length}
+              Total recipients: {ordersToUse.length}
             </p>
+            {useAllOrders && (
+              <div className="flex items-center mt-2 text-xs text-green-600">
+                <AlertCircle className="w-4 h-4 mr-1" />
+                <span>Using all filtered orders</span>
+              </div>
+            )}
           </div>
 
           {/* Message Input */}
@@ -139,10 +242,10 @@ const SMSDialogModal = ({
           {/* Selected Orders List */}
           <div className="mb-6">
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              Selected Orders ({selectedOrders.length})
+              {useAllOrders ? 'All Orders' : 'Selected Orders'} ({ordersToUse.length})
             </label>
             <div className="max-h-40 overflow-y-auto border border-gray-200 rounded-lg">
-              {selectedOrders.slice(0, 10).map((order) => (
+              {ordersToUse.slice(0, 10).map((order) => (
                 <div key={order.id} className="px-4 py-2 border-b border-gray-100 last:border-b-0">
                   <div className="flex items-center justify-between">
                     <div>
@@ -156,10 +259,10 @@ const SMSDialogModal = ({
                   </div>
                 </div>
               ))}
-              {selectedOrders.length > 10 && (
+              {ordersToUse.length > 10 && (
                 <div className="px-4 py-2 bg-gray-50">
                   <p className="text-xs text-gray-600 text-center">
-                    ... and {selectedOrders.length - 10} more orders
+                    ... and {ordersToUse.length - 10} more orders
                   </p>
                 </div>
               )}
@@ -169,7 +272,10 @@ const SMSDialogModal = ({
           {/* SMS Cost Estimate */}
           <div className="mb-6 p-3 bg-gray-50 rounded-lg">
             <p className="text-xs text-gray-600">
-              <span className="font-medium">Estimated Cost:</span> 1 SMS per customer × {selectedOrders.length} customers
+              <span className="font-medium">Estimated Cost:</span> 1 SMS per customer × {ordersToUse.length} customers = {ordersToUse.length} SMS
+            </p>
+            <p className="text-xs text-gray-500 mt-1">
+              Total estimated cost: KES {ordersToUse.length * 1.00} (assuming KES 1 per SMS)
             </p>
           </div>
 
@@ -196,7 +302,7 @@ const SMSDialogModal = ({
               ) : (
                 <>
                   <Send className="w-4 h-4 mr-2" />
-                  Send SMS
+                  Send SMS ({ordersToUse.length} customers)
                 </>
               )}
             </button>
@@ -218,7 +324,9 @@ interface PaginationInfo {
 
 export default function Orders() {
   const [orders, setOrders] = useState<Order[]>([]);
+  const [allOrders, setAllOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingAll, setLoadingAll] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Filter State
@@ -269,7 +377,7 @@ export default function Orders() {
   const exportDropdownRef = useRef<HTMLDivElement>(null);
   const dropdownRefs = useRef<{ [key: number]: HTMLDivElement | null }>({});
 
-  // Pagination State
+  // Pagination State - Fixed page size of 20
   const [pagination, setPagination] = useState<PaginationInfo>({
     count: 0,
     next: null,
@@ -277,13 +385,17 @@ export default function Orders() {
     current_page: 1,
     total_pages: 1
   });
-  const [pageSize, setPageSize] = useState(10);
+  const pageSize = 20; // Fixed page size
 
   // Stats state
   const [stats, setStats] = useState({
     total_orders: 0,
     pending_orders: 0,
     completed_orders: 0,
+    delivered_orders: 0,
+    total_revenue: 0,
+    pending_revenue: 0,
+    completed_revenue: 0,
   });
 
   // Calculate days since order was created
@@ -294,6 +406,82 @@ export default function Orders() {
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
     return diffDays;
   };
+
+  // Fetch all orders with current filters (for SMS sending)
+  const fetchAllOrders = useCallback(async () => {
+    setLoadingAll(true);
+    try {
+      const token = getAuthToken();
+      const headers: HeadersInit = {
+        'Content-Type': 'application/json',
+      };
+
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
+      const params = new URLSearchParams();
+      params.append('page_size', '1000');
+
+      if (searchQuery) params.append('search', searchQuery);
+      if (paymentFilter) params.append('payment_status', paymentFilter);
+      if (shopFilter) params.append('shop', shopFilter);
+
+      if (orderStatusFilter) {
+        params.append('order_status', orderStatusFilter);
+      }
+
+      if (dateFilter.startDate) {
+        params.append('created_at__gte', dateFilter.startDate);
+      }
+      if (dateFilter.endDate) {
+        params.append('created_at__lte', dateFilter.endDate);
+      }
+
+      console.log('Fetching ALL orders with params:', params.toString());
+
+      const response = await fetch(`${ORDERS_URL}?${params}`, {
+        headers,
+      });
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          console.error("Unauthorized access - redirecting to login");
+          window.location.href = "/login";
+          return;
+        }
+        throw new Error(`Failed to fetch all orders: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+
+      if (data.results && Array.isArray(data.results)) {
+        let filteredResults = data.results;
+        
+        if (!orderStatusFilter) {
+          filteredResults = data.results.filter((order: Order) =>
+            order.order_status !== 'Delivered_picked'
+          );
+        }
+
+        setAllOrders(filteredResults);
+      } else if (Array.isArray(data)) {
+        let filteredData = data;
+        if (!orderStatusFilter) {
+          filteredData = data.filter((order: Order) =>
+            order.order_status !== 'Delivered_picked'
+          );
+        }
+        setAllOrders(filteredData);
+      }
+
+    } catch (err: any) {
+      console.error("Error fetching all orders:", err);
+      alert(`Could not load all orders: ${err.message}`);
+    } finally {
+      setLoadingAll(false);
+    }
+  }, [searchQuery, paymentFilter, shopFilter, orderStatusFilter, dateFilter]);
 
   // Fetch data with filters and pagination
   const fetchOrders = useCallback(async (page = 1) => {
@@ -318,12 +506,10 @@ export default function Orders() {
       if (paymentFilter) params.append('payment_status', paymentFilter);
       if (shopFilter) params.append('shop', shopFilter);
 
-      // Handle order status filter
       if (orderStatusFilter) {
         params.append('order_status', orderStatusFilter);
       }
 
-      // Add date filters if provided
       if (dateFilter.startDate) {
         params.append('created_at__gte', dateFilter.startDate);
       }
@@ -347,96 +533,61 @@ export default function Orders() {
       }
 
       const data = await response.json();
-      console.log('API Response:', data);
 
-      // Handle Django REST Framework pagination
-      if (data.results && Array.isArray(data.results)) {
-        let filteredResults = data.results;
-        let filteredCount = data.count || 0;
+      // Calculate stats from ALL orders in the response
+      let allOrdersData = data.results || data;
+      if (!Array.isArray(allOrdersData)) allOrdersData = [];
 
-        // If no order status filter is selected, filter out 'Delivered_picked' on frontend
-        if (!orderStatusFilter) {
-          filteredResults = data.results.filter((order: Order) =>
-            order.order_status !== 'Delivered_picked'
-          );
-          // Adjust count for frontend filtering
-          filteredCount = data.count ? data.count - data.results.filter((o: Order) => o.order_status === 'Delivered_picked').length : filteredResults.length;
-        }
+      // Calculate revenue
+      const totalRevenue = allOrdersData.reduce((sum: number, order: Order) => {
+        return sum + parseFloat(order.total_price || '0');
+      }, 0);
 
-        setOrders(filteredResults);
+      const pendingRevenue = allOrdersData
+        .filter((order: Order) => order.order_status === 'pending')
+        .reduce((sum: number, order: Order) => {
+          return sum + parseFloat(order.total_price || '0');
+        }, 0);
 
-        // Calculate total pages
-        const totalPages = Math.ceil(filteredCount / pageSize);
+      const completedRevenue = allOrdersData
+        .filter((order: Order) => order.order_status === 'Completed')
+        .reduce((sum: number, order: Order) => {
+          return sum + parseFloat(order.total_price || '0');
+        }, 0);
 
-        setPagination({
-          count: filteredCount,
-          next: data.next || null,
-          previous: data.previous || null,
-          current_page: page,
-          total_pages: totalPages
-        });
-
-        // Calculate stats - use the FULL data for stats (not filtered)
-        const allOrders = data.results;
-        const pendingOrders = allOrders.filter((order: Order) => order.order_status === 'pending');
-        const completedOrders = allOrders.filter((order: Order) =>
-          order.order_status === 'Completed'
+      // Filter orders based on status filter
+      let filteredOrders = allOrdersData;
+      if (!orderStatusFilter) {
+        filteredOrders = allOrdersData.filter((order: Order) =>
+          order.order_status !== 'Delivered_picked'
         );
-        const deliveredOrders = allOrders.filter((order: Order) =>
-          order.order_status === 'Delivered_picked'
-        );
-
-        // For total orders in stats, show ALL orders (including delivered)
-        setStats({
-          total_orders: data.count || 0, // Show total from backend including delivered
-          pending_orders: pendingOrders.length,
-          completed_orders: completedOrders.length,
-        });
-
-      } else if (Array.isArray(data)) {
-        // If no pagination, assume it's an array
-        let filteredData = data;
-        if (!orderStatusFilter) {
-          filteredData = data.filter((order: Order) =>
-            order.order_status !== 'Delivered_picked'
-          );
-        }
-
-        setOrders(filteredData);
-        const totalPages = Math.ceil(filteredData.length / pageSize);
-
-        setPagination({
-          count: filteredData.length,
-          next: null,
-          previous: null,
-          current_page: 1,
-          total_pages: totalPages
-        });
-
-        // Stats for non-paginated response
-        setStats({
-          total_orders: data.length, // Total including delivered
-          pending_orders: data.filter((order: Order) => order.order_status === 'pending').length,
-          completed_orders: data.filter((order: Order) =>
-            order.order_status === 'Completed'
-          ).length,
-        });
-      } else {
-        console.error('Unexpected API response format:', data);
-        setOrders([]);
-        setPagination({
-          count: 0,
-          next: null,
-          previous: null,
-          current_page: 1,
-          total_pages: 1
-        });
-        setStats({
-          total_orders: 0,
-          pending_orders: 0,
-          completed_orders: 0,
-        });
       }
+
+      // Calculate counts
+      const statsData = {
+        total_orders: filteredOrders.length,
+        pending_orders: filteredOrders.filter((order: Order) => order.order_status === 'pending').length,
+        completed_orders: filteredOrders.filter((order: Order) => order.order_status === 'Completed').length,
+        delivered_orders: filteredOrders.filter((order: Order) => order.order_status === 'Delivered_picked').length,
+        total_revenue: totalRevenue,
+        pending_revenue: pendingRevenue,
+        completed_revenue: completedRevenue,
+      };
+
+      setStats(statsData);
+      setOrders(filteredOrders);
+
+      // Update pagination
+      const filteredCount = filteredOrders.length;
+      const totalPages = Math.ceil(filteredCount / pageSize);
+
+      setPagination({
+        count: filteredCount,
+        next: data.next || null,
+        previous: data.previous || null,
+        current_page: page,
+        total_pages: totalPages
+      });
 
     } catch (err: any) {
       console.error("Error fetching orders:", err);
@@ -453,15 +604,20 @@ export default function Orders() {
         total_orders: 0,
         pending_orders: 0,
         completed_orders: 0,
+        delivered_orders: 0,
+        total_revenue: 0,
+        pending_revenue: 0,
+        completed_revenue: 0,
       });
     } finally {
       setLoading(false);
     }
-  }, [pageSize, searchQuery, paymentFilter, shopFilter, orderStatusFilter, dateFilter]);
+  }, [searchQuery, paymentFilter, shopFilter, orderStatusFilter, dateFilter]);
 
   // Initial fetch and refetch when filters change
   useEffect(() => {
     fetchOrders(1);
+    setAllOrders([]);
   }, [fetchOrders]);
 
   // Close dropdowns when clicking outside
@@ -489,6 +645,7 @@ export default function Orders() {
     if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
     searchTimeoutRef.current = setTimeout(() => {
       fetchOrders(1);
+      setAllOrders([]);
     }, 500);
   };
 
@@ -535,21 +692,28 @@ export default function Orders() {
     setShowExportDropdown(false);
   };
 
-  // Send SMS to multiple customers
-  const sendBulkSMS = async (message: string) => {
+  // Send SMS to customers
+  const sendBulkSMS = async (message: string, recipients: Order[]) => {
     const token = getAuthToken();
     if (!token) {
       alert('Authentication required. Please login again.');
       return;
     }
 
-    const selectedOrderObjects = orders.filter(order => selectedOrders.has(order.id));
+    if (recipients.length === 0) {
+      alert('No customers selected to send SMS to.');
+      return;
+    }
+
+    if (!confirm(`Are you sure you want to send SMS to ${recipients.length} customers? This will cost approximately KES ${recipients.length}.`)) {
+      return;
+    }
 
     try {
       let successCount = 0;
       let failCount = 0;
 
-      for (const order of selectedOrderObjects) {
+      for (const order of recipients) {
         try {
           const response = await fetch(SEND_SMS_URL, {
             method: 'POST',
@@ -578,6 +742,7 @@ export default function Orders() {
       alert(`SMS sent successfully to ${successCount} customer(s). Failed: ${failCount}`);
       setShowSMSModal(false);
       clearSelection();
+      setAllOrders([]);
 
     } catch (err) {
       console.error('Error sending bulk SMS:', err);
@@ -585,7 +750,7 @@ export default function Orders() {
     }
   };
 
-  // Pagination handlers
+  // Pagination handlers - Next/Previous only
   const goToPage = (page: number) => {
     console.log('Going to page:', page);
     if (page >= 1 && page <= pagination.total_pages) {
@@ -593,9 +758,16 @@ export default function Orders() {
     }
   };
 
-  const handlePageSizeChange = (size: number) => {
-    setPageSize(size);
-    fetchOrders(1);
+  const goToNextPage = () => {
+    if (pagination.next) {
+      goToPage(pagination.current_page + 1);
+    }
+  };
+
+  const goToPreviousPage = () => {
+    if (pagination.previous) {
+      goToPage(pagination.current_page - 1);
+    }
   };
 
   // Selection handlers
@@ -666,25 +838,28 @@ export default function Orders() {
 
       const data = await response.json();
       if (data) {
-        // Update local state immediately
         setOrders(prevOrders =>
           prevOrders.map(order =>
             order.id === orderId ? { ...order, order_status: status } : order
           )
         );
 
-        // Also update stats if needed
+        // Update stats
         if (status === 'Completed') {
           setStats(prev => ({
             ...prev,
             completed_orders: prev.completed_orders + 1,
-            pending_orders: order.order_status === 'pending' ? prev.pending_orders - 1 : prev.pending_orders
+            pending_orders: order.order_status === 'pending' ? prev.pending_orders - 1 : prev.pending_orders,
+            completed_revenue: prev.completed_revenue + parseFloat(order.total_price || '0'),
+            pending_revenue: order.order_status === 'pending' ? prev.pending_revenue - parseFloat(order.total_price || '0') : prev.pending_revenue
           }));
         } else if (status === 'pending' && order.order_status === 'Completed') {
           setStats(prev => ({
             ...prev,
             completed_orders: prev.completed_orders - 1,
-            pending_orders: prev.pending_orders + 1
+            pending_orders: prev.pending_orders + 1,
+            completed_revenue: prev.completed_revenue - parseFloat(order.total_price || '0'),
+            pending_revenue: prev.pending_revenue + parseFloat(order.total_price || '0')
           }));
         }
 
@@ -781,7 +956,6 @@ export default function Orders() {
           return;
         }
         if (response.status === 204) {
-          // 204 No Content is common for DELETE
           console.log(`Order ${orderId} deleted successfully`);
         } else {
           const errorData = await response.json();
@@ -789,30 +963,29 @@ export default function Orders() {
         }
       }
 
-      // Update local state immediately
-      setOrders(prevOrders => prevOrders.filter(order => order.id !== orderId));
-
-      // Update stats
       const deletedOrder = orders.find(o => o.id === orderId);
       if (deletedOrder) {
+        setOrders(prevOrders => prevOrders.filter(order => order.id !== orderId));
+        
         setStats(prev => ({
           ...prev,
           total_orders: prev.total_orders - 1,
           pending_orders: deletedOrder.order_status === 'pending' ? prev.pending_orders - 1 : prev.pending_orders,
-          completed_orders: deletedOrder.order_status === 'Completed' ? prev.completed_orders - 1 : prev.completed_orders
+          completed_orders: deletedOrder.order_status === 'Completed' ? prev.completed_orders - 1 : prev.completed_orders,
+          total_revenue: prev.total_revenue - parseFloat(deletedOrder.total_price || '0'),
+          pending_revenue: deletedOrder.order_status === 'pending' ? prev.pending_revenue - parseFloat(deletedOrder.total_price || '0') : prev.pending_revenue,
+          completed_revenue: deletedOrder.order_status === 'Completed' ? prev.completed_revenue - parseFloat(deletedOrder.total_price || '0') : prev.completed_revenue
         }));
       }
 
       alert(`Order ${orderCode} deleted successfully`);
 
-      // Clear selection if this order was selected
       if (selectedOrders.has(orderId)) {
         const newSelected = new Set(selectedOrders);
         newSelected.delete(orderId);
         setSelectedOrders(newSelected);
       }
 
-      // Refresh data
       fetchOrders(pagination.current_page);
     } catch (err) {
       console.error('Error deleting order:', err);
@@ -886,7 +1059,6 @@ export default function Orders() {
 
       const data = await response.json();
       if (data) {
-        // Update local state
         setOrders(prevOrders =>
           prevOrders.map(order =>
             order.id === currentOrder.id ? { ...order, ...data } : order
@@ -1061,7 +1233,6 @@ export default function Orders() {
 
       const data = await response.json();
       if (data) {
-        // Update local state
         setOrders(prevOrders =>
           prevOrders.map(order =>
             order.id === currentOrder.id
@@ -1132,88 +1303,43 @@ export default function Orders() {
       }
     }
     fetchOrders(1);
+    setAllOrders([]);
   };
 
   // Clear date filter
   const clearDateFilter = () => {
     setDateFilter({ startDate: '', endDate: '' });
     fetchOrders(1);
+    setAllOrders([]);
   };
 
-  // Render pagination buttons
-  const renderPaginationButtons = () => {
-    const buttons = [];
-    const maxVisibleButtons = 5;
-
-    if (pagination.total_pages <= 1) return null;
-
-    let startPage = Math.max(1, pagination.current_page - Math.floor(maxVisibleButtons / 2));
-    let endPage = Math.min(pagination.total_pages, startPage + maxVisibleButtons - 1);
-
-    if (endPage - startPage + 1 < maxVisibleButtons) {
-      startPage = Math.max(1, endPage - maxVisibleButtons + 1);
-    }
-
-    if (startPage > 1) {
-      buttons.push(
-        <button
-          key={1}
-          onClick={() => goToPage(1)}
-          className={`px-3 py-1 text-sm font-medium rounded-md ${pagination.current_page === 1 ? 'bg-blue-600 text-white' : 'text-gray-700 bg-white hover:bg-gray-50 border border-gray-300'}`}
-        >
-          1
-        </button>
-      );
-
-      if (startPage > 2) {
-        buttons.push(
-          <span key="ellipsis-start" className="px-2 py-1 text-gray-500">
-            ...
-          </span>
-        );
-      }
-    }
-
-    for (let page = startPage; page <= endPage; page++) {
-      buttons.push(
-        <button
-          key={page}
-          onClick={() => goToPage(page)}
-          className={`px-3 py-1 text-sm font-medium rounded-md ${pagination.current_page === page ? 'bg-blue-600 text-white' : 'text-gray-700 bg-white hover:bg-gray-50 border border-gray-300'}`}
-        >
-          {page}
-        </button>
-      );
-    }
-
-    if (endPage < pagination.total_pages) {
-      if (endPage < pagination.total_pages - 1) {
-        buttons.push(
-          <span key="ellipsis-end" className="px-2 py-1 text-gray-500">
-            ...
-          </span>
-        );
-      }
-
-      buttons.push(
-        <button
-          key={pagination.total_pages}
-          onClick={() => goToPage(pagination.total_pages)}
-          className={`px-3 py-1 text-sm font-medium rounded-md ${pagination.current_page === pagination.total_pages ? 'bg-blue-600 text-white' : 'text-gray-700 bg-white hover:bg-gray-50 border border-gray-300'}`}
-        >
-          {pagination.total_pages}
-        </button>
-      );
-    }
-
-    return buttons;
+  // Clear all filters
+  const clearAllFilters = () => {
+    setSearchQuery('');
+    setPaymentFilter('');
+    setShopFilter('');
+    setOrderStatusFilter('');
+    setDateFilter({ startDate: '', endDate: '' });
+    fetchOrders(1);
+    setAllOrders([]);
   };
 
-  // Display orders count
-  const isCheckAllChecked = orders.length > 0 && selectedOrders.size === orders.length;
+  // Open SMS modal
+  const handleOpenSMSModal = async () => {
+    setShowSMSModal(true);
+    setAllOrders([]);
+  };
 
   // Get selected order objects
   const selectedOrderObjects = orders.filter(order => selectedOrders.has(order.id));
+
+  // Current filters for SMS modal
+  const currentFilters = {
+    search: searchQuery,
+    paymentFilter,
+    orderStatusFilter,
+    dateFilter
+  };
 
   return (
     <div className="min-h-screen bg-gray-50 font-sans p-6">
@@ -1222,7 +1348,7 @@ export default function Orders() {
         <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
           <div className="flex-shrink-0">
             <button
-              onClick={() => window.location.href = '/'}
+              onClick={() => window.location.href = ROUTES.dashboard}
               className="inline-flex items-center px-4 py-2 bg-white rounded-lg shadow-sm border border-gray-200 text-gray-700 hover:text-blue-600 hover:shadow-md transition-all duration-200"
             >
               <Home className="w-4 h-4 mr-2 text-blue-500" />
@@ -1240,7 +1366,48 @@ export default function Orders() {
             />
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
           </div>
-
+        
+          {/* Date Range Filter */}
+          <div className="flex flex-col sm:flex-row gap-3">
+            <div className="flex items-center gap-2">
+              <Calendar className="w-4 h-4 text-gray-400" />
+              <span className="text-sm font-medium text-gray-700">Date Range:</span>
+            </div>
+            <div className="flex flex-col sm:flex-row gap-2">
+              <div>
+                <input
+                  type="date"
+                  value={dateFilter.startDate}
+                  onChange={(e) => setDateFilter(prev => ({ ...prev, startDate: e.target.value }))}
+                  className="px-3 py-2 border border-gray-300 rounded-md text-sm"
+                />
+              </div>
+              <span className="hidden sm:inline text-gray-400 self-center">to</span>
+              <div>
+                <input
+                  type="date"
+                  value={dateFilter.endDate}
+                  onChange={(e) => setDateFilter(prev => ({ ...prev, endDate: e.target.value }))}
+                  className="px-3 py-2 border border-gray-300 rounded-md text-sm"
+                />
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={applyDateFilter}
+                  className="px-3 py-2 bg-blue-500 text-white rounded-md text-sm hover:bg-blue-600 transition-colors"
+                >
+                  Apply
+                </button>
+                <button
+                  onClick={clearDateFilter}
+                  className="px-3 py-2 bg-gray-200 text-gray-700 rounded-md text-sm hover:bg-gray-300 transition-colors"
+                >
+                  Clear
+                </button>
+              </div>
+            </div>
+          </div>
+          
           <div className="flex items-center gap-3 flex-shrink-0">
             <div className="relative" ref={exportDropdownRef}>
               <button
@@ -1291,7 +1458,7 @@ export default function Orders() {
 
               {/* Send SMS Button */}
               <button
-                onClick={() => setShowSMSModal(true)}
+                onClick={handleOpenSMSModal}
                 className="px-4 py-2 bg-green-500 text-white rounded-lg text-sm font-medium hover:bg-green-600 transition-colors flex items-center"
               >
                 <Send className="w-4 h-4 mr-2" />
@@ -1324,15 +1491,16 @@ export default function Orders() {
         )}
 
         {/* Stats Overview */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mb-6">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-5 mb-6">
           <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
             <div className="flex items-center">
               <div className="p-3 bg-blue-100 rounded-xl m-2">
-                <CheckCircle className="text-blue-600 w-6 h-6" />
+                <Database className="text-blue-600 w-6 h-6" />
               </div>
               <div>
                 <h3 className="text-3xl font-bold text-gray-800 mt-1">{stats.total_orders}</h3>
                 <p className="text-sm text-gray-500 font-medium">Total Orders</p>
+                <p className="text-xs text-blue-600 font-medium mt-1">{formatCurrency(stats.total_revenue)}</p>
               </div>
             </div>
           </div>
@@ -1345,6 +1513,7 @@ export default function Orders() {
               <div>
                 <h3 className="text-3xl font-bold text-gray-800 mt-1">{stats.pending_orders}</h3>
                 <p className="text-sm text-gray-500 font-medium">Pending Orders</p>
+                <p className="text-xs text-amber-600 font-medium mt-1">{formatCurrency(stats.pending_revenue)}</p>
               </div>
             </div>
           </div>
@@ -1357,71 +1526,31 @@ export default function Orders() {
               <div>
                 <h3 className="text-3xl font-bold text-gray-800 mt-1">{stats.completed_orders}</h3>
                 <p className="text-sm text-gray-500 font-medium">Completed Orders</p>
+                <p className="text-xs text-green-600 font-medium mt-1">{formatCurrency(stats.completed_revenue)}</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
+            <div className="flex items-center">
+              <div className="p-3 bg-purple-100 rounded-xl m-2">
+                <Truck className="text-purple-600 w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-3xl font-bold text-gray-800 mt-1">{stats.delivered_orders}</h3>
+                <p className="text-sm text-gray-500 font-medium">Delivered Orders</p>
               </div>
             </div>
           </div>
         </div>
 
-        {/* Date Filter Section */}
+       
         <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100 mb-6">
-          <div className="flex flex-col md:flex-row justify-between w-full items-start md:items-center gap-4 mb-4">
-            <div className="flex flex-col sm:flex-row gap-4 w-full">
-              <div className="flex flex-col sm:flex-row gap-4 flex-1">
-                {/* Date Range Filter */}
-                <div className="flex flex-col sm:flex-row gap-3">
-                  <div className="flex items-center gap-2">
-                    <Calendar className="w-4 h-4 text-gray-400" />
-                    <span className="text-sm font-medium text-gray-700">Date Range:</span>
-                  </div>
-                  <div className="flex flex-col sm:flex-row gap-2">
-                    <div>
-                      <input
-                        type="date"
-                        value={dateFilter.startDate}
-                        onChange={(e) => setDateFilter(prev => ({ ...prev, startDate: e.target.value }))}
-                        className="px-3 py-2 border border-gray-300 rounded-md text-sm"
-                      />
-                    </div>
-                    <span className="hidden sm:inline text-gray-400 self-center">to</span>
-                    <div>
-                      <input
-                        type="date"
-                        value={dateFilter.endDate}
-                        onChange={(e) => setDateFilter(prev => ({ ...prev, endDate: e.target.value }))}
-                        className="px-3 py-2 border border-gray-300 rounded-md text-sm"
-                      />
-                    </div>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={applyDateFilter}
-                        className="px-3 py-2 bg-blue-500 text-white rounded-md text-sm hover:bg-blue-600 transition-colors"
-                      >
-                        Apply
-                      </button>
-                      <button
-                        onClick={clearDateFilter}
-                        className="px-3 py-2 bg-gray-200 text-gray-700 rounded-md text-sm hover:bg-gray-300 transition-colors"
-                      >
-                        Clear
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
           {/* Filters Row */}
           <div className="flex flex-wrap gap-3">
             <button
-              onClick={() => {
-                setPaymentFilter('');
-                setShopFilter('');
-                setSearchQuery('');
-                setOrderStatusFilter('');
-                fetchOrders(1);
-              }}
-              className={`px-4 py-2 ${!orderStatusFilter && !paymentFilter && !shopFilter && !searchQuery ? 'bg-blue-600 text-white' : 'bg-blue-100 text-gray-700'} rounded-md text-sm font-medium`}
+              onClick={clearAllFilters}
+              className={`px-4 py-2 ${!orderStatusFilter && !paymentFilter && !shopFilter && !searchQuery && !dateFilter.startDate && !dateFilter.endDate ? 'bg-blue-600 text-white' : 'bg-blue-100 text-gray-700'} rounded-md text-sm font-medium`}
             >
               All Orders
             </button>
@@ -1431,6 +1560,7 @@ export default function Orders() {
               onChange={(e) => {
                 setShopFilter(e.target.value);
                 fetchOrders(1);
+                setAllOrders([]);
               }}
               className="border border-gray-300 rounded-md p-2 text-sm"
             >
@@ -1448,6 +1578,7 @@ export default function Orders() {
                   onClick={() => {
                     setOrderStatusFilter(orderStatusFilter === status ? '' : status);
                     fetchOrders(1);
+                    setAllOrders([]);
                   }}
                   className={`px-3 py-1.5 ${orderStatusFilter === status ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700'} rounded-full text-sm font-medium`}
                 >
@@ -1465,6 +1596,7 @@ export default function Orders() {
                   onClick={() => {
                     setPaymentFilter(paymentFilter === status ? '' : status);
                     fetchOrders(1);
+                    setAllOrders([]);
                   }}
                   className={`px-3 py-1.5 ${paymentFilter === status ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700'} rounded-full text-sm font-medium`}
                 >
@@ -1473,19 +1605,11 @@ export default function Orders() {
               ))}
             </div>
 
-            {/* Page Size Selector */}
+            {/* Showing information - Fixed 20 per page */}
             <div className="flex items-center gap-2 ml-auto">
-              <span className="text-sm text-gray-600">Show:</span>
-              <select
-                value={pageSize}
-                onChange={(e) => handlePageSizeChange(Number(e.target.value))}
-                className="border border-gray-300 rounded-md p-2 text-sm"
-              >
-                <option value="10">10 per page</option>
-                <option value="20">20 per page</option>
-                <option value="50">50 per page</option>
-                <option value="100">100 per page</option>
-              </select>
+              <span className="text-sm text-gray-600">
+                Showing {Math.min(pageSize, orders.length)} of {pagination.count} orders
+              </span>
             </div>
           </div>
         </div>
@@ -1520,7 +1644,7 @@ export default function Orders() {
                       <th className="w-12 py-4 px-4 text-center font-semibold text-gray-700 text-xs uppercase tracking-wider">
                         <input
                           type="checkbox"
-                          checked={isCheckAllChecked}
+                          checked={orders.length > 0 && selectedOrders.size === orders.length}
                           onChange={(e) => toggleSelectAll(e.target.checked)}
                           className="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
                         />
@@ -1771,7 +1895,7 @@ export default function Orders() {
                 </table>
               </div>
 
-              {/* Pagination Controls */}
+              {/* Pagination Controls - With Next button */}
               {pagination.total_pages > 1 && (
                 <div className="flex flex-col md:flex-row items-center justify-between px-6 py-4 border-t border-gray-200 bg-gray-50">
                   <div className="text-sm text-gray-700 mb-4 md:mb-0">
@@ -1787,22 +1911,59 @@ export default function Orders() {
 
                   <div className="flex items-center space-x-2">
                     <button
-                      onClick={() => goToPage(pagination.current_page - 1)}
+                      onClick={goToPreviousPage}
                       disabled={!pagination.previous}
-                      className={`inline-flex items-center px-3 py-2 border border-gray-300 text-sm font-medium rounded-md ${pagination.previous ? 'text-gray-700 bg-white hover:bg-gray-50' : 'text-gray-300 bg-gray-50 cursor-not-allowed'}`}
+                      className={`inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md ${pagination.previous ? 'text-gray-700 bg-white hover:bg-gray-50' : 'text-gray-300 bg-gray-50 cursor-not-allowed'}`}
                     >
                       <ChevronLeft className="w-4 h-4 mr-1" />
                       Previous
                     </button>
 
+                    {/* Page numbers */}
                     <div className="flex items-center space-x-1">
-                      {renderPaginationButtons()}
+                      {Array.from({ length: Math.min(5, pagination.total_pages) }, (_, i) => {
+                        let pageNum;
+                        if (pagination.total_pages <= 5) {
+                          pageNum = i + 1;
+                        } else if (pagination.current_page <= 3) {
+                          pageNum = i + 1;
+                        } else if (pagination.current_page >= pagination.total_pages - 2) {
+                          pageNum = pagination.total_pages - 4 + i;
+                        } else {
+                          pageNum = pagination.current_page - 2 + i;
+                        }
+
+                        if (pageNum < 1 || pageNum > pagination.total_pages) return null;
+
+                        return (
+                          <button
+                            key={pageNum}
+                            onClick={() => goToPage(pageNum)}
+                            className={`px-3 py-1 text-sm font-medium rounded-md ${pagination.current_page === pageNum ? 'bg-blue-600 text-white' : 'text-gray-700 bg-white border border-gray-300 hover:bg-gray-50'}`}
+                          >
+                            {pageNum}
+                          </button>
+                        );
+                      })}
+                      
+                      {pagination.total_pages > 5 && pagination.current_page < pagination.total_pages - 2 && (
+                        <>
+                          <span className="px-2 text-gray-500">...</span>
+                          <button
+                            onClick={() => goToPage(pagination.total_pages)}
+                            className={`px-3 py-1 text-sm font-medium rounded-md ${pagination.current_page === pagination.total_pages ? 'bg-blue-600 text-white' : 'text-gray-700 bg-white border border-gray-300 hover:bg-gray-50'}`}
+                          >
+                            {pagination.total_pages}
+                          </button>
+                        </>
+                      )}
                     </div>
 
+                    {/* NEXT BUTTON - This is what you asked for */}
                     <button
-                      onClick={() => goToPage(pagination.current_page + 1)}
+                      onClick={goToNextPage}
                       disabled={!pagination.next}
-                      className={`inline-flex items-center px-3 py-2 border border-gray-300 text-sm font-medium rounded-md ${pagination.next ? 'text-gray-700 bg-white hover:bg-gray-50' : 'text-gray-300 bg-gray-50 cursor-not-allowed'}`}
+                      className={`inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md ${pagination.next ? 'text-gray-700 bg-white hover:bg-gray-50' : 'text-gray-300 bg-gray-50 cursor-not-allowed'}`}
                     >
                       Next
                       <ChevronRight className="w-4 h-4 ml-1" />
@@ -1813,386 +1974,392 @@ export default function Orders() {
             </>
           )}
         </div>
-      </div>
 
-      {/* SMS Dialog Modal */}
-      {showSMSModal && (
-        <SMSDialogModal
-          selectedOrders={selectedOrderObjects}
-          onSend={sendBulkSMS}
-          onClose={() => setShowSMSModal(false)}
-        />
-      )}
+        {/* SMS Dialog Modal */}
+        {showSMSModal && (
+          <SMSDialogModal
+            selectedOrders={selectedOrderObjects}
+            allOrders={allOrders}
+            onSend={sendBulkSMS}
+            onClose={() => {
+              setShowSMSModal(false);
+              setAllOrders([]);
+            }}
+            loadAllOrders={fetchAllOrders}
+            loadingAll={loadingAll}
+            currentFilters={currentFilters}
+          />
+        )}
 
-      {/* Edit Order Modal */}
-      {showEditModal && currentOrder && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-4xl max-h-[90vh] overflow-y-auto">
-            <div className="p-6 border-b border-gray-200">
-              <h2 className="text-xl font-bold text-gray-900">Edit Order {currentOrder.uniquecode}</h2>
-              <button
-                onClick={() => setShowEditModal(false)}
-                className="absolute top-6 right-6 text-gray-400 hover:text-gray-600"
-              >
-                <X className="w-6 h-6" />
-              </button>
-            </div>
-            <div className="p-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Customer Name
-                  </label>
-                  <input
-                    type="text"
-                    value={editFormData.name}
-                    onChange={(e) => handleEditFormChange('name', e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Phone Number
-                  </label>
-                  <input
-                    type="text"
-                    value={editFormData.phone}
-                    onChange={(e) => handleEditFormChange('phone', e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Order Status
-                  </label>
-                  <select
-                    value={editFormData.order_status}
-                    onChange={(e) => handleEditFormChange('order_status', e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="pending">Pending</option>
-                    <option value="Completed">Completed</option>
-                    <option value="Delivered_picked">Delivered</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Payment Status
-                  </label>
-                  <select
-                    value={editFormData.payment_status}
-                    onChange={(e) => handleEditFormChange('payment_status', e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="pending">Pending</option>
-                    <option value="partial">Partial</option>
-                    <option value="completed">Completed</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Amount Paid
-                  </label>
-                  <input
-                    type="number"
-                    value={editFormData.amount_paid}
-                    onChange={(e) => handleEditFormChange('amount_paid', e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    step="0.01"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Total Price
-                  </label>
-                  <input
-                    type="number"
-                    value={editFormData.total_price}
-                    onChange={(e) => handleEditFormChange('total_price', e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    step="0.01"
-                  />
-                </div>
-              </div>
-
-              <div className="mb-6">
-                <h3 className="text-lg font-medium text-gray-900 mb-4">Order Items</h3>
-                <div className="space-y-4">
-                  {editFormData.items.map((item, index) => (
-                    <div key={index} className="border border-gray-200 rounded-lg p-4">
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1">
-                            Item Name
-                          </label>
-                          <input
-                            type="text"
-                            value={item.itemname || ''}
-                            onChange={(e) => handleEditItemChange(index, 'itemname', e.target.value)}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1">
-                            Service Type
-                          </label>
-                          <input
-                            type="text"
-                            value={formatServiceType(item.servicetype)}
-                            onChange={(e) => handleEditItemChange(index, 'servicetype', e.target.value.split(',').map(s => s.trim()))}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1">
-                            Unit Price
-                          </label>
-                          <input
-                            type="number"
-                            value={item.unit_price}
-                            onChange={(e) => handleEditItemChange(index, 'unit_price', e.target.value)}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            step="0.01"
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div className="flex justify-end gap-3 pt-4 border-t border-gray-200">
+        {/* Edit Order Modal */}
+        {showEditModal && currentOrder && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-xl shadow-xl w-full max-w-4xl max-h-[90vh] overflow-y-auto">
+              <div className="p-6 border-b border-gray-200">
+                <h2 className="text-xl font-bold text-gray-900">Edit Order {currentOrder.uniquecode}</h2>
                 <button
                   onClick={() => setShowEditModal(false)}
-                  className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors"
+                  className="absolute top-6 right-6 text-gray-400 hover:text-gray-600"
                 >
-                  Cancel
+                  <X className="w-6 h-6" />
                 </button>
-                <button
-                  onClick={submitEditForm}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-                >
-                  Save Changes
-                </button>
+              </div>
+              <div className="p-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Customer Name
+                    </label>
+                    <input
+                      type="text"
+                      value={editFormData.name}
+                      onChange={(e) => handleEditFormChange('name', e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Phone Number
+                    </label>
+                    <input
+                      type="text"
+                      value={editFormData.phone}
+                      onChange={(e) => handleEditFormChange('phone', e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Order Status
+                    </label>
+                    <select
+                      value={editFormData.order_status}
+                      onChange={(e) => handleEditFormChange('order_status', e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="pending">Pending</option>
+                      <option value="Completed">Completed</option>
+                      <option value="Delivered_picked">Delivered</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Payment Status
+                    </label>
+                    <select
+                      value={editFormData.payment_status}
+                      onChange={(e) => handleEditFormChange('payment_status', e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="pending">Pending</option>
+                      <option value="partial">Partial</option>
+                      <option value="completed">Completed</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Amount Paid
+                    </label>
+                    <input
+                      type="number"
+                      value={editFormData.amount_paid}
+                      onChange={(e) => handleEditFormChange('amount_paid', e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      step="0.01"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Total Price
+                    </label>
+                    <input
+                      type="number"
+                      value={editFormData.total_price}
+                      onChange={(e) => handleEditFormChange('total_price', e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      step="0.01"
+                    />
+                  </div>
+                </div>
+
+                <div className="mb-6">
+                  <h3 className="text-lg font-medium text-gray-900 mb-4">Order Items</h3>
+                  <div className="space-y-4">
+                    {editFormData.items.map((item, index) => (
+                      <div key={index} className="border border-gray-200 rounded-lg p-4">
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                              Item Name
+                            </label>
+                            <input
+                              type="text"
+                              value={item.itemname || ''}
+                              onChange={(e) => handleEditItemChange(index, 'itemname', e.target.value)}
+                              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                              Service Type
+                            </label>
+                            <input
+                              type="text"
+                              value={formatServiceType(item.servicetype)}
+                              onChange={(e) => handleEditItemChange(index, 'servicetype', e.target.value.split(',').map(s => s.trim()))}
+                              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                              Unit Price
+                            </label>
+                            <input
+                              type="number"
+                              value={item.unit_price}
+                              onChange={(e) => handleEditItemChange(index, 'unit_price', e.target.value)}
+                              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              step="0.01"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="flex justify-end gap-3 pt-4 border-t border-gray-200">
+                  <button
+                    onClick={() => setShowEditModal(false)}
+                    className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={submitEditForm}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                  >
+                    Save Changes
+                  </button>
+                </div>
               </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Receipt Modal */}
-      {showReceiptModal && currentOrder && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg shadow-lg w-full max-w-sm">
-            <div className="p-4 border-b border-gray-200 relative">
-              <button
-                onClick={() => setShowReceiptModal(false)}
-                className="absolute top-4 right-4 text-gray-400 hover:text-gray-600"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <div className="p-6">
-              <div id="receiptContent" className="bg-white">
-                <div className="header text-center mb-4">
-                  <h3 className="text-lg font-bold">CLEAN PAGE LAUNDRY</h3>
-                  <p className="text-sm text-gray-600 mt-1">Clean clothes, happy hearts</p>
-                  <p className="text-xs text-gray-500 mt-1">Thank you for coming!</p>
-                </div>
-
-                <div className="section">
-                  <div className="flex justify-between mb-1">
-                    <span className="font-medium">Order Code:</span>
-                    <span>{currentOrder.uniquecode}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="font-medium">Date:</span>
-                    <span>{formatDate(currentOrder.created_at)}</span>
-                  </div>
-                </div>
-
-                <div className="section">
-                  <h4 className="font-medium mb-1">Customer Details:</h4>
-                  <p className="text-sm">{currentOrder.customer.name}</p>
-                  <p className="text-sm text-gray-600">{currentOrder.customer.phone}</p>
-                </div>
-
-                <div className="section">
-                  <h4 className="font-medium mb-1">Order Summary:</h4>
-                  <table className="items-table">
-                    <tbody>
-                      {currentOrder.items.map((item, index) => (
-                        <tr key={index}>
-                          <td className="item-name">
-                            {item.itemname ?
-                              (item.itemname.length > 20 ? item.itemname.substring(0, 20) + '...' : item.itemname)
-                              : 'Item'}
-                          </td>
-                          <td className="text-right">{formatCurrency(item.unit_price)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-
-                <div className="divider"></div>
-
-                <div className="space-y-1">
-                  <div className="flex justify-between">
-                    <span>Subtotal:</span>
-                    <span>{formatCurrency(currentOrder.total_price)}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>Amount Paid:</span>
-                    <span>{formatCurrency(currentOrder.amount_paid)}</span>
-                  </div>
-                  <div className="flex justify-between font-bold">
-                    <span>Balance:</span>
-                    <span>{formatCurrency(currentOrder.balance)}</span>
-                  </div>
-                </div>
-
-                <div className="divider"></div>
-
-                <div className="text-center mt-4">
-                  <p className="text-sm font-medium">Served By: {getUserFullName(currentOrder)}</p>
-                  <p className="text-xs text-gray-500 mt-1">Contact: 0705588354</p>
-                  <p className="text-xs text-gray-500 mt-1">Thank you for your business!</p>
-                </div>
-              </div>
-
-              <div className="mt-6 flex justify-end gap-3">
+        {/* Receipt Modal */}
+        {showReceiptModal && currentOrder && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-lg shadow-lg w-full max-w-sm">
+              <div className="p-4 border-b border-gray-200 relative">
                 <button
                   onClick={() => setShowReceiptModal(false)}
-                  className="px-4 py-2 border border-gray-300 rounded text-gray-700 hover:bg-gray-50"
+                  className="absolute top-4 right-4 text-gray-400 hover:text-gray-600"
                 >
-                  Cancel
+                  <X className="w-5 h-5" />
                 </button>
-                <button
-                  onClick={printReceipt}
-                  className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 flex items-center"
-                >
-                  <Printer className="w-4 h-4 mr-2" />
-                  Print Receipt
-                </button>
+              </div>
+              <div className="p-6">
+                <div id="receiptContent" className="bg-white">
+                  <div className="header text-center mb-4">
+                    <h3 className="text-lg font-bold">CLEAN PAGE LAUNDRY</h3>
+                    <p className="text-sm text-gray-600 mt-1">Be sportless Be bright</p>
+                  </div>
+
+                  <div className="section">
+                    <div className="flex justify-between mb-1">
+                      <span className="font-medium">Order Code:</span>
+                      <span>{currentOrder.uniquecode}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="font-medium">Date:</span>
+                      <span>{formatDate(currentOrder.created_at)}</span>
+                    </div>
+                  </div>
+
+                  <div className="section">
+                    <h4 className="font-medium mb-1">Customer Details:</h4>
+                    <p className="text-sm">{currentOrder.customer.name}</p>
+                    <p className="text-sm text-gray-600">{currentOrder.customer.phone}</p>
+                  </div>
+
+                  <div className="section">
+                    <h4 className="font-medium mb-1">Order Summary:</h4>
+                    <div className="items-table">
+                      <div>
+                        {currentOrder.items.map((item, index) => (
+                          <div key={index} className="flex flex-row justify-between" >
+                            <p className="item-name">
+                              {item.itemname ?
+                                (item.itemname.length > 20 ? item.itemname.substring(0, 20) + '...' : item.itemname)
+                                : 'Item'}
+                            </p>
+                            <p className="text-right">{formatCurrency(item.unit_price)}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="divider"></div>
+
+                  <div className="space-y-1">
+                    <div className="flex justify-between">
+                      <span>Subtotal:</span>
+                      <span>{formatCurrency(currentOrder.total_price)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Amount Paid:</span>
+                      <span>{formatCurrency(currentOrder.amount_paid)}</span>
+                    </div>
+                    <div className="flex justify-between font-bold">
+                      <span>Balance:</span>
+                      <span>{formatCurrency(currentOrder.balance)}</span>
+                    </div>
+                  </div>
+
+                  <div className="divider"></div>
+
+                  <div className="text-center mt-4">
+                    <p className="text-sm font-medium">Served By: {getUserFullName(currentOrder)}</p>
+                    <p className="text-xs text-gray-500 mt-1">Contact: 0705588354</p>
+                    <p className="text-xs text-gray-500 mt-1">Thank you for coming!</p>
+                  </div>
+                </div>
+
+                <div className="mt-6 flex justify-end gap-3">
+                  <button
+                    onClick={() => setShowReceiptModal(false)}
+                    className="px-4 py-2 border border-gray-300 rounded text-gray-700 hover:bg-gray-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={printReceipt}
+                    className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 flex items-center"
+                  >
+                    <Printer className="w-4 h-4 mr-2" />
+                    Print Receipt
+                  </button>
+                </div>
               </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Payment Complete Modal */}
-      {showPaymentModal && currentOrder && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-md">
-            <div className="p-6 border-b border-gray-200">
-              <h2 className="text-xl font-bold text-gray-900">Complete Payment</h2>
-              <button
-                onClick={() => setShowPaymentModal(false)}
-                className="absolute top-6 right-6 text-gray-400 hover:text-gray-600"
-              >
-                <X className="w-6 h-6" />
-              </button>
-            </div>
-            <div className="p-6">
-              <div className="mb-6">
-                <div className="flex items-center mb-3">
-                  <div className="w-10 h-10 bg-gradient-to-r from-green-500 to-emerald-600 rounded-full flex items-center justify-center mr-3">
-                    <CreditCard className="text-white w-5 h-5" />
-                  </div>
-                  <h3 className="text-xl font-bold text-gray-900">Complete Payment</h3>
-                </div>
-                <p className="text-gray-600 text-sm">
-                  Confirm to mark this payment as complete. The remaining balance will be added to the total amount paid.
-                </p>
-              </div>
-
-              <div className="bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-100 rounded-xl p-6 mb-6">
-                <h4 className="text-sm font-semibold text-blue-900 mb-4">Payment Summary</h4>
-
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-                  <div className="bg-white rounded-lg p-4">
-                    <div className="flex items-center mb-2">
-                      <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center mr-2">
-                        <Wallet className="text-blue-600 w-4 h-4" />
-                      </div>
-                      <span className="text-xs font-medium text-blue-700">Current Paid</span>
-                    </div>
-                    <p className="text-lg font-bold text-blue-900">
-                      {formatCurrency(currentOrder.amount_paid)}
-                    </p>
-                  </div>
-
-                  <div className="bg-white rounded-lg p-4">
-                    <div className="flex items-center mb-2">
-                      <div className="w-8 h-8 bg-orange-100 rounded-full flex items-center justify-center mr-2">
-                        <PlusCircleIcon className="text-orange-600 w-4 h-4" />
-                      </div>
-                      <span className="text-xs font-medium text-orange-700">Balance to Add</span>
-                    </div>
-                    <p className="text-lg font-bold text-orange-900">
-                      {formatCurrency(currentOrder.balance)}
-                    </p>
-                  </div>
-
-                  <div className="bg-white rounded-lg p-4">
-                    <div className="flex items-center mb-2">
-                      <div className="w-8 h-8 bg-green-100 rounded-full flex items-center justify-center mr-2">
-                        <CheckCircle className="text-green-600 w-4 h-4" />
-                      </div>
-                      <span className="text-xs font-medium text-green-700">New Total</span>
-                    </div>
-                    <p className="text-lg font-bold text-green-900">
-                      {formatCurrency(currentOrder.total_price)}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="bg-white rounded-lg p-4">
-                  <label className="block text-sm font-semibold text-gray-700 mb-3">
-                    Payment Method
-                  </label>
-                  <select
-                    value={paymentType}
-                    onChange={(e) => setPaymentType(e.target.value)}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  >
-                    <option value="">-- Select Payment Type --</option>
-                    <option value="cash">💵 Cash</option>
-                    <option value="mpesa">📱 M-Pesa</option>
-                    <option value="card">💳 Credit/Debit Card</option>
-                    <option value="bank_transfer">🏦 Bank Transfer</option>
-                    <option value="other">🔄 Other</option>
-                    <option value="None">None</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">
+        {/* Payment Complete Modal */}
+        {showPaymentModal && currentOrder && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-xl shadow-xl w-full max-w-md">
+              <div className="p-6 border-b border-gray-200">
+                <h2 className="text-xl font-bold text-gray-900">Complete Payment</h2>
                 <button
                   onClick={() => setShowPaymentModal(false)}
-                  className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50"
+                  className="absolute top-6 right-6 text-gray-400 hover:text-gray-600"
                 >
-                  Cancel
+                  <X className="w-6 h-6" />
                 </button>
-                <button
-                  onClick={completePayment}
-                  className="px-4 py-2 bg-gradient-to-r from-green-600 to-emerald-600 text-white rounded-lg hover:from-green-700 hover:to-emerald-700 flex items-center"
-                >
-                  <CheckCircle className="w-4 h-4 mr-2" />
-                  Complete Payment
-                </button>
+              </div>
+              <div className="p-6">
+                <div className="mb-6">
+                  <div className="flex items-center mb-3">
+                    <div className="w-10 h-10 bg-gradient-to-r from-green-500 to-emerald-600 rounded-full flex items-center justify-center mr-3">
+                      <CreditCard className="text-white w-5 h-5" />
+                    </div>
+                    <h3 className="text-xl font-bold text-gray-900">Complete Payment</h3>
+                  </div>
+                  <p className="text-gray-600 text-sm">
+                    Confirm to mark this payment as complete. The remaining balance will be added to the total amount paid.
+                  </p>
+                </div>
+
+                <div className="bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-100 rounded-xl p-6 mb-6">
+                  <h4 className="text-sm font-semibold text-blue-900 mb-4">Payment Summary</h4>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                    <div className="bg-white rounded-lg p-4">
+                      <div className="flex items-center mb-2">
+                        <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center mr-2">
+                          <Wallet className="text-blue-600 w-4 h-4" />
+                        </div>
+                        <span className="text-xs font-medium text-blue-700">Current Paid</span>
+                      </div>
+                      <p className="text-lg font-bold text-blue-900">
+                        {formatCurrency(currentOrder.amount_paid)}
+                      </p>
+                    </div>
+
+                    <div className="bg-white rounded-lg p-4">
+                      <div className="flex items-center mb-2">
+                        <div className="w-8 h-8 bg-orange-100 rounded-full flex items-center justify-center mr-2">
+                          <PlusCircleIcon className="text-orange-600 w-4 h-4" />
+                        </div>
+                        <span className="text-xs font-medium text-orange-700">Balance to Add</span>
+                      </div>
+                      <p className="text-lg font-bold text-orange-900">
+                        {formatCurrency(currentOrder.balance)}
+                      </p>
+                    </div>
+
+                    <div className="bg-white rounded-lg p-4">
+                      <div className="flex items-center mb-2">
+                        <div className="w-8 h-8 bg-green-100 rounded-full flex items-center justify-center mr-2">
+                          <CheckCircle className="text-green-600 w-4 h-4" />
+                        </div>
+                        <span className="text-xs font-medium text-green-700">New Total</span>
+                      </div>
+                      <p className="text-lg font-bold text-green-900">
+                        {formatCurrency(currentOrder.total_price)}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="bg-white rounded-lg p-4">
+                    <label className="block text-sm font-semibold text-gray-700 mb-3">
+                      Payment Method
+                    </label>
+                    <select
+                      value={paymentType}
+                      onChange={(e) => setPaymentType(e.target.value)}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    >
+                      <option value="">-- Select Payment Type --</option>
+                      <option value="cash">💵 Cash</option>
+                      <option value="mpesa">📱 M-Pesa</option>
+                      <option value="card">💳 Credit/Debit Card</option>
+                      <option value="bank_transfer">🏦 Bank Transfer</option>
+                      <option value="other">🔄 Other</option>
+                      <option value="None">None</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">
+                  <button
+                    onClick={() => setShowPaymentModal(false)}
+                    className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={completePayment}
+                    className="px-4 py-2 bg-gradient-to-r from-green-600 to-emerald-600 text-white rounded-lg hover:from-green-700 hover:to-emerald-700 flex items-center"
+                  >
+                    <CheckCircle className="w-4 h-4 mr-2" />
+                    Complete Payment
+                  </button>
+                </div>
               </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }
