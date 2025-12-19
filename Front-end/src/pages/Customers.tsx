@@ -2,8 +2,6 @@ import { useState, useEffect, useCallback } from 'react';
 import { Customer, Order, OrderItem } from '../services/types';
 import {
     Users,
-    CheckCircle,
-    Clock,
     Edit,
     Trash2,
     RefreshCw,
@@ -14,22 +12,38 @@ import {
     User,
     ShoppingBag,
     ChartLine,
-    ArrowLeft,
-    Filter,
     ChevronLeft,
     ChevronRight,
     Store,
     Calendar,
-    CreditCard,
     DollarSign,
     UserCircle,
     FileText
 } from 'lucide-react';
-import { fetchApi } from '@/services/api'; // Import fetchApi instead of getAccessToken
+import { fetchApi } from '@/services/api';
 
 // --- API Endpoints ---
 const API_CUSTOMERS_URL = "customers/";
-const API_ORDERS_URL = "orders/";
+const API_ORDERS_URL = "Laundry/orders/"; // Updated to use correct route
+
+// --- Types for Pagination ---
+interface PaginatedResponse<T> {
+    count: number;
+    next: string | null;
+    previous: string | null;
+    results: T[];
+    current_page?: number;
+    total_pages?: number;
+    page_size?: number;
+}
+
+interface PaginatedCustomersResponse extends PaginatedResponse<Customer> {
+    results: Customer[];
+}
+
+interface PaginatedOrdersResponse extends PaginatedResponse<Order> {
+    results: Order[];
+}
 
 // Card Component for Dashboard Metrics
 const Card = ({ icon: Icon, title, value, colorClass }: { icon: React.ElementType, title: string, value: string | number, colorClass: string }) => {
@@ -179,21 +193,21 @@ const CustomerDetailModal = ({ customer, orders, onClose, onEdit, onDelete }: {
     onDelete: () => void
 }) => {
     const customerOrders = orders.filter(order => order.customer.id === customer.id);
-    
-    // Calculate customer statistics
-    const totalSpent = customerOrders.reduce((sum, order) => 
+
+    // Calculate customer statistics - FIXED: Use total_price from order, not total_item_price
+    const totalSpent = customerOrders.reduce((sum, order) =>
         sum + parseFloat(order.total_price || '0'), 0
     ).toFixed(2);
-    
-    const totalBalance = customerOrders.reduce((sum, order) => 
+
+    const totalBalance = customerOrders.reduce((sum, order) =>
         sum + parseFloat(order.balance || '0'), 0
     ).toFixed(2);
-    
-    const pendingOrders = customerOrders.filter(order => 
+
+    const pendingOrders = customerOrders.filter(order =>
         order.order_status === 'pending'
     ).length;
-    
-    const completedOrders = customerOrders.filter(order => 
+
+    const completedOrders = customerOrders.filter(order =>
         order.order_status === 'Completed' || order.order_status === 'Delivered_picked'
     ).length;
 
@@ -209,9 +223,10 @@ const CustomerDetailModal = ({ customer, orders, onClose, onEdit, onDelete }: {
 
     // Format currency
     const formatCurrency = (amount: string) => {
-        return `KSh ${parseFloat(amount).toLocaleString('en-KE', { 
-            minimumFractionDigits: 2, 
-            maximumFractionDigits: 2 
+        const num = parseFloat(amount);
+        return `KSh ${isNaN(num) ? '0.00' : num.toLocaleString('en-KE', {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2
         })}`;
     };
 
@@ -265,7 +280,7 @@ const CustomerDetailModal = ({ customer, orders, onClose, onEdit, onDelete }: {
                             <p className="text-2xl font-bold text-blue-900">{customerOrders.length}</p>
                         </div>
                         <div className="bg-green-50 p-4 rounded-lg">
-                            <h3 className="text-sm font-medium text-green-800 mb-2">Total Spent</h3>
+                            <h3 className="text-sm font-medium text-green-800 mb-2">Total Billed</h3>
                             <p className="text-2xl font-bold text-green-900">{formatCurrency(totalSpent)}</p>
                         </div>
                         <div className="bg-yellow-50 p-4 rounded-lg">
@@ -319,7 +334,7 @@ const CustomerDetailModal = ({ customer, orders, onClose, onEdit, onDelete }: {
                                                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                                     <div className="flex items-center">
                                                         <DollarSign className="w-4 h-4 mr-2" />
-                                                        Total Amount
+                                                        Total Billed
                                                     </div>
                                                 </th>
                                                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -391,7 +406,7 @@ const CustomerDetailModal = ({ customer, orders, onClose, onEdit, onDelete }: {
                                                     <td className="px-6 py-4 whitespace-nowrap">
                                                         <div className="text-sm text-gray-900">
                                                             {order.updated_by ? (
-                                                                formatDate(order.updated_at)
+                                                                formatDate(order.updated_at || '')
                                                             ) : (
                                                                 <span className="text-gray-400">Not cleared</span>
                                                             )}
@@ -432,7 +447,7 @@ const CustomerDetailModal = ({ customer, orders, onClose, onEdit, onDelete }: {
                             <h4 className="text-sm font-medium text-gray-700 mb-2">Order Summary</h4>
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
                                 <div>
-                                    <span className="text-gray-600">Total Orders Value:</span>
+                                    <span className="text-gray-600">Total Billed:</span>
                                     <span className="font-semibold ml-2">{formatCurrency(totalSpent)}</span>
                                 </div>
                                 <div>
@@ -472,55 +487,89 @@ export default function CustomersPage() {
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
     const [currentCustomer, setCurrentCustomer] = useState<Customer | null>(null);
-    const [currentPage, setCurrentPage] = useState(1);
-    const itemsPerPage = 10;
+
+    // Pagination state
+    const [pagination, setPagination] = useState({
+        currentPage: 1,
+        totalPages: 1,
+        totalItems: 0,
+        pageSize: 10,
+        next: null as string | null,
+        previous: null as string | null
+    });
 
     // Dashboard Calculations
-    const totalCustomers = customers.length;
-    const displayedCustomers = customers.filter(customer => 
-        customer.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        customer.phone.includes(searchQuery)
-    );
+    const totalCustomers = pagination.totalItems;
+    const displayedCustomers = customers;
 
-    // Calculate customer statistics
-    const calculateCustomerStats = (customerId: number) => {
+    // Helper function to calculate customer statistics from orders
+    const calculateCustomerStats = useCallback((customerId: number) => {
         const customerOrders = orders.filter(order => order.customer.id === customerId);
-        const totalSpent = customerOrders.reduce((sum, order) => 
-            sum + parseFloat(order.total_price || '0'), 0
-        ).toFixed(2);
-        
-        const orderCount = customerOrders.length;
-        const lastOrderDate = customerOrders[0]?.created_at || null;
 
-        return { totalSpent, orderCount, lastOrderDate };
-    };
+        // Calculate total billed from order.total_price
+        const totalBilled = customerOrders.reduce((sum, order) => {
+            return sum + parseFloat(order.total_price || '0');
+        }, 0);
 
-    // Data Fetching with fetchApi
-    const fetchCustomers = useCallback(async () => {
+        return {
+            orderCount: customerOrders.length,
+            totalBilled: totalBilled.toFixed(2),
+            lastOrderDate: customerOrders[0]?.created_at || null
+        };
+    }, [orders]);
+
+    // Data Fetching with fetchApi - Updated for backend pagination
+    const fetchCustomers = useCallback(async (page = 1, search = '') => {
         setLoading(true);
         setError(null);
 
         try {
-            const data = await fetchApi<Customer[]>(
-                API_CUSTOMERS_URL,
+            // Build query parameters
+            const params = new URLSearchParams({
+                page: page.toString(),
+                page_size: pagination.pageSize.toString()
+            });
+
+            if (search.trim()) {
+                params.append('search', search);
+            }
+
+            const response = await fetchApi<PaginatedCustomersResponse>(
+                `${API_CUSTOMERS_URL}?${params}`,
                 { method: 'GET' },
-                'laundry' // Specify the laundry app for your API
+                'laundry'
             );
 
-            const transformedData = data.map((customer: Customer) => {
+            // Transform data with stats calculated from orders
+            const transformedData = response.results.map((customer: Customer) => {
                 const stats = calculateCustomerStats(customer.id);
+
                 return {
                     ...customer,
                     order_count: stats.orderCount,
-                    total_spent: stats.totalSpent,
+                    total_spent: stats.totalBilled, // This will now show actual billed amount
                     last_order_date: stats.lastOrderDate
                 };
             });
 
             setCustomers(transformedData);
+
+            // Handle both response formats (count vs total_items)
+            const totalItems = response.count || (response as any).total_items || 0;
+            const totalPages = response.total_pages || Math.ceil(totalItems / pagination.pageSize) || 1;
+            const currentPage = response.current_page || page;
+            const pageSize = response.page_size || pagination.pageSize;
+
+            setPagination({
+                currentPage,
+                totalPages,
+                totalItems,
+                pageSize,
+                next: response.next,
+                previous: response.previous
+            });
         } catch (err: any) {
             console.error("Error fetching customers:", err);
-            // Handle unauthorized error specifically
             if (err.message === "Unauthorized") {
                 setError("Session expired. Please login again.");
             } else {
@@ -530,20 +579,36 @@ export default function CustomersPage() {
         } finally {
             setLoading(false);
         }
-    }, [orders]);
+    }, [orders, pagination.pageSize, calculateCustomerStats]);
 
     const fetchAllOrders = useCallback(async () => {
         try {
-            const data = await fetchApi<Order[]>(
-                API_ORDERS_URL,
-                { method: 'GET' },
-                'laundry' // Specify the laundry app for your API
-            );
-            setOrders(data || []);
+            // Fetch orders with correct API route
+            let allOrders: Order[] = [];
+            let nextUrl: string | null = `${API_ORDERS_URL}?page_size=100`;
+
+            // Handle pagination for orders
+            while (nextUrl) {
+                const response = await fetchApi<PaginatedOrdersResponse>(
+                    nextUrl,
+                    { method: 'GET' },
+                    'laundry'
+                );
+
+                allOrders = [...allOrders, ...response.results];
+                nextUrl = response.next;
+
+                // Break if we have a lot of orders to prevent infinite loops
+                if (allOrders.length > 500) break;
+            }
+
+            setOrders(allOrders);
         } catch (err: any) {
             console.error("Error fetching all orders:", err);
             if (err.message === "Unauthorized") {
                 setError("Session expired. Please login again.");
+            } else {
+                console.error("Error fetching orders:", err);
             }
         }
     }, []);
@@ -553,10 +618,8 @@ export default function CustomersPage() {
     }, [fetchAllOrders]);
 
     useEffect(() => {
-        if (orders.length > 0) {
-            fetchCustomers();
-        }
-    }, [orders, fetchCustomers]);
+        fetchCustomers(pagination.currentPage, searchQuery);
+    }, [pagination.currentPage, searchQuery, fetchCustomers]);
 
     // CRUD Handlers using fetchApi
     const saveCustomer = async (customerData: Customer) => {
@@ -566,7 +629,7 @@ export default function CustomersPage() {
         const method = isNew ? 'POST' : 'PUT';
 
         try {
-            const data = await fetchApi<Customer>(
+            await fetchApi<Customer>(
                 url,
                 {
                     method,
@@ -579,12 +642,11 @@ export default function CustomersPage() {
                 'laundry'
             );
 
-            await fetchCustomers();
+            await fetchCustomers(pagination.currentPage, searchQuery);
             setIsModalOpen(false);
             alert(`Customer ${isNew ? 'created' : 'updated'} successfully!`);
         } catch (err: any) {
             console.error("Error saving customer:", err);
-            // Handle unauthorized error
             if (err.message === "Unauthorized") {
                 setError("Session expired. Please login again.");
             } else {
@@ -608,12 +670,11 @@ export default function CustomersPage() {
                 'laundry'
             );
 
-            setCustomers(prev => prev.filter(c => c.id !== id));
+            await fetchCustomers(pagination.currentPage, searchQuery);
             setIsDetailModalOpen(false);
             alert(`Customer ${name} deleted successfully.`);
         } catch (err: any) {
             console.error("Error deleting customer:", err);
-            // Handle unauthorized error
             if (err.message === "Unauthorized") {
                 setError("Session expired. Please login again.");
             } else {
@@ -636,21 +697,28 @@ export default function CustomersPage() {
         setIsModalOpen(true);
     };
 
-    // Search Handler
+    // Search Handler - triggers backend search
     const handleSearch = (e: React.FormEvent) => {
         e.preventDefault();
+        setPagination(prev => ({ ...prev, currentPage: 1 })); // Reset to first page on new search
     };
 
-    // Pagination
-    const filteredCustomers = customers.filter(customer => 
-        customer.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        customer.phone.includes(searchQuery)
-    );
+    // Pagination handlers
+    const handlePageChange = (page: number) => {
+        setPagination(prev => ({ ...prev, currentPage: page }));
+    };
 
-    const totalPages = Math.ceil(filteredCustomers.length / itemsPerPage);
-    const startIndex = (currentPage - 1) * itemsPerPage;
-    const endIndex = startIndex + itemsPerPage;
-    const paginatedCustomers = filteredCustomers.slice(startIndex, endIndex);
+    const handleNextPage = () => {
+        if (pagination.next) {
+            setPagination(prev => ({ ...prev, currentPage: prev.currentPage + 1 }));
+        }
+    };
+
+    const handlePrevPage = () => {
+        if (pagination.previous) {
+            setPagination(prev => ({ ...prev, currentPage: prev.currentPage - 1 }));
+        }
+    };
 
     if (loading && customers.length === 0) return (
         <div className="min-h-screen bg-gray-50 py-8">
@@ -698,7 +766,7 @@ export default function CustomersPage() {
                     </div>
                 </div>
 
-                {/* Quick Stats */}
+                {/* Quick Stats with Server-served Information */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
                     <Card
                         icon={Users}
@@ -708,26 +776,33 @@ export default function CustomersPage() {
                     />
                     <Card
                         icon={ShoppingBag}
-                        title="Displayed Customers"
+                        title="Current Page Results"
                         value={displayedCustomers.length}
                         colorClass="green"
                     />
                     <Card
                         icon={ChartLine}
-                        title="Active in Search"
-                        value={displayedCustomers.length > 0 ? displayedCustomers.length : 0}
+                        title={`Page ${pagination.currentPage} of ${pagination.totalPages}`}
+                        value={`Served by Server`}
                         colorClass="purple"
                     />
                 </div>
 
                 {/* Customers Card */}
                 <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
-                    {/* Card Header */}
+                    {/* Card Header with Server Info */}
                     <div className="px-6 py-4 border-b border-gray-200 bg-gray-50">
                         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
-                            <h2 className="text-xl font-semibold text-gray-900">Customers List</h2>
+                            <div>
+                                <h2 className="text-xl font-semibold text-gray-900">Customers List</h2>
+                                <div className="text-sm text-gray-600 mt-1">
+                                    Page {pagination.currentPage} of {pagination.totalPages} •
+                                    Total: {pagination.totalItems} customers •
+                                    Served by: <span className="font-semibold">Backend Pagination</span>
+                                </div>
+                            </div>
                             <span className="text-sm text-gray-600 mt-2 sm:mt-0">
-                                {totalCustomers} customer{totalCustomers !== 1 ? 's' : ''}
+                                Showing {displayedCustomers.length} per page
                             </span>
                         </div>
                     </div>
@@ -747,7 +822,7 @@ export default function CustomersPage() {
                                         Orders
                                     </th>
                                     <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                        Total Spent
+                                        Total Billed
                                     </th>
                                     <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                         Last Order
@@ -758,8 +833,8 @@ export default function CustomersPage() {
                                 </tr>
                             </thead>
                             <tbody className="bg-white divide-y divide-gray-200">
-                                {paginatedCustomers.length > 0 ? (
-                                    paginatedCustomers.map((customer) => (
+                                {displayedCustomers.length > 0 ? (
+                                    displayedCustomers.map((customer) => (
                                         <tr key={customer.id} className="hover:bg-gray-50 transition-colors duration-150">
                                             {/* Name */}
                                             <td className="px-6 py-4 whitespace-nowrap">
@@ -792,7 +867,7 @@ export default function CustomersPage() {
                                                 </span>
                                             </td>
 
-                                            {/* Total Spent */}
+                                            {/* Total Billed */}
                                             <td className="px-6 py-4 whitespace-nowrap">
                                                 <div className="text-sm font-semibold text-green-600">
                                                     KSh {customer.total_spent || '0.00'}
@@ -872,46 +947,47 @@ export default function CustomersPage() {
                         </table>
                     </div>
 
-                    {/* Pagination */}
-                    {filteredCustomers.length > itemsPerPage && (
+                    {/* Pagination - Now based on server response */}
+                    {pagination.totalPages > 1 && (
                         <div className="px-6 py-4 bg-gray-50 border-t border-gray-200">
                             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between space-y-3 sm:space-y-0">
                                 <div className="text-sm text-gray-700">
-                                    Showing {Math.min(startIndex + 1, filteredCustomers.length)} to {Math.min(endIndex, filteredCustomers.length)} of {filteredCustomers.length} entries
+                                    Page {pagination.currentPage} of {pagination.totalPages} •
+                                    Total: {pagination.totalItems} customers •
+                                    Served by: <span className="font-semibold">Backend API</span>
                                 </div>
                                 <div className="flex space-x-2">
                                     <button
-                                        onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
-                                        disabled={currentPage === 1}
-                                        className={`px-4 py-2 bg-white border border-gray-300 rounded-md text-sm font-medium ${
-                                            currentPage === 1 ? 'text-gray-400 cursor-not-allowed' : 'text-gray-700 hover:bg-gray-50'
-                                        } transition-colors duration-200 flex items-center`}
+                                        onClick={handlePrevPage}
+                                        disabled={!pagination.previous}
+                                        className={`px-4 py-2 bg-white border border-gray-300 rounded-md text-sm font-medium ${!pagination.previous ? 'text-gray-400 cursor-not-allowed' : 'text-gray-700 hover:bg-gray-50'
+                                            } transition-colors duration-200 flex items-center`}
                                     >
                                         <ChevronLeft className="w-4 h-4 mr-1" />
                                         Previous
                                     </button>
 
-                                    {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                                    {/* Page Numbers */}
+                                    {Array.from({ length: Math.min(5, pagination.totalPages) }, (_, i) => {
                                         let pageNum;
-                                        if (totalPages <= 5) {
+                                        if (pagination.totalPages <= 5) {
                                             pageNum = i + 1;
-                                        } else if (currentPage <= 3) {
+                                        } else if (pagination.currentPage <= 3) {
                                             pageNum = i + 1;
-                                        } else if (currentPage >= totalPages - 2) {
-                                            pageNum = totalPages - 4 + i;
+                                        } else if (pagination.currentPage >= pagination.totalPages - 2) {
+                                            pageNum = pagination.totalPages - 4 + i;
                                         } else {
-                                            pageNum = currentPage - 2 + i;
+                                            pageNum = pagination.currentPage - 2 + i;
                                         }
 
                                         return (
                                             <button
                                                 key={pageNum}
-                                                onClick={() => setCurrentPage(pageNum)}
-                                                className={`px-4 py-2 border rounded-md text-sm font-medium ${
-                                                    currentPage === pageNum
-                                                        ? 'bg-blue-600 border-blue-600 text-white'
-                                                        : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'
-                                                } transition-colors duration-200`}
+                                                onClick={() => handlePageChange(pageNum)}
+                                                className={`px-4 py-2 border rounded-md text-sm font-medium ${pagination.currentPage === pageNum
+                                                    ? 'bg-blue-600 border-blue-600 text-white'
+                                                    : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'
+                                                    } transition-colors duration-200`}
                                             >
                                                 {pageNum}
                                             </button>
@@ -919,11 +995,10 @@ export default function CustomersPage() {
                                     })}
 
                                     <button
-                                        onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
-                                        disabled={currentPage === totalPages}
-                                        className={`px-4 py-2 bg-white border border-gray-300 rounded-md text-sm font-medium ${
-                                            currentPage === totalPages ? 'text-gray-400 cursor-not-allowed' : 'text-gray-700 hover:bg-gray-50'
-                                        } transition-colors duration-200 flex items-center`}
+                                        onClick={handleNextPage}
+                                        disabled={!pagination.next}
+                                        className={`px-4 py-2 bg-white border border-gray-300 rounded-md text-sm font-medium ${!pagination.next ? 'text-gray-400 cursor-not-allowed' : 'text-gray-700 hover:bg-gray-50'
+                                            } transition-colors duration-200 flex items-center`}
                                     >
                                         Next
                                         <ChevronRight className="w-4 h-4 ml-1" />

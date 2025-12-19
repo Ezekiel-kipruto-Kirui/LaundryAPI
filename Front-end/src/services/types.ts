@@ -70,6 +70,7 @@ export interface FoodCategory {
 export interface FoodItem {
   id: number;
   name: string;
+ 
   category: FoodCategory;
   category_id: number;
   created_by: User;
@@ -81,14 +82,15 @@ export interface HotelOrderItem {
   id: number;
   order?: number;
   food_item: FoodItem;
+  food_item_name: string;
   food_item_id: HotelOrder;
   quantity: number;
   price: any;
   oncredit:boolean;
   name:string;
-  total_price?: any;
-  created_at?: any;
-  created_by?: any;
+  
+
+ 
 }
 
 export interface HotelOrder {

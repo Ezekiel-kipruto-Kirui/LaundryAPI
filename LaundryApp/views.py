@@ -1,15 +1,27 @@
-from rest_framework import viewsets, status,permissions
-from rest_framework_simplejwt.authentication import JWTAuthentication
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated, AllowAny,IsAdminUser
 from django.db import transaction
-from .models import Customer, Order, OrderItem, ExpenseField, ExpenseRecord, Payment, UserProfile
+
+from rest_framework import viewsets, status
+from rest_framework.views import APIView
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.response import Response
+from rest_framework.permissions import (
+    IsAuthenticated,
+    AllowAny,
+    IsAdminUser,
+)
+from .models import (
+    Customer, Order, OrderItem,
+    ExpenseField, ExpenseRecord,
+    Payment, UserProfile
+)
 from .serializers import (
     CustomerSerializer, OrderSerializer, OrderItemSerializer,
-    ExpenseFieldSerializer, ExpenseRecordSerializer, PaymentSerializer, UserProfileSerializer
+    ExpenseFieldSerializer, ExpenseRecordSerializer,
+    PaymentSerializer, UserProfileSerializer
 )
 from .pagination import CustomPageNumberPagination
+from .sms_utility import send_sms   
+
 class CurrentUserView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -21,7 +33,7 @@ class CurrentUserView(APIView):
 class UserProfileViewset(viewsets.ModelViewSet):
     queryset = UserProfile.objects.all()
     serializer_class = UserProfileSerializer
-    permission_classes = [permissions.IsAuthenticated]  # CHANGE THIS from AllowAny
+    permission_classes = [IsAuthenticated]  # CHANGE THIS from AllowAny
     
     # def get_permissions(self):
     #     """Only allow superusers to create/update/delete users"""
@@ -35,7 +47,7 @@ class CustomerViewSet(viewsets.ModelViewSet):
     """
     queryset = Customer.objects.all().order_by("-id")
     serializer_class = CustomerSerializer
-    permission_classes = [permissions.IsAuthenticated]  # change to IsAuthenticated for production
+    permission_classes = [IsAuthenticated]  # change to IsAuthenticated for production
     pagination_class=CustomPageNumberPagination
 
 
@@ -77,25 +89,48 @@ class OrderItemViewSet(viewsets.ModelViewSet):
     """
     queryset = OrderItem.objects.all()
     serializer_class = OrderItemSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [IsAuthenticated]
 
 
 # ---------------------- EXPENSE FIELD CRUD ---------------------- #
 class ExpenseFieldViewSet(viewsets.ModelViewSet):
     queryset = ExpenseField.objects.all().order_by("label")
     serializer_class = ExpenseFieldSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [IsAuthenticated]
 
 
 # ---------------------- EXPENSE RECORD CRUD ---------------------- #
 class ExpenseRecordViewSet(viewsets.ModelViewSet):
     queryset = ExpenseRecord.objects.all().order_by("-date")
     serializer_class = ExpenseRecordSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [IsAuthenticated]
 
 
 # ---------------------- PAYMENT CRUD ---------------------- #
 class PaymentViewSet(viewsets.ModelViewSet):
     queryset = Payment.objects.all()
     serializer_class = PaymentSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [IsAuthenticated]
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def sendsms_view(request):
+    to_number = request.data.get("")
+    message = request.data.get('hi')
+    if not to_number or not message:
+        return Response(
+            {"error": "to_number and message are required"},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    success, result = send_sms(to_number, message)
+
+    if success:
+        return Response(
+            {"success": True, "sid": result},
+            status=status.HTTP_200_OK
+        )
+
+    return Response(
+         {"error": "to_number and message are required"},
+            status=status.HTTP_400_BAD_REQUEST
+    )

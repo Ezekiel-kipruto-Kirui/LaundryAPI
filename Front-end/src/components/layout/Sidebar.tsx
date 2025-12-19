@@ -246,7 +246,7 @@ export function Sidebar() {
         </nav>
 
         {/* Footer */}
-        <div className="border-t p-4">
+        <div className="border-t-1 p-2">
           <button
             onClick={handleLogout}
             className="flex w-full items-center gap-3 rounded-lg px-4 py-3 text-sm opacity-70 hover:bg-sidebar-accent"

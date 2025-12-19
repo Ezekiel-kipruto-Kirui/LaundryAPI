@@ -46,34 +46,26 @@ class HotelOrder(models.Model):
             total += item.get_total_price()
         return total
 
-
-# Add this to your HotelOrderItem model
+# models.py
 class HotelOrderItem(models.Model):
-    order = models.ForeignKey(HotelOrder, on_delete=models.CASCADE, related_name='order_items',null=True)
+    order = models.ForeignKey(HotelOrder, on_delete=models.CASCADE, related_name='order_items')
     food_item = models.ForeignKey(FoodItem, on_delete=models.CASCADE)
     quantity = models.PositiveIntegerField(default=1)
     price = models.DecimalField(max_digits=10, decimal_places=2)
-    oncredit = models.BooleanField(default=False, null=True,blank=True)
-    name = models.CharField(max_length=50,null=True)
-    created_at = models.DateTimeField(auto_now_add=True,null=True)
-    created_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
-        null=True
-    )
+    name = models.CharField(max_length=255, blank=True, null=True)  # Add this field for credit orders
+    oncredit = models.BooleanField(default=False,null=True,blank=True)  # Add this field for credit orders
+    created_at = models.DateTimeField(auto_now_add=True)  # Add this field
     
     def save(self, *args, **kwargs):
-        # Ensure no availability checks in save method
+        # Remove duplicate super().save() calls
         super().save(*args, **kwargs)
-                
-        super().save(*args, **kwargs)
-
+    
     def get_total_price(self):
         """Calculate total price for this order item"""
-        return self.price
-
+        return self.quantity * self.price
+    
     def __str__(self):
-        return f"{self.food_item.name}"
+        return f"{self.food_item.name} x {self.quantity}"
 
 
 class HotelExpenseField(models.Model):

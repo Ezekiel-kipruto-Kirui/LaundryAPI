@@ -5,13 +5,14 @@ import { getAccessToken } from "@/services/api" // Import from your api.ts
 import {
     User,
     Order as LaundryOrder,
-    HotelOrderItem
+    HotelOrderItem,
+    HotelOrder // Import HotelOrder type
 } from "@/services/types"
 
 // Constants for API endpoints
 const USER_PROFILE_URL = `${API_BASE_URL}/me/`
 const LAUNDRY_ORDERS_URL = `${API_BASE_URL}/Laundry/orders/`
-const HOTEL_ORDERS_URL = `${API_BASE_URL}/Hotel/order-items/`
+const HOTEL_ORDERS_URL = `${API_BASE_URL}/Hotel/orders/` // Changed to orders endpoint
 
 // Helper function to get authorization header using your getAccessToken method
 const getAuthHeader = () => {
@@ -19,14 +20,22 @@ const getAuthHeader = () => {
     return token ? { Authorization: `Bearer ${token}` } : {};
 };
 
+// Extended interface for hotel order items with enriched data
+interface EnrichedHotelOrderItem extends HotelOrderItem {
+    _created_by?: User;
+    _created_at?: string;
+    _total_price?: number;
+}
+
 const UserProfile = () => {
     const [user, setUser] = useState<User | null>(null);
     const [loading, setLoading] = useState(true);
     const [initialLoading, setInitialLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
-    const [hotelOrders, setHotelOrders] = useState<HotelOrderItem[]>([]);
+    const [hotelOrders, setHotelOrders] = useState<HotelOrder[]>([]); // Changed to HotelOrder[]
     const [laundryOrders, setLaundryOrders] = useState<LaundryOrder[]>([]);
-    const [filteredHotelOrders, setFilteredHotelOrders] = useState<HotelOrderItem[]>([]);
+    const [enrichedHotelOrderItems, setEnrichedHotelOrderItems] = useState<EnrichedHotelOrderItem[]>([]);
+    const [filteredHotelOrderItems, setFilteredHotelOrderItems] = useState<EnrichedHotelOrderItem[]>([]);
     const [filteredLaundryOrders, setFilteredLaundryOrders] = useState<LaundryOrder[]>([]);
 
     // Function to fetch all user data
@@ -50,19 +59,41 @@ const UserProfile = () => {
 
             setUser(userResponse.data);
 
-            // Fetch hotel orders
+            // Fetch hotel orders (now from orders endpoint)
             const hotelResponse = await axios.get(HOTEL_ORDERS_URL, {
                 headers: getAuthHeader()
             });
 
-            setHotelOrders(hotelResponse.data || []);
+            // Get the results from paginated response
+            const hotelOrdersData = hotelResponse.data.results || hotelResponse.data.data || hotelResponse.data || [];
+            setHotelOrders(hotelOrdersData);
+
+            // Enrich hotel order items with order data
+            const enrichedItems: EnrichedHotelOrderItem[] = [];
+            hotelOrdersData.forEach((order: HotelOrder) => {
+                if (order.order_items && Array.isArray(order.order_items)) {
+                    order.order_items.forEach((item: HotelOrderItem) => {
+                        // Create enriched item with order data
+                        const enrichedItem: EnrichedHotelOrderItem = {
+                            ...item,
+                            _created_by: order.created_by,
+                            _created_at: order.created_at,
+                            _total_price: order.total_order_price || (order as any).total_amount || 0
+                        };
+                        enrichedItems.push(enrichedItem);
+                    });
+                }
+            });
+            setEnrichedHotelOrderItems(enrichedItems);
 
             // Fetch laundry orders
             const laundryResponse = await axios.get(LAUNDRY_ORDERS_URL, {
                 headers: getAuthHeader()
             });
 
-            setLaundryOrders(laundryResponse.data || []);
+            // Get the results from paginated response
+            const laundryOrdersData = laundryResponse.data.results || laundryResponse.data.data || laundryResponse.data || [];
+            setLaundryOrders(laundryOrdersData);
 
             setLoading(false);
             setInitialLoading(false);
@@ -90,16 +121,16 @@ const UserProfile = () => {
         fetchUserData();
     }, []);
 
-    // Filter hotel orders created by the user
+    // Filter hotel order items created by the user
     useEffect(() => {
-        if (user && hotelOrders.length > 0) {
-            const filtered = hotelOrders.filter((order) => {
-                // Check if created_by exists and matches user ID
-                return order.created_by && order.created_by.id === user.id;
+        if (user && enrichedHotelOrderItems.length > 0) {
+            const filtered = enrichedHotelOrderItems.filter((item) => {
+                // Check if _created_by exists and matches user ID
+                return item._created_by && item._created_by.id === user.id;
             });
-            setFilteredHotelOrders(filtered);
+            setFilteredHotelOrderItems(filtered);
         }
-    }, [user, hotelOrders]);
+    }, [user, enrichedHotelOrderItems]);
 
     // Filter laundry orders created or updated by the user
     useEffect(() => {
@@ -116,11 +147,18 @@ const UserProfile = () => {
 
     // Calculate hotel statistics
     const calculateHotelStats = () => {
-        if (!filteredHotelOrders.length) return { totalHotelOrders: 0, totalHotelRevenue: 0 };
+        if (!filteredHotelOrderItems.length) return { totalHotelOrders: 0, totalHotelRevenue: 0 };
 
-        const totalHotelOrders = filteredHotelOrders.length;
-        const totalHotelRevenue = filteredHotelOrders.reduce((sum, order) => {
-            return sum + (parseFloat(order.total_price?.toString() || '0') || 0);
+        const totalHotelOrders = filteredHotelOrderItems.length;
+        const totalHotelRevenue = filteredHotelOrderItems.reduce((sum, item) => {
+            // Use _total_price if available, otherwise calculate from price and quantity
+            if (item._total_price !== undefined) {
+                return sum + (item._total_price || 0);
+            }
+            // Fallback: calculate from price and quantity
+            const price = parseFloat(item.price?.toString() || '0') || 0;
+            const quantity = item.quantity || 0;
+            return sum + (price * quantity);
         }, 0);
 
         return { totalHotelOrders, totalHotelRevenue };
@@ -158,6 +196,25 @@ const UserProfile = () => {
     // Refresh data function
     const handleRefresh = () => {
         fetchUserData();
+    };
+
+    // Get display price for hotel order item
+    const getHotelItemDisplayPrice = (item: EnrichedHotelOrderItem): string => {
+        if (item._total_price !== undefined) {
+            return (item._total_price || 0).toFixed(2);
+        }
+        // Calculate from price and quantity
+        const price = parseFloat(item.price?.toString() || '0') || 0;
+        const quantity = item.quantity || 0;
+        return (price * quantity).toFixed(2);
+    };
+
+    // Get display date for hotel order item
+    const getHotelItemDisplayDate = (item: EnrichedHotelOrderItem): string => {
+        if (item._created_at) {
+            return new Date(item._created_at).toLocaleDateString();
+        }
+        return 'N/A';
     };
 
     // If initial loading (first time)
@@ -300,8 +357,6 @@ const UserProfile = () => {
                     </div>
                 </div>
 
-               
-
                 {/* Orders Sections */}
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                     {/* Hotel Orders Section */}
@@ -309,11 +364,11 @@ const UserProfile = () => {
                         <div className="flex justify-between items-center mb-5">
                             <h2 className="text-xl font-semibold text-gray-800">Your Hotel Orders</h2>
                             <span className="bg-blue-100 text-blue-800 text-sm font-medium px-3 py-1 rounded-full">
-                                {filteredHotelOrders.length} order{filteredHotelOrders.length !== 1 ? 's' : ''}
+                                {filteredHotelOrderItems.length} item{filteredHotelOrderItems.length !== 1 ? 's' : ''}
                             </span>
                         </div>
 
-                        {filteredHotelOrders.length > 0 ? (
+                        {filteredHotelOrderItems.length > 0 ? (
                             <>
                                 <div className="overflow-x-auto">
                                     <table className="min-w-full">
@@ -327,33 +382,33 @@ const UserProfile = () => {
                                             </tr>
                                         </thead>
                                         <tbody>
-                                            {filteredHotelOrders.slice(0, 5).map((order) => (
-                                                <tr key={order.id} className="border-b border-gray-100 hover:bg-gray-50">
-                                                    <td className="py-3 px-4 font-mono text-sm text-gray-700">#{order.id}</td>
+                                            {filteredHotelOrderItems.slice(0, 5).map((item) => (
+                                                <tr key={item.id} className="border-b border-gray-100 hover:bg-gray-50">
+                                                    <td className="py-3 px-4 font-mono text-sm text-gray-700">#{item.id}</td>
                                                     <td className="py-3 px-4">
-                                                        <div className="font-medium text-gray-800">{order.food_item?.name || 'N/A'}</div>
+                                                        <div className="font-medium text-gray-800">{item.food_item_name || item.food_item?.name || 'N/A'}</div>
                                                         <div className="text-xs text-gray-500">
-                                                            {order.created_at ? new Date(order.created_at).toLocaleDateString() : 'N/A'}
+                                                            {getHotelItemDisplayDate(item)}
                                                         </div>
                                                     </td>
                                                     <td className="py-3 px-4">
                                                         <span className="bg-gray-100 text-gray-800 text-xs px-2 py-1 rounded">
-                                                            {order.food_item?.category?.name || 'N/A'}
+                                                            {item.food_item?.category?.name || 'N/A'}
                                                         </span>
                                                     </td>
-                                                    <td className="py-3 px-4 text-gray-700">{order.quantity}</td>
+                                                    <td className="py-3 px-4 text-gray-700">{item.quantity}</td>
                                                     <td className="py-3 px-4 font-medium text-green-700">
-                                                        Ksh {order.total_price || '0.00'}
+                                                        Ksh {getHotelItemDisplayPrice(item)}
                                                     </td>
                                                 </tr>
                                             ))}
                                         </tbody>
                                     </table>
                                 </div>
-                                {filteredHotelOrders.length > 5 && (
+                                {filteredHotelOrderItems.length > 5 && (
                                     <div className="mt-4 text-center">
                                         <p className="text-sm text-gray-500">
-                                            Showing 5 of {filteredHotelOrders.length} orders
+                                            Showing 5 of {filteredHotelOrderItems.length} items
                                         </p>
                                         <button className="mt-2 text-blue-600 hover:text-blue-800 text-sm font-medium">
                                             View All Hotel Orders
@@ -412,8 +467,8 @@ const UserProfile = () => {
                                                         </td>
                                                         <td className="py-3 px-4">
                                                             <span className={`px-2 py-1 rounded-full text-xs font-medium ${order.order_status === 'Completed' ? 'bg-green-100 text-green-800' :
-                                                                    order.order_status === 'Delivered_picked' ? 'bg-blue-100 text-blue-800' :
-                                                                        'bg-yellow-100 text-yellow-800'
+                                                                order.order_status === 'Delivered_picked' ? 'bg-blue-100 text-blue-800' :
+                                                                    'bg-yellow-100 text-yellow-800'
                                                                 }`}>
                                                                 {order.order_status}
                                                             </span>
@@ -423,7 +478,7 @@ const UserProfile = () => {
                                                         </td>
                                                         <td className="py-3 px-4">
                                                             <span className={`px-2 py-1 rounded-full text-xs font-medium ${role === 'Creator' ? 'bg-blue-100 text-blue-800' :
-                                                                    'bg-purple-100 text-purple-800'
+                                                                'bg-purple-100 text-purple-800'
                                                                 }`}>
                                                                 {role}
                                                             </span>
@@ -464,12 +519,12 @@ const UserProfile = () => {
                     <h3 className="font-semibold text-gray-800 mb-4">Summary of Your Work</h3>
                     <div className="grid grid-cols-1 md:grid-cols-4 gap-5">
                         <div className="bg-white p-4 rounded-lg shadow-sm">
-                            <p className="text-gray-600 text-sm mb-1">Total Hotel Orders (System)</p>
-                            <p className="text-lg font-bold text-gray-800">{hotelOrders.length}</p>
+                            <p className="text-gray-600 text-sm mb-1">Total Hotel Items (System)</p>
+                            <p className="text-lg font-bold text-gray-800">{enrichedHotelOrderItems.length}</p>
                         </div>
                         <div className="bg-white p-4 rounded-lg shadow-sm">
-                            <p className="text-gray-600 text-sm mb-1">Your Hotel Orders</p>
-                            <p className="text-lg font-bold text-blue-600">{filteredHotelOrders.length}</p>
+                            <p className="text-gray-600 text-sm mb-1">Your Hotel Items</p>
+                            <p className="text-lg font-bold text-blue-600">{filteredHotelOrderItems.length}</p>
                         </div>
                         <div className="bg-white p-4 rounded-lg shadow-sm">
                             <p className="text-gray-600 text-sm mb-1">Total Laundry Orders (System)</p>

@@ -3,228 +3,223 @@ import { ExpenseField, ExpenseRecord, User } from "./types";
 import { handleLoginSuccess } from "@/utils/auth";
 
 /* =====================================================
-   TOKEN STORAGE
+   TOKEN MANAGEMENT
 ===================================================== */
 
 let accessToken: string | null = null;
 let refreshToken: string | null = null;
 
-export const setAuthTokens = (access: string | null, refresh: string | null) => {
-  accessToken = access;
-  refreshToken = refresh;
+// Token storage utilities
+const tokenStore = {
+  getAccess: (): string | null => accessToken || localStorage.getItem("accessToken"),
+  getRefresh: (): string | null => refreshToken || localStorage.getItem("refreshToken"),
+  set: (access: string | null, refresh: string | null): void => {
+    accessToken = access;
+    refreshToken = refresh;
 
-  if (access) localStorage.setItem("accessToken", access);
-  else localStorage.removeItem("accessToken");
+    if (access) localStorage.setItem("accessToken", access);
+    else localStorage.removeItem("accessToken");
 
-  if (refresh) localStorage.setItem("refreshToken", refresh);
-  else localStorage.removeItem("refreshToken");
+    if (refresh) localStorage.setItem("refreshToken", refresh);
+    else localStorage.removeItem("refreshToken");
+  },
+  clear: (): void => {
+    accessToken = null;
+    refreshToken = null;
+    localStorage.removeItem("accessToken");
+    localStorage.removeItem("refreshToken");
+  }
 };
 
-export const getAccessToken = (): string | null =>
-  accessToken || localStorage.getItem("accessToken");
-
-export const getRefreshToken = (): string | null =>
-  refreshToken || localStorage.getItem("refreshToken");
-
-/* =====================================================
-   TYPES
-===================================================== */
-
-export interface LoginCredentials {
-  email: string;
-  password: string;
-}
-
-export interface AuthResponse {
-  access: string;
-  refresh: string;
-  user: User;
-}
+// Export token functions (maintaining public API)
+export const getAccessToken = tokenStore.getAccess;
+export const getRefreshToken = tokenStore.getRefresh;
+export const setAuthTokens = tokenStore.set;
 
 /* =====================================================
    CONSTANTS
 ===================================================== */
 
-const AUTH_HEADERS = { "Content-Type": "application/json" };
-const TOKEN_ENDPOINT = `${API_BASE_URL}/token/`;
-const REFRESH_ENDPOINT = `${API_BASE_URL}/token/refresh/`;
-const ME_ENDPOINT = `${API_BASE_URL}/me/`;
+const ENDPOINTS = {
+  TOKEN: `${API_BASE_URL}/token/`,
+  REFRESH: `${API_BASE_URL}/token/refresh/`,
+  ME: `${API_BASE_URL}/me/`
+} as const;
+
+const DEFAULT_HEADERS = { "Content-Type": "application/json" };
 
 /* =====================================================
-   HELPERS
+   USER UTILITIES
 ===================================================== */
 
-const normalizeUser = (data: any, fallbackEmail = ""): User => {
-  const user: User = {
-    id: data?.id || data?.pk || 0,
-    email: data?.email || fallbackEmail,
-    user_type: data?.user_type || (data?.is_superuser ? "admin" : "staff"),
-    is_superuser: !!data?.is_superuser,
-    is_staff: !!data?.is_staff,
-    is_active: data?.is_active ?? true,
-    first_name: data?.first_name || "",
-    last_name: data?.last_name || "",
-    groups: data?.groups || [],
-    user_permissions: data?.user_permissions || [],
-    last_login: data?.last_login || null,
-    date_joined: data?.date_joined || new Date().toISOString(),
-  };
-
-  return user;
-};
-
-const fetchWithAuth = async (url: string, token: string) => {
-  const res = await fetch(url, {
-    headers: { ...AUTH_HEADERS, Authorization: `Bearer ${token}` },
-  });
-
-  if (!res.ok) {
-    if (res.status === 401) {
-      throw new Error("Authentication failed");
-    }
-    throw new Error(`Request failed: ${res.statusText}`);
-  }
-
-  return res.json();
-};
-
-const getStoredUser = (): User | null => {
-  try {
-    const raw = localStorage.getItem("current_user");
-    return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
-  }
-};
-
-const createDefaultUser = (email: string): User => ({
-  id: 0,
-  email,
-  user_type: "staff",
-  is_superuser: false,
-  is_staff: true,
-  is_active: true,
-  first_name: "",
-  last_name: "",
-  groups: [],
-  user_permissions: [],
-  last_login: null,
-  date_joined: new Date().toISOString(),
+const normalizeUser = (data: any, fallbackEmail = ""): User => ({
+  id: data?.id || data?.pk || 0,
+  email: data?.email || fallbackEmail,
+  user_type: data?.user_type || (data?.is_superuser ? "admin" : "staff"),
+  is_superuser: !!data?.is_superuser,
+  is_staff: !!data?.is_staff,
+  is_active: data?.is_active ?? true,
+  first_name: data?.first_name || "",
+  last_name: data?.last_name || "",
+  groups: data?.groups || [],
+  user_permissions: data?.user_permissions || [],
+  last_login: data?.last_login || null,
+  date_joined: data?.date_joined || new Date().toISOString(),
 });
 
+const createDefaultUser = (email: string): User => normalizeUser({ email });
+
 /* =====================================================
-   UNIVERSAL FETCH API
+   CORE FETCH UTILITIES
+===================================================== */
+
+const createHeaders = (token?: string | null): Record<string, string> => {
+  const headers: Record<string, string> = { ...DEFAULT_HEADERS };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  return headers;
+};
+
+const createUrl = (endpoint: string, app: "laundry" | "hotel" | "auth"): string => {
+  const base = `${API_BASE_URL}/`;
+  switch (app) {
+    case "laundry": return `${base}Laundry/${endpoint}`;
+    case "hotel": return `${base}Hotel/${endpoint}`;
+    case "auth": return `${base}${endpoint}`;
+  }
+};
+
+const handleError = async (response: Response): Promise<never> => {
+  const message = await response.text().catch(() => response.statusText);
+  throw new Error(`API Error: ${response.status} - ${message || "Unknown error"}`);
+};
+
+/* =====================================================
+   MAIN FETCH API (Maintaining same interface)
 ===================================================== */
 
 export async function fetchApi<T>(
   endpoint: string,
   options?: RequestInit,
-  app: "laundry" | "hotel" | 'auth' = "laundry"
+  app: "laundry" | "hotel" | "auth" = "laundry"
 ): Promise<T> {
-  const token = getAccessToken();
+  const url = createUrl(endpoint, app);
+  const token = tokenStore.getAccess();
 
-  let baseUrl = `${API_BASE_URL}/Laundry/`;
-  if (app === "hotel") baseUrl = `${API_BASE_URL}/Hotel/`;
-  if (app === "auth") baseUrl = `${API_BASE_URL}/`;
+  const makeRequest = async (authToken?: string) => {
+    const headers = createHeaders(authToken);
+    if (options?.headers) {
+      Object.assign(headers, options.headers);
+    }
 
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-    ...(options?.headers as Record<string, string>),
+    const response = await fetch(url, {
+      ...options,
+      headers,
+    });
+
+    if (!response.ok) {
+      // Handle 401 by trying to refresh token once
+      if (response.status === 401 && authToken && !options?.body?.toString().includes("refresh")) {
+        try {
+          await authApi.refreshToken();
+          const newToken = tokenStore.getAccess();
+          if (newToken) {
+            return makeRequest(newToken);
+          }
+        } catch (refreshError) {
+          // Refresh failed, proceed with original error
+        }
+      }
+      return handleError(response);
+    }
+
+    return response.json();
   };
 
-  if (token) headers.Authorization = `Bearer ${token}`;
-
-  let response = await fetch(`${baseUrl}${endpoint}`, {
-    ...options,
-    headers,
-  });
-
-  if (response.status === 401) {
-    await authApi.refreshToken();
-    const newToken = getAccessToken();
-    if (!newToken) throw new Error("Unauthorized");
-
-    headers.Authorization = `Bearer ${newToken}`;
-    response = await fetch(`${baseUrl}${endpoint}`, { ...options, headers });
-  }
-
-  if (!response.ok) {
-    const msg = await response.text();
-    throw new Error(`API Error: ${response.status} - ${msg || response.statusText}`);
-  }
-
-  return response.json();
+  return makeRequest(token);
 }
 
 /* =====================================================
-   AUTH API
+   AUTH API (Maintaining same interface)
 ===================================================== */
 
-export const authApi = {
-  login: async (credentials: LoginCredentials): Promise<AuthResponse> => {
-    const res = await fetch(TOKEN_ENDPOINT, {
+const authApi = {
+  login: async (credentials: { email: string; password: string }) => {
+    const response = await fetch(ENDPOINTS.TOKEN, {
       method: "POST",
-      headers: AUTH_HEADERS,
+      headers: DEFAULT_HEADERS,
       body: JSON.stringify(credentials),
     });
 
-    if (!res.ok) {
-      const errorText = await res.text();
+    if (!response.ok) {
+      const errorText = await response.text();
       throw new Error(errorText || "Invalid credentials");
     }
 
-    const tokenData = await res.json();
+    const tokenData = await response.json();
 
-    // Get user data from /me/ endpoint
-    const userData = await fetchWithAuth(ME_ENDPOINT, tokenData.access);
+    // Get user info
+    const userResponse = await fetch(ENDPOINTS.ME, {
+      headers: { ...DEFAULT_HEADERS, Authorization: `Bearer ${tokenData.access}` },
+    });
+
+    if (!userResponse.ok) throw new Error("Failed to fetch user data");
+
+    const userData = await userResponse.json();
     const user = normalizeUser(userData, credentials.email);
 
-    handleLoginSuccess({
-      access: tokenData.access,
-      refresh: tokenData.refresh,
-      user: user
-    });
+    // Store tokens and user
+    tokenStore.set(tokenData.access, tokenData.refresh);
+    localStorage.setItem("current_user", JSON.stringify(user));
+    handleLoginSuccess({ access: tokenData.access, refresh: tokenData.refresh, user });
 
     return { access: tokenData.access, refresh: tokenData.refresh, user };
   },
 
-  refreshToken: async (): Promise<{ access: string }> => {
-    const refresh = getRefreshToken();
+  refreshToken: async () => {
+    const refresh = tokenStore.getRefresh();
     if (!refresh) throw new Error("No refresh token available");
 
-    const res = await fetch(REFRESH_ENDPOINT, {
+    const response = await fetch(ENDPOINTS.REFRESH, {
       method: "POST",
-      headers: AUTH_HEADERS,
+      headers: DEFAULT_HEADERS,
       body: JSON.stringify({ refresh }),
     });
 
-    if (!res.ok) {
-      const errorText = await res.text();
+    if (!response.ok) {
+      const errorText = await response.text();
       throw new Error(errorText || "Token refresh failed");
     }
 
-    const data = await res.json();
-    setAuthTokens(data.access, refresh);
+    const data = await response.json();
+    tokenStore.set(data.access, refresh);
     return { access: data.access };
   },
 
-  logout: async () => {
-    setAuthTokens(null, null);
+  logout: () => {
+    tokenStore.clear();
     localStorage.removeItem("current_user");
     localStorage.removeItem("selected_shop");
   },
 
-  me: async (): Promise<{ user: User }> => {
-    const token = getAccessToken();
+  me: async () => {
+    const token = tokenStore.getAccess();
     if (!token) throw new Error("No authentication token available");
 
-    const userData = await fetchWithAuth(ME_ENDPOINT, token);
+    const response = await fetch(ENDPOINTS.ME, {
+      headers: createHeaders(token),
+    });
+
+    if (!response.ok) throw new Error("Failed to fetch user data");
+
+    const userData = await response.json();
     const user = normalizeUser(userData);
 
+    // Update local storage
+    localStorage.setItem("current_user", JSON.stringify(user));
     handleLoginSuccess({
       access: token,
-      refresh: getRefreshToken() || '',
-      user: user
+      refresh: tokenStore.getRefresh() || '',
+      user
     });
 
     return { user };
@@ -235,9 +230,13 @@ export const authApi = {
       const { user } = await authApi.me();
       return user;
     } catch {
-      const storedUser = getStoredUser();
+      const storedUser = localStorage.getItem("current_user");
       if (storedUser) {
-        return storedUser;
+        try {
+          return JSON.parse(storedUser);
+        } catch {
+          // JSON parse failed, continue to default
+        }
       }
       return createDefaultUser("unknown@example.com");
     }
@@ -245,59 +244,41 @@ export const authApi = {
 
   checkUserRole: async (): Promise<'admin' | 'staff'> => {
     const user = await authApi.getCurrentUser();
-
-    if (user.user_type === 'admin' || user.is_superuser) {
-      return 'admin';
-    }
-
-    return 'staff';
+    return (user.user_type === 'admin' || user.is_superuser) ? 'admin' : 'staff';
   }
 };
 
+export { authApi };
+
 /* =====================================================
-   EXPENSE APIs
+   EXPENSE APIs (Maintaining same interface)
 ===================================================== */
 
-export const expenseFieldsApi = {
-  getAll: () => fetchApi<ExpenseField[]>("expense-fields/"),
-  getById: (id: number) => fetchApi<ExpenseField>(`expense-fields/${id}/`),
-  create: (data: { label: string }) =>
-    fetchApi<ExpenseField>("expense-fields/", {
-      method: "POST",
-      body: JSON.stringify(data),
-    }),
-  update: (id: number, data: Partial<ExpenseField>) =>
-    fetchApi<ExpenseField>(`expense-fields/${id}/`, {
-      method: "PUT",
-      body: JSON.stringify(data),
-    }),
-  delete: (id: number) =>
-    fetchApi<void>(`expense-fields/${id}/`, { method: "DELETE" }),
-};
+const createCrudApi = <T>(endpoint: string, app: "laundry" | "hotel" | "auth" = "hotel") => ({
+  getAll: () => fetchApi<T[]>(endpoint, undefined, app),
+  getById: (id: number) => fetchApi<T>(`${endpoint}${id}/`, undefined, app),
+  create: (data: any) => fetchApi<T>(endpoint, {
+    method: "POST",
+    body: JSON.stringify(data)
+  }, app),
+  update: (id: number, data: Partial<T>) => fetchApi<T>(`${endpoint}${id}/`, {
+    method: "PUT",
+    body: JSON.stringify(data)
+  }, app),
+  delete: (id: number) => fetchApi<void>(`${endpoint}${id}/`, {
+    method: "DELETE"
+  }, app),
+});
 
-export const expenseRecordsApi = {
-  getAll: () => fetchApi<ExpenseRecord[]>("Hotelexpense-records/"),
-  getById: (id: number) => fetchApi<ExpenseRecord>(`Hotelexpense-records/${id}/`),
-  create: (data: Omit<ExpenseRecord, "id">) =>
-    fetchApi<ExpenseRecord>("Hotelexpense-records/", {
-      method: "POST",
-      body: JSON.stringify(data),
-    }),
-  update: (id: number, data: Partial<ExpenseRecord>) =>
-    fetchApi<ExpenseRecord>(`Hotelexpense-records/${id}/`, {
-      method: "PUT",
-      body: JSON.stringify(data),
-    }),
-  delete: (id: number) =>
-    fetchApi<void>(`Hotelexpense-records/${id}/`, { method: "DELETE" }),
-};
+export const expenseFieldsApi = createCrudApi<ExpenseField>("expense-fields/");
+export const expenseRecordsApi = createCrudApi<ExpenseRecord>("expense-records/");
 
 /* =====================================================
-   MISC HELPERS
+   AUTH UTILITIES (Maintaining same interface)
 ===================================================== */
 
 export const isAuthenticated = () =>
-  !!getAccessToken() && !!localStorage.getItem("current_user");
+  !!tokenStore.getAccess() && !!localStorage.getItem("current_user");
 
 export const getSelectedShop = (): "laundry" | "hotel" | null => {
   const shop = localStorage.getItem("selected_shop");
@@ -308,5 +289,7 @@ export const setSelectedShop = (shop: "laundry" | "hotel") =>
   localStorage.setItem("selected_shop", shop);
 
 export const clearUserData = () => {
-  localStorage.clear();
+  tokenStore.clear();
+  localStorage.removeItem("current_user");
+  localStorage.removeItem("selected_shop");
 };

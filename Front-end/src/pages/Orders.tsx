@@ -6,11 +6,13 @@ import {
   Filter, Clock, Check, Truck as TruckIcon,
   MoreVertical, Inbox, ChevronLeft, ChevronRight,
   Wallet, PlusCircle as PlusCircleIcon, CreditCard, XCircle,
-  FileText, FileSpreadsheet, Printer, Loader2, EllipsisVertical
+  FileText, FileSpreadsheet, Printer, Loader2, EllipsisVertical,
+  MessageSquare, Send, Calendar, CheckSquare, Square, Phone
 } from 'lucide-react';
 import { Order, OrderItem } from "@/services/types";
 
 export const ORDERS_URL = `${API_BASE_URL}/Laundry/orders/`;
+export const SEND_SMS_URL = `${API_BASE_URL}/api/Laundry/send_sms/`;
 
 // Helper function to get auth token
 const getAuthToken = (): string | null => {
@@ -28,6 +30,181 @@ const PAYMENT_STATUS_COLORS: { [key: string]: { bg: string; text: string; icon: 
   'completed': { bg: 'bg-green-100', text: 'text-green-800', icon: Check },
   'partial': { bg: 'bg-yellow-100', text: 'text-yellow-800', icon: Clock },
   'pending': { bg: 'bg-red-100', text: 'text-red-800', icon: Clock },
+};
+
+// SMS Dialog Modal Component
+const SMSDialogModal = ({
+  selectedOrders,
+  onSend,
+  onClose
+}: {
+  selectedOrders: Order[],
+  onSend: (message: string) => Promise<void>,
+  onClose: () => void
+}) => {
+  const [message, setMessage] = useState('');
+  const [sending, setSending] = useState(false);
+  const [previewMessage, setPreviewMessage] = useState('');
+
+  const handleSend = async () => {
+    if (!message.trim()) {
+      alert('Please enter a message');
+      return;
+    }
+
+    setSending(true);
+    try {
+      await onSend(message);
+    } finally {
+      setSending(false);
+    }
+  };
+
+  // Generate default reminder message
+  const generateDefaultMessage = () => {
+    const customerNames = selectedOrders.slice(0, 3).map(order => order.customer.name.split(' ')[0]);
+    const nameList = customerNames.join(', ');
+    const extra = selectedOrders.length > 3 ? ` and ${selectedOrders.length - 3} others` : '';
+
+    return `Dear ${nameList}${extra}, this is a friendly reminder about your pending laundry order. Please visit us to collect your items. Thank you!`;
+  };
+
+  const handleUseDefault = () => {
+    setMessage(generateDefaultMessage());
+  };
+
+  useEffect(() => {
+    if (selectedOrders.length === 1) {
+      const order = selectedOrders[0];
+      setPreviewMessage(`SMS will be sent to: ${order.customer.name} (${order.customer.phone})`);
+    } else {
+      setPreviewMessage(`SMS will be sent to ${selectedOrders.length} customers`);
+    }
+  }, [selectedOrders]);
+
+  return (
+    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg">
+        <div className="px-6 py-4 border-b border-gray-200">
+          <h2 className="text-xl font-semibold text-gray-900">
+            <MessageSquare className="inline-block w-5 h-5 mr-2" />
+            Send SMS to Customers
+          </h2>
+        </div>
+        <div className="p-6">
+          {/* Preview */}
+          <div className="mb-6 p-4 bg-blue-50 rounded-lg border border-blue-200">
+            <p className="text-sm text-blue-800 font-medium mb-2">SMS Preview:</p>
+            <p className="text-sm text-blue-700">{previewMessage}</p>
+            <p className="text-xs text-blue-600 mt-2">
+              Total recipients: {selectedOrders.length}
+            </p>
+          </div>
+
+          {/* Message Input */}
+          <div className="mb-4">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Message Content
+            </label>
+            <textarea
+              value={message}
+              onChange={(e) => setMessage(e.target.value)}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent h-32 resize-none"
+              placeholder="Type your message here..."
+              maxLength={160}
+            />
+            <div className="flex justify-between items-center mt-2">
+              <span className="text-xs text-gray-500">
+                {message.length}/160 characters
+              </span>
+              <button
+                type="button"
+                onClick={handleUseDefault}
+                className="text-xs text-blue-600 hover:text-blue-800 font-medium"
+              >
+                Use Default Reminder
+              </button>
+            </div>
+          </div>
+
+          {/* Character Count Warning */}
+          {message.length > 160 && (
+            <div className="mb-4 p-3 bg-red-50 rounded-lg border border-red-200">
+              <p className="text-sm text-red-700">
+                Message exceeds 160 characters. SMS messages are typically limited to 160 characters.
+              </p>
+            </div>
+          )}
+
+          {/* Selected Orders List */}
+          <div className="mb-6">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Selected Orders ({selectedOrders.length})
+            </label>
+            <div className="max-h-40 overflow-y-auto border border-gray-200 rounded-lg">
+              {selectedOrders.slice(0, 10).map((order) => (
+                <div key={order.id} className="px-4 py-2 border-b border-gray-100 last:border-b-0">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-gray-900">{order.customer.name}</p>
+                      <p className="text-xs text-gray-500">{order.customer.phone}</p>
+                      <p className="text-xs text-gray-400">Order: {order.uniquecode}</p>
+                    </div>
+                    <span className="text-xs text-yellow-600 font-medium">
+                      {order.balance === '0.00' ? 'Paid' : `Balance: ${order.balance}`}
+                    </span>
+                  </div>
+                </div>
+              ))}
+              {selectedOrders.length > 10 && (
+                <div className="px-4 py-2 bg-gray-50">
+                  <p className="text-xs text-gray-600 text-center">
+                    ... and {selectedOrders.length - 10} more orders
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* SMS Cost Estimate */}
+          <div className="mb-6 p-3 bg-gray-50 rounded-lg">
+            <p className="text-xs text-gray-600">
+              <span className="font-medium">Estimated Cost:</span> 1 SMS per customer × {selectedOrders.length} customers
+            </p>
+          </div>
+
+          {/* Action Buttons */}
+          <div className="flex justify-end space-x-3 pt-4 border-t border-gray-200">
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={sending}
+              className="px-6 py-2 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleSend}
+              disabled={sending || !message.trim()}
+              className="px-6 py-2 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-lg transition-colors duration-200 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
+            >
+              {sending ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Sending...
+                </>
+              ) : (
+                <>
+                  <Send className="w-4 h-4 mr-2" />
+                  Send SMS
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 };
 
 // Pagination interface
@@ -48,10 +225,20 @@ export default function Orders() {
   const [searchQuery, setSearchQuery] = useState('');
   const [paymentFilter, setPaymentFilter] = useState('');
   const [shopFilter, setShopFilter] = useState('');
+  const [orderStatusFilter, setOrderStatusFilter] = useState<string>('');
+
+  // Date Filter State
+  const [dateFilter, setDateFilter] = useState({
+    startDate: '',
+    endDate: ''
+  });
 
   // Selection State
   const [selectedOrders, setSelectedOrders] = useState<Set<number>>(new Set());
   const [showBulkActions, setShowBulkActions] = useState(false);
+
+  // SMS Modal State
+  const [showSMSModal, setShowSMSModal] = useState(false);
 
   // Modal States
   const [showEditModal, setShowEditModal] = useState(false);
@@ -90,14 +277,23 @@ export default function Orders() {
     current_page: 1,
     total_pages: 1
   });
-  const [pageSize, setPageSize] = useState(20); // Default 20 rows per page
+  const [pageSize, setPageSize] = useState(10);
 
-  // Stats state - separate from orders to avoid confusion
+  // Stats state
   const [stats, setStats] = useState({
     total_orders: 0,
     pending_orders: 0,
-    completed_orders: 0, // Only 'Completed', not 'Delivered_picked'
+    completed_orders: 0,
   });
+
+  // Calculate days since order was created
+  const calculateDaysSince = (dateString: string) => {
+    const orderDate = new Date(dateString);
+    const today = new Date();
+    const diffTime = Math.abs(today.getTime() - orderDate.getTime());
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    return diffDays;
+  };
 
   // Fetch data with filters and pagination
   const fetchOrders = useCallback(async (page = 1) => {
@@ -116,14 +312,24 @@ export default function Orders() {
 
       const params = new URLSearchParams();
       params.append('page', page.toString());
-
-      // Use page_size from backend config (or default)
-      const pageSizeParam = pageSize || 10; // Default to 10 if not set
-      params.append('page_size', pageSizeParam.toString());
+      params.append('page_size', pageSize.toString());
 
       if (searchQuery) params.append('search', searchQuery);
       if (paymentFilter) params.append('payment_status', paymentFilter);
       if (shopFilter) params.append('shop', shopFilter);
+
+      // Handle order status filter
+      if (orderStatusFilter) {
+        params.append('order_status', orderStatusFilter);
+      }
+
+      // Add date filters if provided
+      if (dateFilter.startDate) {
+        params.append('created_at__gte', dateFilter.startDate);
+      }
+      if (dateFilter.endDate) {
+        params.append('created_at__lte', dateFilter.endDate);
+      }
 
       console.log('Fetching orders with params:', params.toString());
 
@@ -141,62 +347,108 @@ export default function Orders() {
       }
 
       const data = await response.json();
-      console.log('API Response:', data); // Add this for debugging
+      console.log('API Response:', data);
 
-      // For Django REST Framework PageNumberPagination, it should return:
-      // {
-      //   "count": 100,
-      //   "next": "http://api.example.org/accounts/?page=2",
-      //   "previous": null,
-      //   "results": [...]
-      // }
+      // Handle Django REST Framework pagination
+      if (data.results && Array.isArray(data.results)) {
+        let filteredResults = data.results;
+        let filteredCount = data.count || 0;
 
-      if (data.results) {
-        setOrders(data.results);
+        // If no order status filter is selected, filter out 'Delivered_picked' on frontend
+        if (!orderStatusFilter) {
+          filteredResults = data.results.filter((order: Order) =>
+            order.order_status !== 'Delivered_picked'
+          );
+          // Adjust count for frontend filtering
+          filteredCount = data.count ? data.count - data.results.filter((o: Order) => o.order_status === 'Delivered_picked').length : filteredResults.length;
+        }
 
-        // Update pagination from response
+        setOrders(filteredResults);
+
+        // Calculate total pages
+        const totalPages = Math.ceil(filteredCount / pageSize);
+
         setPagination({
-          count: data.count || 0,
-          next: data.next,
-          previous: data.previous,
-          current_page: page, // Use the page we requested
-          total_pages: Math.ceil((data.count || 0) / pageSizeParam)
+          count: filteredCount,
+          next: data.next || null,
+          previous: data.previous || null,
+          current_page: page,
+          total_pages: totalPages
         });
 
-        // Calculate stats from the current page only (for display purposes)
-        const currentPageStats = {
-          total_orders: data.count || 0, // Use total count from backend
-          pending_orders: data.results.filter((order: Order) => order.order_status === 'pending').length,
-          completed_orders: data.results.filter((order: Order) =>
+        // Calculate stats - use the FULL data for stats (not filtered)
+        const allOrders = data.results;
+        const pendingOrders = allOrders.filter((order: Order) => order.order_status === 'pending');
+        const completedOrders = allOrders.filter((order: Order) =>
+          order.order_status === 'Completed'
+        );
+        const deliveredOrders = allOrders.filter((order: Order) =>
+          order.order_status === 'Delivered_picked'
+        );
+
+        // For total orders in stats, show ALL orders (including delivered)
+        setStats({
+          total_orders: data.count || 0, // Show total from backend including delivered
+          pending_orders: pendingOrders.length,
+          completed_orders: completedOrders.length,
+        });
+
+      } else if (Array.isArray(data)) {
+        // If no pagination, assume it's an array
+        let filteredData = data;
+        if (!orderStatusFilter) {
+          filteredData = data.filter((order: Order) =>
+            order.order_status !== 'Delivered_picked'
+          );
+        }
+
+        setOrders(filteredData);
+        const totalPages = Math.ceil(filteredData.length / pageSize);
+
+        setPagination({
+          count: filteredData.length,
+          next: null,
+          previous: null,
+          current_page: 1,
+          total_pages: totalPages
+        });
+
+        // Stats for non-paginated response
+        setStats({
+          total_orders: data.length, // Total including delivered
+          pending_orders: data.filter((order: Order) => order.order_status === 'pending').length,
+          completed_orders: data.filter((order: Order) =>
             order.order_status === 'Completed'
           ).length,
-        };
-        setStats(currentPageStats);
+        });
       } else {
-        // If no pagination, assume it's an array
-        setOrders(data || []);
+        console.error('Unexpected API response format:', data);
+        setOrders([]);
         setPagination({
-          count: data.length || 0,
+          count: 0,
           next: null,
           previous: null,
           current_page: 1,
           total_pages: 1
         });
-
-        const currentPageStats = {
-          total_orders: data.length || 0,
-          pending_orders: data.filter((order: Order) => order.order_status === 'pending').length,
-          completed_orders: data.filter((order: Order) =>
-            order.order_status === 'Completed'
-          ).length,
-        };
-        setStats(currentPageStats);
+        setStats({
+          total_orders: 0,
+          pending_orders: 0,
+          completed_orders: 0,
+        });
       }
 
-    } catch (err) {
+    } catch (err: any) {
       console.error("Error fetching orders:", err);
-      setError("Could not load orders. Please check the API status.");
+      setError(`Could not load orders: ${err.message}`);
       setOrders([]);
+      setPagination({
+        count: 0,
+        next: null,
+        previous: null,
+        current_page: 1,
+        total_pages: 1
+      });
       setStats({
         total_orders: 0,
         pending_orders: 0,
@@ -205,8 +457,9 @@ export default function Orders() {
     } finally {
       setLoading(false);
     }
-  }, [pageSize, searchQuery, paymentFilter, shopFilter]);
+  }, [pageSize, searchQuery, paymentFilter, shopFilter, orderStatusFilter, dateFilter]);
 
+  // Initial fetch and refetch when filters change
   useEffect(() => {
     fetchOrders(1);
   }, [fetchOrders]);
@@ -214,12 +467,10 @@ export default function Orders() {
   // Close dropdowns when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      // Close export dropdown
       if (exportDropdownRef.current && !exportDropdownRef.current.contains(event.target as Node)) {
         setShowExportDropdown(false);
       }
 
-      // Close row dropdowns
       const clickedOutsideAllDropdowns = Object.values(dropdownRefs.current).every(
         ref => ref && !ref.contains(event.target as Node)
       );
@@ -235,7 +486,6 @@ export default function Orders() {
   // Handle search with debounce
   const handleSearch = (query: string) => {
     setSearchQuery(query);
-    // Reset to page 1 when searching
     if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
     searchTimeoutRef.current = setTimeout(() => {
       fetchOrders(1);
@@ -256,6 +506,7 @@ export default function Orders() {
     if (searchQuery) params.append('search', searchQuery);
     if (paymentFilter) params.append('payment_status', paymentFilter);
     if (shopFilter) params.append('shop', shopFilter);
+    if (orderStatusFilter) params.append('order_status', orderStatusFilter);
 
     const url = `${ORDERS_URL}?${params}`;
     const exportWindow = window.open('', '_blank');
@@ -263,10 +514,7 @@ export default function Orders() {
     if (exportWindow) {
       exportWindow.location.href = url;
     } else {
-      // Fallback: download using fetch
-      fetch(url, {
-        headers,
-      })
+      fetch(url, { headers })
         .then(response => response.blob())
         .then(blob => {
           const downloadUrl = window.URL.createObjectURL(blob);
@@ -287,8 +535,59 @@ export default function Orders() {
     setShowExportDropdown(false);
   };
 
+  // Send SMS to multiple customers
+  const sendBulkSMS = async (message: string) => {
+    const token = getAuthToken();
+    if (!token) {
+      alert('Authentication required. Please login again.');
+      return;
+    }
+
+    const selectedOrderObjects = orders.filter(order => selectedOrders.has(order.id));
+
+    try {
+      let successCount = 0;
+      let failCount = 0;
+
+      for (const order of selectedOrderObjects) {
+        try {
+          const response = await fetch(SEND_SMS_URL, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`,
+            },
+            body: JSON.stringify({
+              to_number: order.customer.phone,
+              message: message
+            }),
+          });
+
+          if (response.ok) {
+            successCount++;
+          } else {
+            failCount++;
+            console.error(`Failed to send SMS to ${order.customer.phone}:`, await response.json());
+          }
+        } catch (err) {
+          failCount++;
+          console.error(`Error sending SMS to ${order.customer.phone}:`, err);
+        }
+      }
+
+      alert(`SMS sent successfully to ${successCount} customer(s). Failed: ${failCount}`);
+      setShowSMSModal(false);
+      clearSelection();
+
+    } catch (err) {
+      console.error('Error sending bulk SMS:', err);
+      alert('Failed to send SMS. Please try again.');
+    }
+  };
+
   // Pagination handlers
   const goToPage = (page: number) => {
+    console.log('Going to page:', page);
     if (page >= 1 && page <= pagination.total_pages) {
       fetchOrders(page);
     }
@@ -296,10 +595,10 @@ export default function Orders() {
 
   const handlePageSizeChange = (size: number) => {
     setPageSize(size);
-    fetchOrders(1); // Reset to page 1 when changing page size
+    fetchOrders(1);
   };
 
-  // Selection handlers - use current page orders
+  // Selection handlers
   const toggleOrderSelection = (orderId: number) => {
     const newSelected = new Set(selectedOrders);
     if (newSelected.has(orderId)) {
@@ -313,7 +612,7 @@ export default function Orders() {
 
   const toggleSelectAll = (checked: boolean) => {
     if (checked) {
-      const allIds = orders.map(order => order.id); // Use current page orders only
+      const allIds = orders.map(order => order.id);
       setSelectedOrders(new Set(allIds));
       setShowBulkActions(true);
     } else {
@@ -340,7 +639,12 @@ export default function Orders() {
       }
 
       const order = orders.find(o => o.id === orderId);
-      if (!order) return false;
+      if (!order) {
+        console.error(`Order with id ${orderId} not found`);
+        return false;
+      }
+
+      console.log(`Updating order ${orderId} to status: ${status}`);
 
       const response = await fetch(`${ORDERS_URL}${orderId}/`, {
         method: 'PATCH',
@@ -368,6 +672,23 @@ export default function Orders() {
             order.id === orderId ? { ...order, order_status: status } : order
           )
         );
+
+        // Also update stats if needed
+        if (status === 'Completed') {
+          setStats(prev => ({
+            ...prev,
+            completed_orders: prev.completed_orders + 1,
+            pending_orders: order.order_status === 'pending' ? prev.pending_orders - 1 : prev.pending_orders
+          }));
+        } else if (status === 'pending' && order.order_status === 'Completed') {
+          setStats(prev => ({
+            ...prev,
+            completed_orders: prev.completed_orders - 1,
+            pending_orders: prev.pending_orders + 1
+          }));
+        }
+
+        console.log(`Successfully updated order ${orderId} to ${status}`);
         return true;
       }
     } catch (err) {
@@ -393,10 +714,19 @@ export default function Orders() {
         updateOrderStatus(orderId, status)
       );
 
-      await Promise.all(promises);
-      alert(`Successfully updated ${selectedOrders.size} order(s)`);
+      const results = await Promise.allSettled(promises);
+      const successful = results.filter(r => r.status === 'fulfilled').length;
+
+      if (successful > 0) {
+        alert(`Successfully updated ${successful} order(s)`);
+      }
+
+      if (successful < selectedOrders.size) {
+        alert(`Failed to update ${selectedOrders.size - successful} order(s)`);
+      }
+
       clearSelection();
-      fetchOrders(pagination.current_page); // Refresh current page
+      fetchOrders(pagination.current_page);
     } catch (err) {
       console.error('Error in bulk update:', err);
       alert('Failed to update orders');
@@ -410,9 +740,13 @@ export default function Orders() {
     }
 
     try {
-      await updateOrderStatus(orderId, status);
-      alert('Order status updated successfully');
-      fetchOrders(pagination.current_page); // Refresh current page
+      const success = await updateOrderStatus(orderId, status);
+      if (success) {
+        alert('Order status updated successfully');
+        fetchOrders(pagination.current_page);
+      } else {
+        alert('Failed to update order status');
+      }
     } catch (err) {
       console.error('Error updating status:', err);
       alert('Failed to update order status');
@@ -446,12 +780,29 @@ export default function Orders() {
           window.location.href = "/login";
           return;
         }
-        const errorData = await response.json();
-        throw new Error(errorData.message || 'Failed to delete order');
+        if (response.status === 204) {
+          // 204 No Content is common for DELETE
+          console.log(`Order ${orderId} deleted successfully`);
+        } else {
+          const errorData = await response.json();
+          throw new Error(errorData.message || 'Failed to delete order');
+        }
       }
 
       // Update local state immediately
       setOrders(prevOrders => prevOrders.filter(order => order.id !== orderId));
+
+      // Update stats
+      const deletedOrder = orders.find(o => o.id === orderId);
+      if (deletedOrder) {
+        setStats(prev => ({
+          ...prev,
+          total_orders: prev.total_orders - 1,
+          pending_orders: deletedOrder.order_status === 'pending' ? prev.pending_orders - 1 : prev.pending_orders,
+          completed_orders: deletedOrder.order_status === 'Completed' ? prev.completed_orders - 1 : prev.completed_orders
+        }));
+      }
+
       alert(`Order ${orderCode} deleted successfully`);
 
       // Clear selection if this order was selected
@@ -543,7 +894,7 @@ export default function Orders() {
         );
         alert('Order updated successfully');
         setShowEditModal(false);
-        fetchOrders(pagination.current_page); // Refresh current page
+        fetchOrders(pagination.current_page);
       }
     } catch (err) {
       console.error('Error updating order:', err);
@@ -569,14 +920,80 @@ export default function Orders() {
         <head>
           <title>Receipt - ${currentOrder?.uniquecode}</title>
           <style>
-            body { font-family: Arial, sans-serif; padding: 20px; }
-            .receipt { max-width: 300px; margin: 0 auto; }
-            .header { text-align: center; margin-bottom: 20px; }
-            .section { margin-bottom: 15px; }
-            .total { font-weight: bold; margin-top: 10px; }
+            * {
+              margin: 0;
+              padding: 0;
+              box-sizing: border-box;
+              font-family: 'Courier New', monospace;
+            }
+            body { 
+              padding: 10px; 
+              font-size: 12px;
+              background: white;
+            }
+            .receipt { 
+              max-width: 250px; 
+              margin: 0 auto;
+              padding: 10px;
+              border: 1px solid #ccc;
+            }
+            .header { 
+              text-align: center; 
+              margin-bottom: 10px;
+              padding-bottom: 10px;
+              border-bottom: 1px dashed #000;
+            }
+            .header h3 {
+              font-size: 16px;
+              font-weight: bold;
+              margin-bottom: 5px;
+            }
+            .header p {
+              font-size: 10px;
+            }
+            .section { 
+              margin-bottom: 8px;
+              padding-bottom: 8px;
+              border-bottom: 1px dashed #ccc;
+            }
+            .total { 
+              font-weight: bold; 
+              margin-top: 10px;
+              padding-top: 10px;
+              border-top: 2px solid #000;
+            }
+            .divider {
+              border-top: 1px dashed #000;
+              margin: 5px 0;
+            }
+            .items-table {
+              width: 100%;
+              border-collapse: collapse;
+            }
+            .items-table td {
+              padding: 2px 0;
+              font-size: 11px;
+            }
+            .items-table .item-name {
+              max-width: 120px;
+              overflow: hidden;
+              text-overflow: ellipsis;
+              white-space: nowrap;
+            }
             @media print {
-              body { padding: 0; }
+              body { 
+                padding: 0; 
+                margin: 0;
+              }
+              .receipt {
+                border: none;
+                max-width: 230px;
+              }
               button { display: none; }
+              @page {
+                margin: 0;
+                size: auto;
+              }
             }
           </style>
         </head>
@@ -660,7 +1077,7 @@ export default function Orders() {
         );
         alert('Payment marked as complete successfully');
         setShowPaymentModal(false);
-        fetchOrders(pagination.current_page); // Refresh current page
+        fetchOrders(pagination.current_page);
       }
     } catch (err) {
       console.error('Error completing payment:', err);
@@ -688,9 +1105,39 @@ export default function Orders() {
     return `KSh ${numAmount.toLocaleString('en-KE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   };
 
+  // Get user's full name for receipt
+  const getUserFullName = (order: Order) => {
+    if (order.created_by) {
+      const firstName = order.created_by.first_name || '';
+      const lastName = order.created_by.last_name || '';
+      return `${firstName} ${lastName}`.trim() || 'Unknown';
+    }
+    return 'Unknown';
+  };
+
   // Toggle dropdown for a specific row
   const toggleDropdown = (orderId: number) => {
     setOpenDropdownId(openDropdownId === orderId ? null : orderId);
+  };
+
+  // Apply date filter
+  const applyDateFilter = () => {
+    if (dateFilter.startDate && dateFilter.endDate) {
+      const start = new Date(dateFilter.startDate);
+      const end = new Date(dateFilter.endDate);
+
+      if (start > end) {
+        alert('Start date cannot be after end date');
+        return;
+      }
+    }
+    fetchOrders(1);
+  };
+
+  // Clear date filter
+  const clearDateFilter = () => {
+    setDateFilter({ startDate: '', endDate: '' });
+    fetchOrders(1);
   };
 
   // Render pagination buttons
@@ -700,16 +1147,13 @@ export default function Orders() {
 
     if (pagination.total_pages <= 1) return null;
 
-    // Calculate start and end pages
     let startPage = Math.max(1, pagination.current_page - Math.floor(maxVisibleButtons / 2));
     let endPage = Math.min(pagination.total_pages, startPage + maxVisibleButtons - 1);
 
-    // Adjust start page if we're near the end
     if (endPage - startPage + 1 < maxVisibleButtons) {
       startPage = Math.max(1, endPage - maxVisibleButtons + 1);
     }
 
-    // Always show first page button if not visible
     if (startPage > 1) {
       buttons.push(
         <button
@@ -730,7 +1174,6 @@ export default function Orders() {
       }
     }
 
-    // Add page number buttons
     for (let page = startPage; page <= endPage; page++) {
       buttons.push(
         <button
@@ -743,7 +1186,6 @@ export default function Orders() {
       );
     }
 
-    // Always show last page button if not visible
     if (endPage < pagination.total_pages) {
       if (endPage < pagination.total_pages - 1) {
         buttons.push(
@@ -768,8 +1210,10 @@ export default function Orders() {
   };
 
   // Display orders count
-  const displayOrdersCount = orders.length;
   const isCheckAllChecked = orders.length > 0 && selectedOrders.size === orders.length;
+
+  // Get selected order objects
+  const selectedOrderObjects = orders.filter(order => selectedOrders.has(order.id));
 
   return (
     <div className="min-h-screen bg-gray-50 font-sans p-6">
@@ -844,25 +1288,35 @@ export default function Orders() {
               <span id="selectedCount" className="text-sm font-medium text-gray-700">
                 {selectedOrders.size} order(s) selected
               </span>
+
+              {/* Send SMS Button */}
+              <button
+                onClick={() => setShowSMSModal(true)}
+                className="px-4 py-2 bg-green-500 text-white rounded-lg text-sm font-medium hover:bg-green-600 transition-colors flex items-center"
+              >
+                <Send className="w-4 h-4 mr-2" />
+                Send SMS to Selected
+              </button>
+
               <button
                 onClick={() => handleBulkAction('Completed')}
-                className="px-4 py-2 bg-green-500 text-white rounded-lg text-sm font-medium hover:bg-green-600 transition-colors"
+                className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 transition-colors flex items-center"
               >
-                <CheckCircle className="w-4 h-4 mr-2 inline" />
+                <CheckCircle className="w-4 h-4 mr-2" />
                 Mark Selected as Completed
               </button>
               <button
                 onClick={() => handleBulkAction('Delivered_picked')}
-                className="px-4 py-2 bg-purple-500 text-white rounded-lg text-sm font-medium hover:bg-purple-600 transition-colors"
+                className="px-4 py-2 bg-purple-500 text-white rounded-lg text-sm font-medium hover:bg-purple-600 transition-colors flex items-center"
               >
-                <Truck className="w-4 h-4 mr-2 inline" />
+                <Truck className="w-4 h-4 mr-2" />
                 Mark Selected as Delivered
               </button>
               <button
                 onClick={clearSelection}
-                className="px-4 py-2 bg-gray-500 text-white rounded-lg text-sm font-medium hover:bg-gray-600 transition-colors"
+                className="px-4 py-2 bg-gray-500 text-white rounded-lg text-sm font-medium hover:bg-gray-600 transition-colors flex items-center"
               >
-                <XCircle className="w-4 h-4 mr-2 inline" />
+                <XCircle className="w-4 h-4 mr-2" />
                 Clear Selection
               </button>
             </div>
@@ -903,60 +1357,124 @@ export default function Orders() {
               <div>
                 <h3 className="text-3xl font-bold text-gray-800 mt-1">{stats.completed_orders}</h3>
                 <p className="text-sm text-gray-500 font-medium">Completed Orders</p>
-                <p className="text-xs text-gray-400 mt-1">(Excluding Delivered/Picked)</p>
               </div>
             </div>
           </div>
         </div>
 
-        {/* Filters */}
+        {/* Date Filter Section */}
         <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100 mb-6">
-          <div className="flex flex-col md:flex-row justify-between w-full items-start md:items-center gap-4">
-            <div className="flex flex-row gap-3 flex-wrap">
-              <button
-                onClick={() => {
-                  setPaymentFilter('');
-                  setShopFilter('');
-                  setSearchQuery('');
-                  fetchOrders(1);
-                }}
-                className={`px-4 py-2 bg-blue-100 text-gray-700 rounded-md text-sm font-medium`}
-              >
-                All Orders
-              </button>
-
-              <select
-                value={shopFilter}
-                onChange={(e) => {
-                  setShopFilter(e.target.value);
-                  fetchOrders(1);
-                }}
-                className="border border-gray-300 rounded-md p-2 text-sm"
-              >
-                <option value="">All Shops</option>
-                <option value="Shop A">Shop A</option>
-                <option value="Shop B">Shop B</option>
-              </select>
-
-              <div className="flex flex-row items-center gap-2">
-                <span className="text-sm text-gray-500 font-medium">Payment:</span>
-                {['pending', 'completed', 'partial'].map((status) => (
-                  <button
-                    key={status}
-                    onClick={() => {
-                      setPaymentFilter(paymentFilter === status ? '' : status);
-                      fetchOrders(1);
-                    }}
-                    className={`px-3 py-1.5 ${paymentFilter === status ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700'} rounded-full text-sm font-medium`}
-                  >
-                    {status.charAt(0).toUpperCase() + status.slice(1)}
-                  </button>
-                ))}
+          <div className="flex flex-col md:flex-row justify-between w-full items-start md:items-center gap-4 mb-4">
+            <div className="flex flex-col sm:flex-row gap-4 w-full">
+              <div className="flex flex-col sm:flex-row gap-4 flex-1">
+                {/* Date Range Filter */}
+                <div className="flex flex-col sm:flex-row gap-3">
+                  <div className="flex items-center gap-2">
+                    <Calendar className="w-4 h-4 text-gray-400" />
+                    <span className="text-sm font-medium text-gray-700">Date Range:</span>
+                  </div>
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <div>
+                      <input
+                        type="date"
+                        value={dateFilter.startDate}
+                        onChange={(e) => setDateFilter(prev => ({ ...prev, startDate: e.target.value }))}
+                        className="px-3 py-2 border border-gray-300 rounded-md text-sm"
+                      />
+                    </div>
+                    <span className="hidden sm:inline text-gray-400 self-center">to</span>
+                    <div>
+                      <input
+                        type="date"
+                        value={dateFilter.endDate}
+                        onChange={(e) => setDateFilter(prev => ({ ...prev, endDate: e.target.value }))}
+                        className="px-3 py-2 border border-gray-300 rounded-md text-sm"
+                      />
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={applyDateFilter}
+                        className="px-3 py-2 bg-blue-500 text-white rounded-md text-sm hover:bg-blue-600 transition-colors"
+                      >
+                        Apply
+                      </button>
+                      <button
+                        onClick={clearDateFilter}
+                        className="px-3 py-2 bg-gray-200 text-gray-700 rounded-md text-sm hover:bg-gray-300 transition-colors"
+                      >
+                        Clear
+                      </button>
+                    </div>
+                  </div>
+                </div>
               </div>
+            </div>
+          </div>
+
+          {/* Filters Row */}
+          <div className="flex flex-wrap gap-3">
+            <button
+              onClick={() => {
+                setPaymentFilter('');
+                setShopFilter('');
+                setSearchQuery('');
+                setOrderStatusFilter('');
+                fetchOrders(1);
+              }}
+              className={`px-4 py-2 ${!orderStatusFilter && !paymentFilter && !shopFilter && !searchQuery ? 'bg-blue-600 text-white' : 'bg-blue-100 text-gray-700'} rounded-md text-sm font-medium`}
+            >
+              All Orders
+            </button>
+
+            <select
+              value={shopFilter}
+              onChange={(e) => {
+                setShopFilter(e.target.value);
+                fetchOrders(1);
+              }}
+              className="border border-gray-300 rounded-md p-2 text-sm"
+            >
+              <option value="">All Shops</option>
+              <option value="Shop A">Shop A</option>
+              <option value="Shop B">Shop B</option>
+            </select>
+
+            {/* Order Status Filters */}
+            <div className="flex flex-row items-center gap-2">
+              <span className="text-sm text-gray-500 font-medium">Order Status:</span>
+              {['pending', 'Completed', 'Delivered_picked'].map((status) => (
+                <button
+                  key={status}
+                  onClick={() => {
+                    setOrderStatusFilter(orderStatusFilter === status ? '' : status);
+                    fetchOrders(1);
+                  }}
+                  className={`px-3 py-1.5 ${orderStatusFilter === status ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700'} rounded-full text-sm font-medium`}
+                >
+                  {status === 'Delivered_picked' ? 'Delivered' : status.charAt(0).toUpperCase() + status.slice(1)}
+                </button>
+              ))}
+            </div>
+
+            {/* Payment Status Filters */}
+            <div className="flex flex-row items-center gap-2">
+              <span className="text-sm text-gray-500 font-medium">Payment:</span>
+              {['pending', 'completed', 'partial'].map((status) => (
+                <button
+                  key={status}
+                  onClick={() => {
+                    setPaymentFilter(paymentFilter === status ? '' : status);
+                    fetchOrders(1);
+                  }}
+                  className={`px-3 py-1.5 ${paymentFilter === status ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700'} rounded-full text-sm font-medium`}
+                >
+                  {status.charAt(0).toUpperCase() + status.slice(1)}
+                </button>
+              ))}
             </div>
 
             {/* Page Size Selector */}
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 ml-auto">
               <span className="text-sm text-gray-600">Show:</span>
               <select
                 value={pageSize}
@@ -988,7 +1506,7 @@ export default function Orders() {
               </div>
               <h3 className="text-lg font-medium text-gray-900 mb-1">No orders found</h3>
               <p className="text-gray-500 max-w-md mx-auto">
-                {searchQuery || paymentFilter || shopFilter
+                {searchQuery || paymentFilter || shopFilter || orderStatusFilter || dateFilter.startDate
                   ? 'No orders match your current filters. Try adjusting your search criteria.'
                   : "There are no orders in the system. When you create orders, they'll appear here."}
               </p>
@@ -1013,6 +1531,7 @@ export default function Orders() {
                       <th className="py-4 px-4 text-left font-semibold text-gray-700 text-xs uppercase tracking-wider">Service</th>
                       <th className="py-4 px-4 text-left font-semibold text-gray-700 text-xs uppercase tracking-wider">Item Type</th>
                       <th className="py-4 px-4 text-left font-semibold text-gray-700 text-xs uppercase tracking-wider">Items</th>
+                      <th className="py-4 px-4 text-left font-semibold text-gray-700 text-xs uppercase tracking-wider">Days</th>
                       <th className="py-4 px-4 text-left font-semibold text-gray-700 text-xs uppercase tracking-wider">Served by</th>
                       <th className="py-4 px-4 text-left font-semibold text-gray-700 text-xs uppercase tracking-wider">Amount Paid</th>
                       <th className="py-4 px-4 text-left font-semibold text-gray-700 text-xs uppercase tracking-wider">Balance</th>
@@ -1028,6 +1547,7 @@ export default function Orders() {
                       const hasMultipleItems = order.items.length > 1;
                       const orderStatusConfig = STATUS_COLORS[order.order_status] || STATUS_COLORS.pending;
                       const paymentStatusConfig = PAYMENT_STATUS_COLORS[order.payment_status] || PAYMENT_STATUS_COLORS.pending;
+                      const daysSinceOrder = calculateDaysSince(order.created_at);
 
                       return (
                         <tr key={order.id} className="hover:bg-gray-50 transition-colors duration-150">
@@ -1110,6 +1630,13 @@ export default function Orders() {
                           </td>
 
                           <td className="px-4 py-4">
+                            <div className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${daysSinceOrder > 7 ? 'bg-red-100 text-red-800' : 'bg-gray-100 text-gray-800'}`}>
+                              <Clock className="w-3 h-3 mr-1" />
+                              {daysSinceOrder}d
+                            </div>
+                          </td>
+
+                          <td className="px-4 py-4">
                             <div className="font-semibold text-blue-900 text-xs">
                               {order.created_by?.first_name || 'Unknown'}
                             </div>
@@ -1134,7 +1661,7 @@ export default function Orders() {
                           <td className="py-4 px-4">
                             <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${orderStatusConfig.text} ${orderStatusConfig.bg}`}>
                               <orderStatusConfig.icon className="w-3 h-3 mr-1" />
-                              {order.order_status}
+                              {order.order_status === 'Delivered_picked' ? 'Delivered' : order.order_status}
                             </span>
                           </td>
                           <td className="px-4 py-4">
@@ -1146,6 +1673,18 @@ export default function Orders() {
 
                           <td className="px-4 py-4">
                             <div className="flex items-center justify-start space-x-2">
+                              {/* SMS Button for individual orders */}
+                              <button
+                                onClick={() => {
+                                  setSelectedOrders(new Set([order.id]));
+                                  setShowSMSModal(true);
+                                }}
+                                className="p-2 text-green-600 hover:bg-green-100 rounded-lg transition-colors duration-200"
+                                title="Send SMS"
+                              >
+                                <Send className="w-4 h-4" />
+                              </button>
+
                               {order.payment_status !== 'completed' && (
                                 <button
                                   onClick={() => openPaymentModal(order)}
@@ -1275,6 +1814,15 @@ export default function Orders() {
           )}
         </div>
       </div>
+
+      {/* SMS Dialog Modal */}
+      {showSMSModal && (
+        <SMSDialogModal
+          selectedOrders={selectedOrderObjects}
+          onSend={sendBulkSMS}
+          onClose={() => setShowSMSModal(false)}
+        />
+      )}
 
       {/* Edit Order Modal */}
       {showEditModal && currentOrder && (
@@ -1451,14 +1999,15 @@ export default function Orders() {
               </button>
             </div>
             <div className="p-6">
-              <div id="receiptContent" className="bg-white p-4 border border-gray-300">
-                <div className="text-center mb-4">
+              <div id="receiptContent" className="bg-white">
+                <div className="header text-center mb-4">
                   <h3 className="text-lg font-bold">CLEAN PAGE LAUNDRY</h3>
-                  <p className="text-sm text-gray-600 mt-1">Clean clothes, happy hearts — thank you for coming!</p>
+                  <p className="text-sm text-gray-600 mt-1">Clean clothes, happy hearts</p>
+                  <p className="text-xs text-gray-500 mt-1">Thank you for coming!</p>
                 </div>
 
-                <div className="border-t border-b border-gray-300 py-3 mb-3">
-                  <div className="flex justify-between mb-2">
+                <div className="section">
+                  <div className="flex justify-between mb-1">
                     <span className="font-medium">Order Code:</span>
                     <span>{currentOrder.uniquecode}</span>
                   </div>
@@ -1468,47 +2017,53 @@ export default function Orders() {
                   </div>
                 </div>
 
-                <div className="mb-4">
-                  <h4 className="font-medium mb-2">Customer Details:</h4>
+                <div className="section">
+                  <h4 className="font-medium mb-1">Customer Details:</h4>
                   <p className="text-sm">{currentOrder.customer.name}</p>
                   <p className="text-sm text-gray-600">{currentOrder.customer.phone}</p>
                 </div>
 
-                <div className="mb-4">
-                  <h4 className="font-medium mb-2">Order Summary:</h4>
-                  <div className="space-y-2">
-                    {currentOrder.items.map((item, index) => (
-                      <div key={index} className="flex justify-between text-sm">
-                        <span>
-                          {item.itemname || 'Item'} ({formatServiceType(item.servicetype)})
-                        </span>
-                        <span>{formatCurrency(item.unit_price)}</span>
-                      </div>
-                    ))}
-                  </div>
+                <div className="section">
+                  <h4 className="font-medium mb-1">Order Summary:</h4>
+                  <table className="items-table">
+                    <tbody>
+                      {currentOrder.items.map((item, index) => (
+                        <tr key={index}>
+                          <td className="item-name">
+                            {item.itemname ?
+                              (item.itemname.length > 20 ? item.itemname.substring(0, 20) + '...' : item.itemname)
+                              : 'Item'}
+                          </td>
+                          <td className="text-right">{formatCurrency(item.unit_price)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
 
-                <div className="border-t border-gray-300 pt-3 space-y-2">
-                  <div className="flex justify-between font-medium">
-                    <span>Total Amount:</span>
+                <div className="divider"></div>
+
+                <div className="space-y-1">
+                  <div className="flex justify-between">
+                    <span>Subtotal:</span>
                     <span>{formatCurrency(currentOrder.total_price)}</span>
                   </div>
                   <div className="flex justify-between">
                     <span>Amount Paid:</span>
                     <span>{formatCurrency(currentOrder.amount_paid)}</span>
                   </div>
-                  <div className="flex justify-between font-bold border-t border-gray-300 pt-2">
+                  <div className="flex justify-between font-bold">
                     <span>Balance:</span>
                     <span>{formatCurrency(currentOrder.balance)}</span>
                   </div>
-                  <div className="flex justify-between font-bold border-t border-gray-300 pt-2">
-                    <span>Served By:</span>
-                    <span>{currentOrder.created_by?.email || 'Unknown'}</span>
-                  </div>
-                  <div className="text-sm flex flex-row justify-between m-2">
-                    <p>Contact</p>
-                    <p>0705588354</p>
-                  </div>
+                </div>
+
+                <div className="divider"></div>
+
+                <div className="text-center mt-4">
+                  <p className="text-sm font-medium">Served By: {getUserFullName(currentOrder)}</p>
+                  <p className="text-xs text-gray-500 mt-1">Contact: 0705588354</p>
+                  <p className="text-xs text-gray-500 mt-1">Thank you for your business!</p>
                 </div>
               </div>
 

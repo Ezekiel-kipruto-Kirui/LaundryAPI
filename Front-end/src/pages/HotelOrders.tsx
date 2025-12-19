@@ -2,8 +2,9 @@ import { useState, useCallback, useEffect } from "react";
 import { toast } from "sonner";
 import { API_BASE_URL } from "@/services/url";
 import { getAccessToken, getUserData, isAdmin } from "@/utils/auth";
-import { HotelOrderItem, FoodItem } from "@/services/types";
+import { HotelOrderItem, FoodItem, HotelOrder, User } from "@/services/types";
 import { exportToCSV, exportToJSON } from "@/lib/exportUtils";
+import { ROUTES } from '@/services/Routes'
 
 // Import Lucide React icons
 import {
@@ -29,7 +30,11 @@ import {
   CreditCard,
   Users,
   Eye,
-  ShoppingBag
+  ShoppingBag,
+  ListOrdered,
+  Receipt,
+  Save,
+  ShoppingCart
 } from "lucide-react";
 
 // Define the URLs
@@ -40,6 +45,9 @@ const FOOD_ITEMS_URL = `${API_BASE_URL}/Hotel/food-items/`;
 // Helper function to get auth headers
 const getAuthHeaders = () => {
   const token = getAccessToken();
+  if (!token) {
+    throw new Error("No access token found");
+  }
   return {
     "Authorization": `Bearer ${token}`,
     "Content-Type": "application/json"
@@ -52,15 +60,71 @@ interface DateRange {
 }
 
 interface CreateEditOrderItemData {
-  food_item_id: number;
+  food_item: number;
   quantity: number;
   price: string;
   name?: string;
   oncredit: boolean;
 }
 
-// API functions
-const fetchOrders = async (pageNumber: number, dateFilter?: DateRange): Promise<{ items: any[], count: number }> => {
+interface OrderFormData {
+  items: CreateEditOrderItemData[];
+  customer_name?: string;
+  oncredit: boolean;
+}
+
+// Helper functions for safe property access
+const getFoodItemId = (item: HotelOrderItem | FoodItem | number): number => {
+  if (typeof item === 'number') return item;
+  if ('id' in item) return item.id;
+  return 0;
+};
+
+const getFoodItemObject = (item: HotelOrderItem): FoodItem | null => {
+  if (item.food_item && typeof item.food_item === 'object') {
+    return item.food_item as FoodItem;
+  }
+  return null;
+};
+
+// Extended HotelOrderItem type with additional properties from server response
+interface ExtendedHotelOrderItem extends Omit<HotelOrderItem, 'created_at' | 'total_price'> {
+  _order?: HotelOrder;
+  _created_by_email?: string;
+  _created_by?: User | number;
+  _created_at?: string;
+  total_price?: any; // From server response
+  created_at?: any; // From server response
+}
+
+// API functions with authentication handling
+const createOrder = async (): Promise<HotelOrder> => {
+  const response = await fetch(ORDERS_URL, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+    body: JSON.stringify({}),
+  });
+
+  if (response.status === 401) {
+    window.location.href = "/login";
+    throw new Error("Authentication required");
+  }
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    const errorMessage = errorData.detail || errorData.message ||
+      errorData.error || JSON.stringify(errorData) || 'Failed to create order';
+    throw new Error(errorMessage);
+  }
+
+  return response.json();
+};
+
+const fetchOrders = async (pageNumber: number, dateFilter?: DateRange): Promise<{
+  items: HotelOrder[],
+  count: number,
+  flattenedOrderItems: ExtendedHotelOrderItem[]
+}> => {
   let url = `${ORDERS_URL}?page=${pageNumber}`;
 
   if (dateFilter?.start_date) {
@@ -72,76 +136,65 @@ const fetchOrders = async (pageNumber: number, dateFilter?: DateRange): Promise<
 
   const response = await fetch(url, { headers: getAuthHeaders() });
 
+  if (response.status === 401) {
+    window.location.href = ROUTES.login;
+    throw new Error("Authentication required");
+  }
+
   if (!response.ok) {
     throw new Error(`Failed to fetch orders: ${response.status}`);
   }
 
   const apiData = await response.json();
 
+  let orders: HotelOrder[] = [];
+  let totalCount = 0;
+
   // Handle pagination response from Django REST Framework
   if (apiData.results) {
-    return {
-      items: apiData.results,
-      count: apiData.count || 0
-    };
+    orders = apiData.results as HotelOrder[];
+    totalCount = apiData.count || 0;
   } else if (apiData.data) {
-    return {
-      items: apiData.data,
-      count: apiData.totalItems || apiData.data.length
-    };
+    orders = apiData.data as HotelOrder[];
+    totalCount = apiData.totalItems || apiData.data.length;
   } else if (Array.isArray(apiData)) {
-    return { items: apiData, count: apiData.length };
+    orders = apiData as HotelOrder[];
+    totalCount = apiData.length;
   }
 
-  return { items: [], count: 0 };
-};
-
-const fetchOrderItems = async (pageNumber: number, dateFilter?: DateRange): Promise<{ items: HotelOrderItem[], count: number }> => {
-  let url = `${ORDER_ITEMS_URL}?page=${pageNumber}`;
-
-  if (dateFilter?.start_date) {
-    url += `&start_date=${dateFilter.start_date}`;
-  }
-  if (dateFilter?.end_date) {
-    url += `&end_date=${dateFilter.end_date}`;
-  }
-
-  const response = await fetch(url, { headers: getAuthHeaders() });
-
-  if (!response.ok) {
-    let errorMessage = `HTTP error! status: ${response.status}`;
-    try {
-      const errorData = await response.json();
-      errorMessage = errorData.detail || errorData.message || errorMessage;
-    } catch {
-      // If can't parse JSON, use default message
+  // Flatten order items and add order info to each item
+  const flattenedOrderItems: ExtendedHotelOrderItem[] = [];
+  orders.forEach(order => {
+    if (order.order_items && Array.isArray(order.order_items)) {
+      order.order_items.forEach(item => {
+        // Create a new item with order info attached
+        const enrichedItem: ExtendedHotelOrderItem = {
+          ...item,
+          // Add order reference and created_by info
+          _order: order,
+          _created_by_email: (order as any).created_by_email,
+          _created_by: order.created_by,
+          _created_at: order.created_at
+        };
+        flattenedOrderItems.push(enrichedItem);
+      });
     }
-    throw new Error(`Failed to fetch order items: ${errorMessage}`);
-  }
+  });
 
-  const apiData = await response.json();
-  console.log('Order Items API Response:', apiData); // Debug log
-
-  // Handle pagination response from Django REST Framework
-  if (apiData.results) {
-    return {
-      items: apiData.results as HotelOrderItem[],
-      count: apiData.count || 0
-    };
-  } else if (apiData.data) {
-    return {
-      items: apiData.data as HotelOrderItem[],
-      count: apiData.totalItems || apiData.data.length
-    };
-  } else if (Array.isArray(apiData)) {
-    return { items: apiData as HotelOrderItem[], count: apiData.length };
-  }
-
-  return { items: [], count: 0 };
+  return {
+    items: orders,
+    count: totalCount,
+    flattenedOrderItems: flattenedOrderItems
+  };
 };
 
 const fetchFoodItems = async (): Promise<FoodItem[]> => {
   const response = await fetch(FOOD_ITEMS_URL, { headers: getAuthHeaders() });
+
+  if (response.status === 401) {
+    window.location.href = ROUTES.login;
+    throw new Error("Authentication required");
+  }
 
   if (!response.ok) {
     throw new Error(`Failed to fetch food items: ${response.status}`);
@@ -151,38 +204,74 @@ const fetchFoodItems = async (): Promise<FoodItem[]> => {
   return Array.isArray(data) ? data : (data.results || data.data || []);
 };
 
-const createOrUpdateOrderItem = async (
-  data: CreateEditOrderItemData,
-  itemId?: number
+const createOrderItem = async (
+  orderId: number,
+  data: CreateEditOrderItemData
 ): Promise<HotelOrderItem> => {
-  const url = itemId
-    ? `${ORDER_ITEMS_URL}${itemId}/`
-    : ORDER_ITEMS_URL;
-
-  const method = itemId ? 'PUT' : 'POST';
-
-  // Format the data properly for the API - IMPORTANT FIX
+  // Format the data properly for the API
   const formattedData = {
-    food_item_id: data.food_item_id,
+    order: orderId,
+    food_item: data.food_item,
     quantity: parseInt(data.quantity.toString()) || 1,
     price: parseFloat(data.price) || 0,
-    name: data.oncredit ? (data.name || "") : null, // Send null instead of empty string
+    name: data.oncredit ? (data.name || "") : null,
     oncredit: Boolean(data.oncredit)
   };
 
-  console.log('Sending data to API:', formattedData);
+  console.log('Creating order item with data:', formattedData);
 
-  const response = await fetch(url, {
-    method,
+  const response = await fetch(ORDER_ITEMS_URL, {
+    method: 'POST',
     headers: getAuthHeaders(),
     body: JSON.stringify(formattedData),
   });
 
+  if (response.status === 401) {
+    window.location.href = "/login";
+    throw new Error("Authentication required");
+  }
+
   if (!response.ok) {
     const errorData = await response.json();
-    console.error('API Error Response:', errorData); // Debug log
+    console.error('API Error Response:', errorData);
     const errorMessage = errorData.detail || errorData.message ||
-      errorData.error || JSON.stringify(errorData) || `Failed to ${itemId ? 'update' : 'create'} order item`;
+      errorData.error || JSON.stringify(errorData) || 'Failed to create order item';
+    throw new Error(errorMessage);
+  }
+
+  return response.json();
+};
+
+const updateOrderItem = async (
+  itemId: number,
+  data: CreateEditOrderItemData
+): Promise<HotelOrderItem> => {
+  const formattedData = {
+    food_item: data.food_item,
+    quantity: parseInt(data.quantity.toString()) || 1,
+    price: parseFloat(data.price) || 0,
+    name: data.oncredit ? (data.name || "") : null,
+    oncredit: Boolean(data.oncredit)
+  };
+
+  console.log('Updating order item with data:', formattedData);
+
+  const response = await fetch(`${ORDER_ITEMS_URL}${itemId}/`, {
+    method: 'PUT',
+    headers: getAuthHeaders(),
+    body: JSON.stringify(formattedData),
+  });
+
+  if (response.status === 401) {
+    window.location.href = ROUTES.login;
+    throw new Error("Authentication required");
+  }
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    console.error('API Error Response:', errorData);
+    const errorMessage = errorData.detail || errorData.message ||
+      errorData.error || JSON.stringify(errorData) || 'Failed to update order item';
     throw new Error(errorMessage);
   }
 
@@ -195,14 +284,76 @@ const deleteOrderItem = async (itemId: number): Promise<void> => {
     headers: getAuthHeaders(),
   });
 
+  if (response.status === 401) {
+    window.location.href = ROUTES.login;
+    throw new Error("Authentication required");
+  }
+
   if (!response.ok) {
     throw new Error('Failed to delete order item');
   }
 };
 
+const deleteOrder = async (orderId: number): Promise<void> => {
+  const response = await fetch(`${ORDERS_URL}${orderId}/`, {
+    method: 'DELETE',
+    headers: getAuthHeaders(),
+  });
+
+  if (response.status === 401) {
+    window.location.href = "/login";
+    throw new Error("Authentication required");
+  }
+
+  if (!response.ok) {
+    throw new Error('Failed to delete order');
+  }
+};
+
+// Fetch order summary
+const fetchOrderSummary = async (dateFilter?: DateRange) => {
+  let url = `${ORDERS_URL}summary/`;
+
+  if (dateFilter?.start_date && dateFilter?.end_date) {
+    url += `?start_date=${dateFilter.start_date}&end_date=${dateFilter.end_date}`;
+  }
+
+  const response = await fetch(url, { headers: getAuthHeaders() });
+
+  if (response.status === 401) {
+    window.location.href = "/login";
+    throw new Error("Authentication required");
+  }
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch order summary: ${response.status}`);
+  }
+
+  return response.json();
+};
+
+// Helper function to extract name from email
+const extractNameFromEmail = (email: string): string => {
+  if (!email) return "User";
+
+  const emailParts = email.split('@')[0];
+  if (!emailParts) return "User";
+
+  // Try to split by common separators
+  const nameParts = emailParts.split(/[\._-]/);
+  if (nameParts.length > 0) {
+    // Capitalize first letter
+    const firstName = nameParts[0].charAt(0).toUpperCase() + nameParts[0].slice(1).toLowerCase();
+    return firstName;
+  }
+
+  // Just return the email username if no separators
+  return emailParts.charAt(0).toUpperCase() + emailParts.slice(1);
+};
+
 export default function HotelOrderItems() {
-  const [orders, setOrders] = useState<any[]>([]);
-  const [orderItems, setOrderItems] = useState<HotelOrderItem[]>([]);
+  const [orders, setOrders] = useState<HotelOrder[]>([]);
+  const [orderItems, setOrderItems] = useState<ExtendedHotelOrderItem[]>([]);
   const [foodItems, setFoodItems] = useState<FoodItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -210,24 +361,36 @@ export default function HotelOrderItems() {
   const [totalPages, setTotalPages] = useState(1);
   const [totalItems, setTotalItems] = useState(0);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [showDeleteOrderModal, setShowDeleteOrderModal] = useState(false);
   const [showCreateEditModal, setShowCreateEditModal] = useState(false);
   const [showCreditModal, setShowCreditModal] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [itemToDelete, setItemToDelete] = useState<number | null>(null);
-  const [currentItem, setCurrentItem] = useState<HotelOrderItem | null>(null);
-  const [formData, setFormData] = useState<CreateEditOrderItemData>({
-    food_item_id: 0,
-    quantity: 1,
-    price: "0.00",
-    name: "",
+  const [orderToDelete, setOrderToDelete] = useState<number | null>(null);
+  const [currentItem, setCurrentItem] = useState<ExtendedHotelOrderItem | null>(null);
+  const [formData, setFormData] = useState<OrderFormData>({
+    items: [{
+      food_item: 0,
+      quantity: 1,
+      price: "0.00",
+      oncredit: false
+    }],
+    customer_name: "",
     oncredit: false
   });
+  const [currentOrder, setCurrentOrder] = useState<HotelOrder | null>(null);
   const [dateRange, setDateRange] = useState<DateRange>({
     start_date: "",
     end_date: "",
   });
   const [exportDropdownOpen, setExportDropdownOpen] = useState(false);
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+  const [summary, setSummary] = useState({
+    total_orders: 0,
+    total_revenue: 0,
+    credit_orders_count: 0,
+    credit_orders_value: 0
+  });
 
   // Get user data for permissions
   const currentUser = getUserData();
@@ -241,8 +404,50 @@ export default function HotelOrderItems() {
     }
   }, []);
 
-  // Fetch data function - FIXED
+  // Get created by info for an order item
+  const getCreatedByInfo = useCallback((item: ExtendedHotelOrderItem): string => {
+    // Check if we have the extended properties
+    if (item._created_by_email) {
+      return extractNameFromEmail(item._created_by_email);
+    }
+
+    // Check if we have the order object
+    if (item._order) {
+      const order = item._order;
+
+      // Check for email in order object (from your backend response)
+      if ((order as any).created_by_email) {
+        return extractNameFromEmail((order as any).created_by_email);
+      }
+
+      // Check for full user object
+      if (order.created_by && typeof order.created_by === 'object') {
+        const user = order.created_by as User;
+        if (user.first_name && user.first_name.trim() !== "") {
+          return user.first_name;
+        }
+        if (user.email) {
+          return extractNameFromEmail(user.email);
+        }
+      }
+
+      // Check for created_by_username as fallback
+      if ((order as any).created_by_username) {
+        return (order as any).created_by_username;
+      }
+    }
+
+    return "Unknown";
+  }, []);
+
+  // Fetch data function - UPDATED to use orders endpoint
   const fetchData = useCallback(async () => {
+    const token = getAccessToken();
+    if (!token) {
+      window.location.href = "/login";
+      return;
+    }
+
     setLoading(true);
     setError(null);
 
@@ -257,39 +462,46 @@ export default function HotelOrderItems() {
         end_date: dateRange.end_date || today
       };
 
-      console.log('Fetching data with date range:', initialDateRange);
-
-      // Fetch all data in parallel
-      const [orderItemsData, foodItemsData] = await Promise.all([
-        fetchOrderItems(page, initialDateRange),
+      // Fetch orders (which includes order items) and food items in parallel
+      const [ordersData, foodItemsData, summaryData] = await Promise.all([
+        fetchOrders(page, initialDateRange),
         fetchFoodItems(),
+        fetchOrderSummary(initialDateRange),
       ]);
 
-      setOrderItems(orderItemsData.items);
+      setOrders(ordersData.items);
+      setOrderItems(ordersData.flattenedOrderItems);
       setFoodItems(foodItemsData);
 
-      // Calculate total pages based on count from API
-      const itemsPerPage = 10; // This should match your PAGE_SIZE setting
-      const totalCount = orderItemsData.count || orderItemsData.items.length;
-      const calculatedTotalPages = Math.ceil(totalCount / itemsPerPage);
+      // Update summary with API data and calculate credit orders
+      const creditOrders = ordersData.flattenedOrderItems.filter(item => item.oncredit);
+      const creditValue = creditOrders.reduce((sum, item) => {
+        // Use total_price directly from API (it should already include quantity calculation)
+        const price = item.total_price ? parseFloat(item.total_price.toString()) : 0;
+        return sum + price;
+      }, 0);
 
-      console.log('Pagination data:', {
-        totalCount,
-        itemsPerPage,
-        currentPage: page,
-        calculatedTotalPages,
-        items: orderItemsData.items.length
+      setSummary({
+        total_orders: summaryData.total_orders || 0,
+        total_revenue: summaryData.total_revenue || 0,
+        credit_orders_count: creditOrders.length,
+        credit_orders_value: creditValue
       });
+
+      // Calculate total pages based on count from API
+      const itemsPerPage = 10;
+      const totalCount = ordersData.count || ordersData.flattenedOrderItems.length;
+      const calculatedTotalPages = Math.ceil(totalCount / itemsPerPage);
 
       setTotalPages(calculatedTotalPages);
       setTotalItems(totalCount);
 
-      // Also fetch orders if needed
-      const ordersData = await fetchOrders(page, initialDateRange);
-      setOrders(ordersData.items);
-
     } catch (err: any) {
       console.error('Error fetching data:', err);
+      if (err.message.includes("Authentication required")) {
+        window.location.href = "/login";
+        return;
+      }
       setError(`Failed to fetch data: ${err.message}`);
     } finally {
       setLoading(false);
@@ -301,42 +513,100 @@ export default function HotelOrderItems() {
     fetchData();
   }, [fetchData]);
 
-  // Handle form input changes
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
-    const { name, value } = e.target;
+  // Add new item to form
+  const addItemToForm = () => {
+    setFormData(prev => ({
+      ...prev,
+      items: [...prev.items, {
+        food_item: 0,
+        quantity: 1,
+        price: "0.00",
+        oncredit: prev.oncredit,
+        name: prev.oncredit ? prev.customer_name : ""
+      }]
+    }));
+  };
 
-    if (name === 'food_item_id') {
+  // Remove item from form
+  const removeItemFromForm = (index: number) => {
+    if (formData.items.length > 1) {
+      setFormData(prev => ({
+        ...prev,
+        items: prev.items.filter((_, i) => i !== index)
+      }));
+    }
+  };
+
+  // Handle form input changes for individual items
+  const handleItemInputChange = (index: number, e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+    const { name, value } = e.target;
+    const updatedItems = [...formData.items];
+
+    if (name === 'food_item') {
       const foodItemId = parseInt(value);
       const selectedFoodItem = foodItems.find(item => item.id === foodItemId);
 
-      setFormData({
-        ...formData,
-        [name]: foodItemId,
+      updatedItems[index] = {
+        ...updatedItems[index],
+        food_item: foodItemId,
         price: selectedFoodItem?.price?.toString() || "0.00"
-      });
+      };
     } else if (name === 'quantity') {
-      setFormData({
-        ...formData,
+      updatedItems[index] = {
+        ...updatedItems[index],
         [name]: parseInt(value) || 1
-      });
+      };
     } else if (name === 'oncredit') {
       const isChecked = (e.target as HTMLInputElement).checked;
-      setFormData({
-        ...formData,
+      updatedItems[index] = {
+        ...updatedItems[index],
         [name]: isChecked
-      });
-      // If credit is disabled, clear the name field
-      if (!isChecked) {
-        setFormData(prev => ({
-          ...prev,
-          name: ""
-        }));
-      }
+      };
     } else {
-      setFormData({
-        ...formData,
+      updatedItems[index] = {
+        ...updatedItems[index],
         [name]: value
+      };
+    }
+
+    setFormData(prev => ({
+      ...prev,
+      items: updatedItems
+    }));
+
+    // Clear error for this field
+    if (formErrors[name]) {
+      setFormErrors({
+        ...formErrors,
+        [name]: ''
       });
+    }
+  };
+
+  // Handle order-level changes
+  const handleOrderInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { name, value, type } = e.target;
+
+    if (type === 'checkbox') {
+      const isChecked = (e.target as HTMLInputElement).checked;
+      setFormData(prev => ({
+        ...prev,
+        [name]: isChecked,
+        items: prev.items.map(item => ({
+          ...item,
+          oncredit: isChecked,
+          name: isChecked ? prev.customer_name : ""
+        }))
+      }));
+    } else {
+      setFormData(prev => ({
+        ...prev,
+        [name]: value,
+        items: prev.items.map(item => ({
+          ...item,
+          name: prev.oncredit ? value : ""
+        }))
+      }));
     }
 
     // Clear error for this field
@@ -352,20 +622,24 @@ export default function HotelOrderItems() {
   const validateForm = (): boolean => {
     const errors: Record<string, string> = {};
 
-    if (!formData.food_item_id || formData.food_item_id === 0) {
-      errors.food_item_id = "Please select a food item";
-    }
+    // Validate each item
+    formData.items.forEach((item, index) => {
+      if (!item.food_item || item.food_item === 0) {
+        errors[`item_${index}_food_item`] = "Please select a food item";
+      }
 
-    if (!formData.quantity || formData.quantity <= 0) {
-      errors.quantity = "Quantity must be greater than 0";
-    }
+      if (!item.quantity || item.quantity <= 0) {
+        errors[`item_${index}_quantity`] = "Quantity must be greater than 0";
+      }
 
-    if (!formData.price || parseFloat(formData.price) <= 0) {
-      errors.price = "Price must be greater than 0";
-    }
+      if (!item.price || parseFloat(item.price) <= 0) {
+        errors[`item_${index}_price`] = "Price must be greater than 0";
+      }
+    });
 
-    if (formData.oncredit && (!formData.name || formData.name.trim() === "")) {
-      errors.name = "Customer name is required for credit orders";
+    // Validate order-level fields
+    if (formData.oncredit && (!formData.customer_name || formData.customer_name.trim() === "")) {
+      errors.customer_name = "Customer name is required for credit orders";
     }
 
     setFormErrors(errors);
@@ -373,29 +647,40 @@ export default function HotelOrderItems() {
   };
 
   // Open create dialog
-  const handleCreateOrderItem = () => {
+  const handleCreateOrder = () => {
+    // Reset form data without creating order yet
     setFormData({
-      food_item_id: 0,
-      quantity: 1,
-      price: "0.00",
-      name: "",
+      items: [{
+        food_item: 0,
+        quantity: 1,
+        price: "0.00",
+        oncredit: false
+      }],
+      customer_name: "",
       oncredit: false
     });
     setCurrentItem(null);
+    setCurrentOrder(null);
     setIsEditing(false);
     setFormErrors({});
     setShowCreateEditModal(true);
   };
 
   // Open edit dialog
-  const handleEditOrderItem = (item: HotelOrderItem) => {
-    console.log('Editing item:', item); // Debug log
+  const handleEditOrderItem = (item: ExtendedHotelOrderItem) => {
+    console.log('Editing item:', item);
+
+    const foodItemId = getFoodItemId(item.food_item);
 
     setFormData({
-      food_item_id: item.food_item?.id || 0,
-      quantity: item.quantity || 1,
-      price: item.price?.toString() || "0.00",
-      name: item.name || "",
+      items: [{
+        food_item: foodItemId,
+        quantity: item.quantity || 1,
+        price: item.price?.toString() || "0.00",
+        name: item.name || "",
+        oncredit: item.oncredit || false
+      }],
+      customer_name: item.name || "",
       oncredit: item.oncredit || false
     });
     setCurrentItem(item);
@@ -405,30 +690,64 @@ export default function HotelOrderItems() {
   };
 
   // Handle save (create/update)
-  const handleSaveOrderItem = async () => {
+  const handleSaveOrder = async () => {
+    const token = getAccessToken();
+    if (!token) {
+      window.location.href = "/login";
+      return;
+    }
+
     if (!validateForm()) {
       toast.error("Please fix the form errors");
       return;
     }
 
     try {
-      const result = await createOrUpdateOrderItem(
-        formData,
-        isEditing && currentItem ? currentItem.id : undefined
-      );
+      if (isEditing && currentItem) {
+        // Update existing item
+        const result = await updateOrderItem(currentItem.id, formData.items[0]);
+        console.log('Update successful, result:', result);
+        toast.success('Order item updated successfully!');
+      } else {
+        // Create new order first
+        const newOrder = await createOrder();
+        setCurrentOrder(newOrder);
 
-      console.log('Save successful, result:', result); // Debug log
-      toast.success(`Order item ${isEditing ? 'updated' : 'created'} successfully!`);
+        // Then add all items to the order
+        const promises = formData.items.map(item =>
+          createOrderItem(newOrder.id, {
+            ...item,
+            name: formData.oncredit ? formData.customer_name : ""
+          })
+        );
+
+        await Promise.all(promises);
+        console.log('Create successful for all items');
+        toast.success(`Order created successfully with ${formData.items.length} item(s)!`);
+      }
+
       fetchData();
       setShowCreateEditModal(false);
+      setCurrentOrder(null);
+      setCurrentItem(null);
     } catch (err: any) {
       console.error('Save error:', err);
-      toast.error(`Failed to ${isEditing ? 'update' : 'create'} order item: ${err.message}`);
+      if (err.message.includes("Authentication required")) {
+        window.location.href = "/login";
+        return;
+      }
+      toast.error(`Failed to ${isEditing ? 'update' : 'create'} order: ${err.message}`);
     }
   };
 
-  // Handle delete
+  // Handle delete order item
   const handleDeleteOrderItem = async () => {
+    const token = getAccessToken();
+    if (!token) {
+      window.location.href = "/login";
+      return;
+    }
+
     if (!itemToDelete) return;
 
     try {
@@ -438,6 +757,35 @@ export default function HotelOrderItems() {
       setShowDeleteModal(false);
       setItemToDelete(null);
     } catch (err: any) {
+      if (err.message.includes("Authentication required")) {
+        window.location.href = "/login";
+        return;
+      }
+      toast.error(`Delete failed: ${err.message}`);
+    }
+  };
+
+  // Handle delete entire order
+  const handleDeleteOrder = async () => {
+    const token = getAccessToken();
+    if (!token) {
+      window.location.href = "/login";
+      return;
+    }
+
+    if (!orderToDelete) return;
+
+    try {
+      await deleteOrder(orderToDelete);
+      toast.success('Order deleted successfully!');
+      fetchData();
+      setShowDeleteOrderModal(false);
+      setOrderToDelete(null);
+    } catch (err: any) {
+      if (err.message.includes("Authentication required")) {
+        window.location.href = "/login";
+        return;
+      }
       toast.error(`Delete failed: ${err.message}`);
     }
   };
@@ -452,19 +800,18 @@ export default function HotelOrderItems() {
     return numPrice.toFixed(2);
   };
 
-  // Get total price for an item
-  const getTotalPrice = (item: HotelOrderItem): string => {
-    if (item.total_price) {
+  // Get total price for an item - FIXED: Don't multiply price * quantity, use total_price from API
+  const getTotalPrice = (item: ExtendedHotelOrderItem): string => {
+    // Use the total_price provided by API (it should already be calculated)
+    if (item.total_price !== undefined && item.total_price !== null) {
       return formatPrice(item.total_price);
     }
-    // Calculate from quantity and unit price
-    const unitPrice = typeof item.price === 'string' ? parseFloat(item.price) : Number(item.price) || 0;
-    const total = (item.quantity || 0) * unitPrice;
-    return total.toFixed(2);
+    return "0.00";
   };
 
   // Format date and time
-  const formatDateTime = (item: HotelOrderItem): string => {
+  const formatDateTime = (item: ExtendedHotelOrderItem): string => {
+    // Use created_at from the item itself first
     if (item.created_at) {
       try {
         const date = new Date(item.created_at);
@@ -481,110 +828,73 @@ export default function HotelOrderItems() {
       }
     }
 
-    return "N/A";
-  };
-
-  // Get served by user info - FIXED
-  const getServedBy = (item: HotelOrderItem): string => {
-    console.log('Getting served by for item:', item); // Debug log
-
-    if (item.created_by) {
-      if (typeof item.created_by === 'object' && item.created_by !== null) {
-        const user = item.created_by as any;
-        // Use email instead of username since User type doesn't have username
-        return user.first_name || user.email || "Staff";
-      } else if (typeof item.created_by === 'string') {
-        return item.created_by;
+    // Fall back to order's created_at
+    if (item._created_at) {
+      try {
+        const date = new Date(item._created_at);
+        return date.toLocaleString('en-US', {
+          month: 'short',
+          day: 'numeric',
+          year: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: true
+        });
+      } catch (e) {
+        console.error('Date parsing error:', e);
       }
-    }
-
-    // Fallback: check if user info is nested in food_item
-    if (item.food_item?.created_by) {
-      const foodItemUser = item.food_item.created_by;
-      if (typeof foodItemUser === 'object' && foodItemUser !== null) {
-        return foodItemUser.first_name || foodItemUser.email || "Staff";
-      }
-    }
-
-    return "Staff";
-  };
-
-  // Get food item name - FIXED
-  const getFoodItemName = (item: HotelOrderItem): string => {
-    console.log('Getting food item name for item:', item); // Debug log
-
-    if (item.food_item) {
-      if (typeof item.food_item === 'object' && item.food_item !== null) {
-        // The food_item should directly have a name property
-        return item.food_item.name || "N/A";
-      }
-    }
-
-    // Alternative: check food_item_id if it's an object (fallback)
-    if (item.food_item_id && typeof item.food_item_id === 'object') {
-      const foodItemObj = item.food_item_id as any;
-      return foodItemObj.name || "N/A";
     }
 
     return "N/A";
   };
 
-  // Get food item category - FIXED
-  const getFoodItemCategory = (item: HotelOrderItem): string => {
-    if (item.food_item) {
-      if (typeof item.food_item === 'object' && item.food_item !== null) {
-        if (item.food_item.category && typeof item.food_item.category === 'object') {
-          return item.food_item.category.name || "Uncategorized";
-        }
-      }
+  // Get food item name - FIXED: Use food_item_name from API response
+  const getFoodItemName = (item: ExtendedHotelOrderItem): string => {
+    // Use food_item_name from API response (from your example: "food_item_name": "Chips")
+    if (item.food_item_name) {
+      return item.food_item_name;
     }
+
+    // Fallback to the nested food_item object name property
+    const foodItem = getFoodItemObject(item);
+    if (foodItem?.name) {
+      return foodItem.name;
+    }
+
+    return "N/A";
+  };
+
+  // Get food item category
+  const getFoodItemCategory = (item: ExtendedHotelOrderItem): string => {
+    // Check if we have a food_item object with category
+    const foodItem = getFoodItemObject(item);
+    if (foodItem?.category) {
+      if (typeof foodItem.category === 'object') {
+        return foodItem.category.name || "Uncategorized";
+      }
+      return String(foodItem.category) || "Uncategorized";
+    }
+
+    // If no category information is available, return a default
     return "Uncategorized";
   };
 
-  // Calculate summary statistics
-  const calculateStatistics = () => {
-    const totalValue = orderItems.reduce((sum, item) => sum + parseFloat(getTotalPrice(item)), 0);
-
-    // Get credit orders
-    const creditOrders = orderItems.filter(item => item.oncredit === true);
-    const creditValue = creditOrders.reduce((sum, item) => sum + parseFloat(getTotalPrice(item)), 0);
-
-    const totalOrders = orders.length;
-
-    return {
-      totalOrders,
-      totalValue,
-      creditOrdersCount: creditOrders.length,
-      creditValue,
-    };
-  };
-
-  const stats = calculateStatistics();
-
-  // Get all credit orders grouped by customer
-  const getCreditOrdersByCustomer = () => {
-    const creditOrders = orderItems.filter(item => item.oncredit === true);
-
-    // Group by customer name
-    const grouped: Record<string, HotelOrderItem[]> = {};
-
-    creditOrders.forEach(item => {
-      const customerName = item.name || 'Unknown Customer';
-      if (!grouped[customerName]) {
-        grouped[customerName] = [];
-      }
-      grouped[customerName].push(item);
-    });
-
-    return grouped;
+  // Calculate total for current form
+  const calculateFormTotal = (): string => {
+    const total = formData.items.reduce((sum, item) => {
+      const price = parseFloat(item.price) || 0;
+      const quantity = item.quantity || 0;
+      return sum + (price * quantity);
+    }, 0);
+    return formatPrice(total);
   };
 
   // Export functions
   const handleExportCSV = () => {
     const exportData = orderItems.map(item => ({
-      'Order ID': item.order || 'N/A',
+      'Order ID': typeof item.order === 'object' ? (item.order as any)?.id || 'N/A' : item.order || 'N/A',
       'Date/Time': formatDateTime(item),
-      'Served By': getServedBy(item),
+      'Created By': getCreatedByInfo(item),
       'Food Item': getFoodItemName(item),
       'Category': getFoodItemCategory(item),
       'Quantity': item.quantity || 0,
@@ -607,7 +917,6 @@ export default function HotelOrderItems() {
   const handlePageChange = (newPage: number) => {
     if (newPage >= 1 && newPage <= totalPages) {
       setPage(newPage);
-      // fetchData will be called via useEffect dependency
     }
   };
 
@@ -639,108 +948,109 @@ export default function HotelOrderItems() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50/30 p-4 sm:p-6 lg:p-8">
-      {/* Export and Filter Controls */}
-      <div className="bg-white rounded-2xl shadow-xl border border-gray-200 mb-8 p-6">
-        <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
-          <div className="w-full lg:w-auto">
-            <div className="flex items-center mb-4">
-              <Utensils className="h-6 w-6 text-blue-600 mr-2" />
-              <h1 className="text-2xl font-bold text-gray-900">Hotel Order Items</h1>
+    <div className="w-full px-4 sm:px-6 lg:px-8 py-8">
+      {/* Header Section - Made more responsive */}
+      <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center mb-8 gap-4">
+        <div>
+          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 flex items-center">
+            <div className="mr-3 bg-blue-100 p-2 sm:p-3 rounded-xl">
+              <Receipt className="h-6 w-6 sm:h-8 sm:w-8 text-blue-600" />
             </div>
+            Order Management
+          </h1>
+          <p className="text-gray-600 mt-1 sm:mt-2 text-sm sm:text-base">Manage and track all customer orders</p>
+        </div>
 
-            {/* Date Filter Form */}
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                setPage(1); // Reset to first page when filtering
-                fetchData();
-              }}
-              className="flex flex-col sm:flex-row gap-3 items-start sm:items-center"
-            >
-              <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center w-full">
-                <div className="flex items-center gap-2 bg-gray-50 p-3 rounded-lg border border-gray-200">
-                  <Calendar className="h-4 w-4 text-gray-500" />
-                  <label className="text-sm font-medium text-gray-700 whitespace-nowrap">From:</label>
+        {/* Export and Filter Controls - Made responsive */}
+        <div className="flex flex-col sm:flex-row gap-2 sm:gap-3 w-full lg:w-auto">
+          {/* Date Filter Form */}
+          <div className="bg-white p-2 sm:p-3 rounded-lg border border-gray-200 shadow-sm">
+            <div className="flex flex-col sm:flex-row gap-2 items-start sm:items-center">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 w-full">
+                <div className="flex items-center gap-1 sm:gap-2">
+                  <label className="text-xs sm:text-sm font-medium text-gray-700 whitespace-nowrap">From:</label>
                   <input
                     type="date"
+                    name="start_date"
                     value={dateRange.start_date}
                     onChange={(e) => setDateRange({ ...dateRange, start_date: e.target.value })}
-                    className="px-3 py-2 bg-transparent border-none focus:ring-0 focus:outline-none text-sm min-w-[140px]"
+                    className="px-2 sm:px-3 py-1 sm:py-2 border border-gray-300 rounded-lg text-xs sm:text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 w-full"
                   />
                 </div>
-                <div className="flex items-center gap-2 bg-gray-50 p-3 rounded-lg border border-gray-200">
-                  <Calendar className="h-4 w-4 text-gray-500" />
-                  <label className="text-sm font-medium text-gray-700 whitespace-nowrap">To:</label>
+                <div className="flex items-center gap-1 sm:gap-2">
+                  <label className="text-xs sm:text-sm font-medium text-gray-700 whitespace-nowrap">To:</label>
                   <input
                     type="date"
+                    name="end_date"
                     value={dateRange.end_date}
                     onChange={(e) => setDateRange({ ...dateRange, end_date: e.target.value })}
-                    className="px-3 py-2 bg-transparent border-none focus:ring-0 focus:outline-none text-sm min-w-[140px]"
+                    className="px-2 sm:px-3 py-1 sm:py-2 border border-gray-300 rounded-lg text-xs sm:text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 w-full"
                   />
                 </div>
-                <div className="flex gap-2">
-                  <button
-                    type="submit"
-                    className="bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white px-5 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 flex items-center shadow-md hover:shadow-lg"
-                  >
-                    <Filter className="h-4 w-4 mr-2" />
-                    Apply Filter
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const today = new Date().toISOString().split('T')[0];
-                      const firstDayOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1)
-                        .toISOString()
-                        .split('T')[0];
-                      setDateRange({
-                        start_date: firstDayOfMonth,
-                        end_date: today
-                      });
-                      setPage(1);
-                      fetchData();
-                    }}
-                    className="bg-gradient-to-r from-gray-200 to-gray-300 hover:from-gray-300 hover:to-gray-400 text-gray-800 px-5 py-2.5 rounded-xl text-sm font-medium flex items-center shadow-md hover:shadow-lg"
-                  >
-                    <RotateCw className="h-4 w-4 mr-2" />
-                    Reset
-                  </button>
-                </div>
               </div>
-            </form>
+              <div className="flex gap-1 sm:gap-2 w-full sm:w-auto mt-2 sm:mt-0">
+                <button
+                  onClick={() => {
+                    setPage(1);
+                    fetchData();
+                  }}
+                  className="bg-blue-600 hover:bg-blue-700 text-white px-3 sm:px-4 py-1 sm:py-2 rounded-lg text-xs sm:text-sm font-medium transition duration-200 flex items-center justify-center flex-1 sm:flex-none"
+                >
+                  <Filter className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
+                  Filter
+                </button>
+                <button
+                  onClick={() => {
+                    const today = new Date().toISOString().split('T')[0];
+                    const firstDayOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1)
+                      .toISOString()
+                      .split('T')[0];
+                    setDateRange({
+                      start_date: firstDayOfMonth,
+                      end_date: today
+                    });
+                    setPage(1);
+                    fetchData();
+                  }}
+                  className="bg-gray-300 hover:bg-gray-400 text-gray-800 px-3 sm:px-4 py-1 sm:py-2 rounded-lg text-xs sm:text-sm font-medium flex items-center justify-center flex-1 sm:flex-none"
+                >
+                  <RotateCw className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
+                  Reset
+                </button>
+              </div>
+            </div>
           </div>
 
-          {/* Action Buttons */}
-          <div className="flex flex-col sm:flex-row gap-3 w-full lg:w-auto">
+          {/* Export and Create Order Buttons */}
+          <div className="flex gap-2 sm:gap-3">
             {/* Export Dropdown */}
             <div className="relative">
               <button
                 type="button"
                 onClick={() => setExportDropdownOpen(!exportDropdownOpen)}
-                className="bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 text-white px-5 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 flex items-center shadow-md hover:shadow-lg w-full sm:w-auto"
+                className="bg-green-600 hover:bg-green-700 text-white px-3 sm:px-4 py-1 sm:py-2 rounded-lg text-xs sm:text-sm font-medium transition duration-200 flex items-center"
               >
-                <Download className="h-4 w-4 mr-2" />
-                Export Data
-                <ChevronDown className="h-3 w-3 ml-1" />
+                <Download className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
+                Export
+                <ChevronDown className="h-2 w-2 sm:h-3 sm:w-3 ml-1" />
               </button>
 
               {/* Export Dropdown Menu */}
               {exportDropdownOpen && (
-                <div className="absolute right-0 top-full mt-2 w-48 bg-white rounded-xl shadow-lg border border-gray-200 z-50">
+                <div className="absolute right-0 top-full mt-1 sm:mt-2 w-48 bg-white rounded-lg shadow-lg border border-gray-200 z-10">
                   <div className="p-2">
                     <button
                       onClick={handleExportCSV}
-                      className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-lg flex items-center transition-colors"
+                      className="w-full text-left px-3 sm:px-4 py-2 text-xs sm:text-sm text-gray-700 hover:bg-gray-100 rounded-md flex items-center transition-colors"
                     >
-                      <FileSpreadsheet className="h-4 w-4 text-green-600 mr-2" />
+                      <FileSpreadsheet className="h-3 w-3 sm:h-4 sm:w-4 text-green-600 mr-2" />
                       Export as CSV
                     </button>
                     <button
                       onClick={handleExportJSON}
-                      className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-lg flex items-center transition-colors"
+                      className="w-full text-left px-3 sm:px-4 py-2 text-xs sm:text-sm text-gray-700 hover:bg-gray-100 rounded-md flex items-center transition-colors"
                     >
-                      <FileJson className="h-4 w-4 text-green-600 mr-2" />
+                      <FileJson className="h-3 w-3 sm:h-4 sm:w-4 text-green-600 mr-2" />
                       Export as JSON
                     </button>
                   </div>
@@ -748,263 +1058,192 @@ export default function HotelOrderItems() {
               )}
             </div>
 
-            {/* View Credit Orders Button */}
+            {/* Create Order Button */}
             <button
-              onClick={() => setShowCreditModal(true)}
-              className="bg-gradient-to-r from-purple-600 to-violet-600 hover:from-purple-700 hover:to-violet-700 text-white px-5 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 flex items-center shadow-md hover:shadow-lg w-full sm:w-auto"
+              onClick={handleCreateOrder}
+              className="inline-flex items-center px-3 sm:px-4 py-1 sm:py-2 border border-transparent rounded-lg shadow-sm text-xs sm:text-sm font-medium text-white bg-blue-500 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
             >
-              <Eye className="h-4 w-4 mr-2" />
-              View Credit Orders
-            </button>
-
-            <button
-              onClick={handleCreateOrderItem}
-              className="bg-gradient-to-r from-blue-500 to-cyan-500 hover:from-blue-600 hover:to-cyan-600 text-white px-5 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 flex items-center shadow-md hover:shadow-lg w-full sm:w-auto"
-            >
-              <Plus className="h-4 w-4 mr-2" />
-              Add Order Item
+              <ShoppingCart className="-ml-0.5 mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
+              Create Order
             </button>
           </div>
         </div>
       </div>
 
-      {/* Summary Statistics - Role-based display */}
-      <div className={`grid grid-cols-1 md:grid-cols-${isUserAdmin ? '3' : '2'} gap-6 mb-8`}>
-        <div className="bg-white rounded-2xl shadow-lg border border-gray-100 p-6 hover:shadow-xl transition-shadow duration-300">
-          <div className="flex items-center">
-            <div className="w-12 h-12 bg-gradient-to-br from-blue-100 to-blue-50 rounded-xl flex items-center justify-center mr-4 shadow-sm">
-              <ShoppingBag className="h-6 w-6 text-blue-600" />
-            </div>
-            <div>
-              <p className="text-sm font-medium text-gray-600 uppercase tracking-wide">Total Orders</p>
-              <p className="text-2xl font-bold text-gray-900 mt-1">{stats.totalOrders}</p>
-              <div className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 mt-2">
-                All time orders
+      {/* Summary Cards - Only for admins - Made responsive and removed Average Order Value */}
+      {isUserAdmin && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6 mb-8">
+          {/* Total Orders Card */}
+          <div className="bg-white rounded-xl sm:rounded-2xl shadow-lg border border-gray-100 p-4 sm:p-6">
+            <div className="flex items-center">
+              <div className="w-10 h-10 sm:w-12 sm:h-12 bg-blue-100 rounded-lg sm:rounded-xl flex items-center justify-center mr-3 sm:mr-4">
+                <Receipt className="h-5 w-5 sm:h-6 sm:w-6 text-blue-600" />
+              </div>
+              <div>
+                <p className="text-xs sm:text-sm font-medium text-gray-600">Total Orders</p>
+                <p className="text-xl sm:text-2xl font-bold text-gray-900">{summary.total_orders}</p>
               </div>
             </div>
           </div>
-        </div>
 
-        {/* Only show total value for admins */}
-        {isUserAdmin && (
-          <div className="bg-white rounded-2xl shadow-lg border border-gray-100 p-6 hover:shadow-xl transition-shadow duration-300">
+          {/* Total Revenue Card */}
+          <div className="bg-white rounded-xl sm:rounded-2xl shadow-lg border border-gray-100 p-4 sm:p-6">
             <div className="flex items-center">
-              <div className="w-12 h-12 bg-gradient-to-br from-emerald-100 to-emerald-50 rounded-xl flex items-center justify-center mr-4 shadow-sm">
-                <DollarSign className="h-6 w-6 text-emerald-600" />
+              <div className="w-10 h-10 sm:w-12 sm:h-12 bg-green-100 rounded-lg sm:rounded-xl flex items-center justify-center mr-3 sm:mr-4">
+                <DollarSign className="h-5 w-5 sm:h-6 sm:w-6 text-green-600" />
               </div>
               <div>
-                <p className="text-sm font-medium text-gray-600 uppercase tracking-wide">Total Value</p>
-                <p className="text-2xl font-bold text-gray-900 mt-1">
-                  Ksh {stats.totalValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                <p className="text-xs sm:text-sm font-medium text-gray-600">Total Revenue</p>
+                <p className="text-xl sm:text-2xl font-bold text-gray-900">
+                  Ksh {summary.total_revenue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </p>
-                <div className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800 mt-2">
-                  Revenue Summary
+              </div>
+            </div>
+          </div>
+
+          {/* Credit Orders Card */}
+          <div className="bg-white rounded-xl sm:rounded-2xl shadow-lg border border-gray-100 p-4 sm:p-6">
+            <div className="flex items-center">
+              <div className="w-10 h-10 sm:w-12 sm:h-12 bg-yellow-100 rounded-lg sm:rounded-xl flex items-center justify-center mr-3 sm:mr-4">
+                <CreditCard className="h-5 w-5 sm:h-6 sm:w-6 text-yellow-600" />
+              </div>
+              <div>
+                <p className="text-xs sm:text-sm font-medium text-gray-600">Credit Orders</p>
+                <p className="text-xl sm:text-2xl font-bold text-gray-900">{summary.credit_orders_count}</p>
+                <div className="text-xs text-gray-500 mt-0.5 sm:mt-1">
+                  Ksh {formatPrice(summary.credit_orders_value)} pending
                 </div>
               </div>
             </div>
           </div>
-        )}
-
-        <div className="bg-white rounded-2xl shadow-lg border border-gray-100 p-6 hover:shadow-xl transition-shadow duration-300">
-          <div className="flex items-center">
-            <div className="w-12 h-12 bg-gradient-to-br from-purple-100 to-purple-50 rounded-xl flex items-center justify-center mr-4 shadow-sm">
-              <CreditCard className="h-6 w-6 text-purple-600" />
-            </div>
-            <div>
-              <p className="text-sm font-medium text-gray-600 uppercase tracking-wide">Credit Orders</p>
-              <p className="text-2xl font-bold text-gray-900 mt-1">{stats.creditOrdersCount}</p>
-              <div className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800 mt-2">
-                Ksh {stats.creditValue.toFixed(2)} pending
-              </div>
-            </div>
-          </div>
         </div>
-      </div>
+      )}
 
       {/* Loading and Error States */}
       {loading ? (
-        <div className="text-center p-12 bg-white rounded-2xl shadow-lg border border-gray-100">
-          <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-indigo-600 mx-auto"></div>
-          <p className="text-gray-600 mt-4 text-lg">Loading order items...</p>
-          <p className="text-gray-400 text-sm mt-2">Fetching the latest data...</p>
+        <div className="text-center p-6 sm:p-12 bg-white rounded-xl sm:rounded-2xl shadow-lg border border-gray-100">
+          <div className="animate-spin rounded-full h-10 w-10 sm:h-12 sm:w-12 border-t-2 border-b-2 border-indigo-600 mx-auto"></div>
+          <p className="text-gray-600 mt-3 sm:mt-4 text-sm sm:text-lg">Loading order items...</p>
+          <p className="text-gray-400 text-xs sm:text-sm mt-1 sm:mt-2">Fetching the latest data...</p>
         </div>
       ) : error ? (
-        <div className="text-center p-8 bg-gradient-to-br from-red-50 to-red-100 rounded-2xl border border-red-200 shadow-lg">
-          <div className="w-16 h-16 bg-red-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
-            <AlertTriangle className="h-8 w-8 text-red-600" />
+        <div className="text-center p-4 sm:p-8 bg-gradient-to-br from-red-50 to-red-100 rounded-xl sm:rounded-2xl border border-red-200 shadow-lg">
+          <div className="w-12 h-12 sm:w-16 sm:h-16 bg-red-100 rounded-lg sm:rounded-2xl flex items-center justify-center mx-auto mb-3 sm:mb-4">
+            <AlertTriangle className="h-6 w-6 sm:h-8 sm:w-8 text-red-600" />
           </div>
-          <h3 className="text-xl font-bold text-red-700 mb-2">Error Loading Data</h3>
-          <p className="text-red-600 mb-6">{error}</p>
+          <h3 className="text-lg sm:text-xl font-bold text-red-700 mb-1 sm:mb-2">Error Loading Data</h3>
+          <p className="text-red-600 text-sm sm:text-base mb-4 sm:mb-6">{error}</p>
           <button
             onClick={() => fetchData()}
-            className="bg-red-600 hover:bg-red-700 text-white px-6 py-3 rounded-xl font-medium transition flex items-center mx-auto shadow-md hover:shadow-lg"
+            className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 sm:px-6 sm:py-3 rounded-lg sm:rounded-xl font-medium transition flex items-center mx-auto shadow-md hover:shadow-lg text-sm sm:text-base"
           >
-            <RotateCw className="h-4 w-4 mr-2" />
+            <RotateCw className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2" />
             Retry Loading Data
           </button>
         </div>
       ) : orderItems.length > 0 ? (
-        /* Order Items Table */
-        <div className="bg-white rounded-2xl shadow-lg border border-gray-100 overflow-hidden">
-          <div className="p-6 border-b border-gray-200">
-            <div className="flex justify-between items-center">
-              <div>
-                <h3 className="text-xl font-bold text-gray-900">All Order Items</h3>
-                <p className="text-gray-600 mt-1">
-                  Showing {Math.min((page - 1) * 10 + 1, totalItems)} to {Math.min(page * 10, totalItems)} of {totalItems} order items
-                </p>
-              </div>
-              <div className="text-sm text-gray-500">
-                Page {page} of {totalPages}
-              </div>
-            </div>
-          </div>
-
+        /* Order Items Table - Made responsive */
+        <div className="bg-white rounded-xl sm:rounded-2xl shadow-lg border border-gray-100 overflow-hidden p-2 sm:p-4">
           <div className="overflow-x-auto">
-            <table className="w-full">
+            <table className="w-full min-w-[640px]">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="pl-6 pr-4 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    <div className="flex items-center">
-                      <Calendar className="h-4 w-4 mr-2" />
-                      Date/Time
-                    </div>
+                  <th className="pl-4 pr-2 sm:pl-6 sm:pr-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Order Details
                   </th>
-                  <th className="px-4 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    <div className="flex items-center">
-                      <UserCircle className="h-4 w-4 mr-2" />
-                      Served by
-                    </div>
+                  <th className="px-2 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Created By
                   </th>
-                  <th className="px-4 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    <div className="flex items-center">
-                      <Package className="h-4 w-4 mr-2" />
-                      Items
-                    </div>
+                  <th className="px-2 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Items
                   </th>
-                  <th className="px-4 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Quantity
+                  <th className="px-2 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Qty
                   </th>
-                  <th className="px-4 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    <div className="flex items-center">
-                      <DollarSign className="h-4 w-4 mr-2" />
-                      Price
-                    </div>
+                  <th className="px-2 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Total
                   </th>
-                  <th className="px-4 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    <div className="flex items-center">
-                      <CreditCard className="h-4 w-4 mr-2" />
-                      Credit
-                    </div>
-                  </th>
-                  <th className="pr-6 pl-4 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th className="pr-4 pl-2 sm:pr-6 sm:pl-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Actions
                   </th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-100">
                 {orderItems.map((item) => (
-                  <tr key={item.id} className="hover:bg-gray-50/80 transition-colors duration-150">
-                    {/* Date/Time Column */}
-                    <td className="pl-6 pr-4 py-4 whitespace-nowrap">
+                  <tr key={item.id} className="hover:bg-gray-50 transition-colors">
+                    {/* Order Details */}
+                    <td className="pl-4 pr-2 sm:pl-6 sm:pr-4 py-3 sm:py-4 whitespace-nowrap">
                       <div>
-                        <div className="text-sm font-semibold text-gray-900">
-                          Order #{item.order || "N/A"}
-                        </div>
                         <div className="text-xs text-gray-500">
                           {formatDateTime(item)}
                         </div>
                       </div>
                     </td>
 
-                    {/* Served by Column */}
-                    <td className="px-4 py-4 whitespace-nowrap">
-                      <div className="flex items-center">
-                        <div className="h-8 w-8 rounded-full bg-gradient-to-br from-blue-100 to-blue-50 flex items-center justify-center mr-3 shadow-sm">
-                          <span className="text-blue-600 font-medium text-xs">
-                            {getServedBy(item).charAt(0).toUpperCase()}
-                          </span>
-                        </div>
-                        <div className="text-sm text-gray-900">
-                          {getServedBy(item)}
-                        </div>
+                    {/* Created By - Now shows the user who created the order */}
+                    <td className="px-2 sm:px-4 py-3 sm:py-4 whitespace-nowrap">
+                      <div className="text-sm text-gray-900">
+                        {getCreatedByInfo(item)}
                       </div>
                     </td>
 
-                    {/* Items Column */}
-                    <td className="px-4 py-4">
-                      <div className="flex items-center">
-                        <div className="ml-4">
-                          <div className="text-sm font-medium text-gray-900">
-                            {getFoodItemName(item)}
-                          </div>
-                          <div className="text-xs text-gray-500">
-                            {getFoodItemCategory(item)}
-                          </div>
-                          {item.oncredit && item.name && (
-                            <div className="text-xs text-purple-600 font-medium mt-1 flex items-center">
-                              <CreditCard className="h-3 w-3 mr-1" />
-                              Customer: {item.name}
-                            </div>
-                          )}
+                    {/* Items - Food item name will now display correctly from food_item_name */}
+                    <td className="px-2 sm:px-4 py-3 sm:py-4">
+                      <div className="text-sm text-gray-900 font-medium">
+                        {getFoodItemName(item)}
+                      </div>
+                      <div className="text-xs text-gray-500">
+                        {getFoodItemCategory(item)}
+                      </div>
+                      {item.oncredit && item.name && (
+                        <div className="text-xs text-purple-600 font-medium mt-0.5 sm:mt-1">
+                          Credit: {item.name}
                         </div>
-                      </div>
-                    </td>
-
-                    {/* Quantity Column */}
-                    <td className="px-4 py-4 whitespace-nowrap">
-                      <div className="text-sm text-gray-900 font-medium bg-gray-50 px-3 py-1.5 rounded-lg inline-block">
-                        {item.quantity || 0}
-                      </div>
-                    </td>
-
-                    {/* Price Column */}
-                    <td className="px-4 py-4 whitespace-nowrap">
-                      <div className="text-sm font-bold text-blue-600 bg-gradient-to-r from-blue-50 to-blue-100/50 px-3 py-1.5 rounded-lg">
-                        Ksh {getTotalPrice(item)}
-                      </div>
-                      <div className="text-xs text-gray-500 mt-1">
+                      )}
+                      <div className="text-xs text-gray-500 mt-0.5 sm:mt-1">
                         Unit: Ksh {formatPrice(item.price)}
                       </div>
                     </td>
 
-                    {/* Credit Column */}
-                    <td className="px-4 py-4 whitespace-nowrap">
-                      <div className="flex items-center">
-                        {item.oncredit ? (
-                          <span className="px-3 py-1.5 bg-gradient-to-r from-purple-50 to-purple-100 text-purple-800 text-xs font-semibold rounded-lg flex items-center border border-purple-200">
-                            <CreditCard className="h-3 w-3 mr-1.5" />
-                            On Credit
-                          </span>
-                        ) : (
-                          <span className="px-3 py-1.5 bg-gradient-to-r from-green-50 to-green-100 text-green-800 text-xs font-semibold rounded-lg border border-green-200">
-                            Paid
-                          </span>
-                        )}
+                    {/* Quantity */}
+                    <td className="px-2 sm:px-4 py-3 sm:py-4">
+                      <div className="text-sm font-medium text-gray-900 bg-gray-50 px-2 py-1 sm:px-3 sm:py-1 rounded-lg inline-block">
+                        {item.quantity || 0}
                       </div>
                     </td>
 
-                    {/* Actions Column */}
-                    <td className="pr-6 pl-4 py-4 whitespace-nowrap">
-                      <div className="flex items-center space-x-3">
+                    {/* Total - Now uses total_price directly from API */}
+                    <td className="px-2 sm:px-4 py-3 sm:py-4 whitespace-nowrap">
+                      <div className="text-sm font-bold text-blue-600">
+                        Ksh {getTotalPrice(item)}
+                      </div>
+                    </td>
+
+                    {/* Actions */}
+                    <td className="pr-4 pl-2 sm:pr-6 sm:pl-4 py-3 sm:py-4 whitespace-nowrap">
+                      <div className="flex items-center space-x-1 sm:space-x-2">
+                        {/* Edit Button */}
                         <button
                           onClick={() => handleEditOrderItem(item)}
-                          className="inline-flex items-center justify-center w-11 h-11 text-emerald-600 hover:text-emerald-800 hover:bg-emerald-50 rounded-xl transition-all duration-200 border border-emerald-200 shadow-sm hover:shadow"
-                          title="Edit Item"
+                          className="p-1 sm:p-2 text-green-600 hover:text-green-800 hover:bg-green-50 rounded-lg transition-colors"
+                          title="Edit Order Item"
                         >
-                          <Edit className="h-5 w-5" />
+                          <Edit className="h-3 w-3 sm:h-4 sm:w-4" />
                         </button>
 
-                        <button
-                          onClick={() => {
-                            setItemToDelete(item.id);
-                            setShowDeleteModal(true);
-                          }}
-                          className="inline-flex items-center justify-center w-11 h-11 text-red-600 hover:text-red-800 hover:bg-red-50 rounded-xl transition-all duration-200 border border-red-200 shadow-sm hover:shadow"
-                          title="Delete Item"
-                        >
-                          <Trash2 className="h-5 w-5" />
-                        </button>
+                        {/* Delete Button - Only for admins */}
+                        {isUserAdmin && (
+                          <button
+                            onClick={() => {
+                              setItemToDelete(item.id);
+                              setShowDeleteModal(true);
+                            }}
+                            className="p-1 sm:p-2 text-red-600 hover:text-red-800 hover:bg-red-50 rounded-lg transition-colors"
+                            title="Delete Order Item"
+                          >
+                            <Trash2 className="h-3 w-3 sm:h-4 sm:w-4" />
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -1013,21 +1252,18 @@ export default function HotelOrderItems() {
             </table>
           </div>
 
-          {/* Pagination */}
+          {/* Pagination - Made responsive */}
           {totalPages > 1 && (
-            <div className="border-t border-gray-200 px-6 py-4 bg-gray-50/50">
-              <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
-                <div className="text-sm text-gray-700">
-                  Showing {Math.min((page - 1) * 10 + 1, totalItems)} to {Math.min(page * 10, totalItems)} of {totalItems} order items
+            <div className="border-t border-gray-200 px-4 sm:px-6 py-3 sm:py-4">
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-2 sm:gap-4">
+                <div className="text-xs sm:text-sm text-gray-700">
+                  Showing {Math.min((page - 1) * 10 + 1, totalItems)} to {Math.min(page * 10, totalItems)} of {totalItems} items
                 </div>
-                <div className="flex items-center space-x-2">
+                <div className="flex space-x-1 sm:space-x-2">
                   <button
                     onClick={() => handlePageChange(1)}
                     disabled={page === 1}
-                    className={`px-4 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 flex items-center shadow-sm ${page === 1
-                      ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                      : 'bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 hover:shadow'
-                      }`}
+                    className={`px-2 py-1 sm:px-3 sm:py-2 bg-white border border-gray-300 rounded-lg text-xs sm:text-sm font-medium text-gray-700 hover:bg-gray-50 transition duration-200 ${page === 1 ? 'opacity-50 cursor-not-allowed' : ''}`}
                   >
                     First
                   </button>
@@ -1035,13 +1271,9 @@ export default function HotelOrderItems() {
                   <button
                     onClick={() => handlePageChange(page - 1)}
                     disabled={page === 1}
-                    className={`px-4 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 flex items-center shadow-sm ${page === 1
-                      ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                      : 'bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 hover:shadow'
-                      }`}
+                    className={`px-2 py-1 sm:px-3 sm:py-2 bg-white border border-gray-300 rounded-lg text-xs sm:text-sm font-medium text-gray-700 hover:bg-gray-50 transition duration-200 ${page === 1 ? 'opacity-50 cursor-not-allowed' : ''}`}
                   >
-                    <ChevronDown className="h-4 w-4 mr-2 rotate-90" />
-                    Previous
+                    Prev
                   </button>
 
                   {/* Page Numbers */}
@@ -1049,9 +1281,9 @@ export default function HotelOrderItems() {
                     <button
                       key={pageNum}
                       onClick={() => handlePageChange(pageNum)}
-                      className={`px-4 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 flex items-center shadow-sm ${page === pageNum
-                        ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white border border-blue-600 shadow-md'
-                        : 'bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 hover:shadow'
+                      className={`px-2 py-1 sm:px-3 sm:py-2 border rounded-lg text-xs sm:text-sm font-medium transition duration-200 ${page === pageNum
+                        ? 'bg-blue-600 border-blue-600 text-white'
+                        : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'
                         }`}
                     >
                       {pageNum}
@@ -1061,22 +1293,15 @@ export default function HotelOrderItems() {
                   <button
                     onClick={() => handlePageChange(page + 1)}
                     disabled={page === totalPages}
-                    className={`px-4 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 flex items-center shadow-sm ${page === totalPages
-                      ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                      : 'bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 hover:shadow'
-                      }`}
+                    className={`px-2 py-1 sm:px-3 sm:py-2 bg-white border border-gray-300 rounded-lg text-xs sm:text-sm font-medium text-gray-700 hover:bg-gray-50 transition duration-200 ${page === totalPages ? 'opacity-50 cursor-not-allowed' : ''}`}
                   >
                     Next
-                    <ChevronDown className="h-4 w-4 ml-2 -rotate-90" />
                   </button>
 
                   <button
                     onClick={() => handlePageChange(totalPages)}
                     disabled={page === totalPages}
-                    className={`px-4 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 flex items-center shadow-sm ${page === totalPages
-                      ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                      : 'bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 hover:shadow'
-                      }`}
+                    className={`px-2 py-1 sm:px-3 sm:py-2 bg-white border border-gray-300 rounded-lg text-xs sm:text-sm font-medium text-gray-700 hover:bg-gray-50 transition duration-200 ${page === totalPages ? 'opacity-50 cursor-not-allowed' : ''}`}
                   >
                     Last
                   </button>
@@ -1086,325 +1311,285 @@ export default function HotelOrderItems() {
           )}
         </div>
       ) : (
-        /* No Order Items State */
-        <div className="bg-gradient-to-br from-blue-50 to-indigo-50 border-2 border-dashed border-blue-200 rounded-2xl p-12 text-center">
+        /* No Orders State */
+        <div className="bg-gradient-to-br from-blue-50 to-indigo-50 border-2 border-dashed border-blue-200 rounded-xl sm:rounded-2xl p-6 sm:p-12 text-center">
           <div className="max-w-md mx-auto">
-            <div className="w-20 h-20 bg-gradient-to-br from-blue-100 to-blue-50 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-lg">
-              <Utensils className="h-10 w-10 text-blue-600" />
+            <div className="w-16 h-16 sm:w-20 sm:h-20 bg-blue-100 rounded-lg sm:rounded-2xl flex items-center justify-center mx-auto mb-4 sm:mb-6">
+              <Receipt className="h-8 w-8 sm:h-10 sm:w-10 text-blue-600" />
             </div>
-            <h3 className="text-2xl font-bold text-gray-900 mb-2">No Order Items Found</h3>
-            <p className="text-gray-600 mb-6">
-              You haven't created any order items yet. Start by adding your first order item.
+            <h3 className="text-xl sm:text-2xl font-bold text-gray-900 mb-1 sm:mb-2">No Orders Found</h3>
+            <p className="text-gray-600 text-sm sm:text-base mb-4 sm:mb-6">
+              {dateRange.start_date && dateRange.end_date
+                ? `No orders found between ${dateRange.start_date} and ${dateRange.end_date}.`
+                : "You haven't received any orders yet. Orders will appear here once customers start ordering."}
             </p>
-            <button
-              onClick={handleCreateOrderItem}
-              className="bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white px-8 py-3.5 rounded-xl font-semibold transition-all duration-200 inline-flex items-center shadow-lg hover:shadow-xl"
-            >
-              <Plus className="h-5 w-5 mr-2" />
-              Create First Order Item
-            </button>
+            {dateRange.start_date && dateRange.end_date && (
+              <button
+                onClick={() => {
+                  const today = new Date().toISOString().split('T')[0];
+                  const firstDayOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1)
+                    .toISOString()
+                    .split('T')[0];
+                  setDateRange({
+                    start_date: firstDayOfMonth,
+                    end_date: today
+                  });
+                  setPage(1);
+                  fetchData();
+                }}
+                className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 sm:px-6 sm:py-3 rounded-lg font-semibold transition duration-200 inline-flex items-center text-sm sm:text-base"
+              >
+                <ListOrdered className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2" />
+                View All Orders
+              </button>
+            )}
           </div>
         </div>
       )}
 
-      {/* Create/Edit Modal */}
+      {/* Create/Edit Order Modal - Made responsive */}
       {showCreateEditModal && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl max-h-[90vh] overflow-y-auto animate-in fade-in slide-in-from-bottom-4 duration-300">
-            <div className="flex justify-between items-center mb-6">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-2 sm:p-4 overflow-y-auto">
+          <div className="bg-white rounded-xl sm:rounded-2xl p-4 sm:p-6 max-w-2xl w-full shadow-2xl transform transition-all duration-300 scale-100 my-4 sm:my-8">
+            <div className="flex justify-between items-center mb-4 sm:mb-6">
               <div>
-                <h3 className="text-xl font-bold text-gray-900">
-                  {isEditing ? 'Edit Order Item' : 'Create New Order Item'}
+                <h3 className="text-lg sm:text-2xl font-bold text-gray-900">
+                  {isEditing ? 'Edit Order Item' : 'Create New Order'}
                 </h3>
-                <p className="text-gray-600 text-sm mt-1">
-                  {isEditing ? 'Update the order item details' : 'Fill in the order item details'}
+                <p className="text-gray-600 text-xs sm:text-sm mt-0.5 sm:mt-1">
+                  {isEditing
+                    ? 'Update the order item details'
+                    : 'Add multiple items to create a complete order'}
                 </p>
               </div>
               <button
                 onClick={() => {
                   setShowCreateEditModal(false);
                   setCurrentItem(null);
+                  setCurrentOrder(null);
                   setIsEditing(false);
                 }}
-                className="text-gray-400 hover:text-gray-600 transition p-2 hover:bg-gray-100 rounded-lg"
+                className="text-gray-400 hover:text-gray-600 transition p-1 sm:p-2 hover:bg-gray-100 rounded-lg"
               >
-                <X className="h-5 w-5" />
+                <X className="h-4 w-4 sm:h-5 sm:w-5" />
               </button>
             </div>
 
-            <div className="space-y-5">
-              {/* Food Item Selection */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  <span className="flex items-center">
-                    <Package className="h-4 w-4 mr-1 text-blue-600" />
-                    Food Item *
-                  </span>
-                </label>
-                <select
-                  name="food_item_id"
-                  value={formData.food_item_id}
-                  onChange={handleInputChange}
-                  className={`w-full px-4 py-3 border rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition ${formErrors.food_item_id ? 'border-red-300 bg-red-50' : 'border-gray-300'
-                    }`}
-                >
-                  <option value={0}>Select a food item...</option>
-                  {foodItems.map((foodItem) => (
-                    <option key={foodItem.id} value={foodItem.id}>
-                      {foodItem.name} ({foodItem.category?.name || 'Uncategorized'}) - Ksh {foodItem.price}
-                    </option>
-                  ))}
-                </select>
-                {formErrors.food_item_id && (
-                  <p className="mt-2 text-sm text-red-600 flex items-center">
-                    <AlertTriangle className="h-3 w-3 mr-1" />
-                    {formErrors.food_item_id}
+            {/* Order Summary */}
+            <div className="mb-4 sm:mb-6 p-3 sm:p-4 bg-blue-50 rounded-lg sm:rounded-xl border border-blue-200">
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 sm:gap-0">
+                <div>
+                  <h4 className="font-semibold text-blue-900 text-sm sm:text-base">Order Summary</h4>
+                  <p className="text-xs sm:text-sm text-blue-700">
+                    {formData.items.length} item{formData.items.length !== 1 ? 's' : ''} selected
                   </p>
-                )}
+                </div>
+                <div className="text-right">
+                  <p className="text-xs sm:text-sm text-blue-700">Total Amount</p>
+                  <p className="text-lg sm:text-2xl font-bold text-blue-900">Ksh {calculateFormTotal()}</p>
+                </div>
               </div>
+            </div>
 
-              {/* Quantity */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Quantity *
-                </label>
-                <input
-                  type="number"
-                  name="quantity"
-                  value={formData.quantity}
-                  onChange={handleInputChange}
-                  className={`w-full px-4 py-3 border rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition ${formErrors.quantity ? 'border-red-300 bg-red-50' : 'border-gray-300'
-                    }`}
-                  placeholder="Enter quantity"
-                  min="1"
-                />
-                {formErrors.quantity && (
-                  <p className="mt-2 text-sm text-red-600 flex items-center">
-                    <AlertTriangle className="h-3 w-3 mr-1" />
-                    {formErrors.quantity}
-                  </p>
-                )}
-              </div>
-
-              {/* Price */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Price (Ksh) *
-                </label>
-                <input
-                  type="number"
-                  name="price"
-                  value={formData.price}
-                  onChange={handleInputChange}
-                  className={`w-full px-4 py-3 border rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition ${formErrors.price ? 'border-red-300 bg-red-50' : 'border-gray-300'
-                    }`}
-                  placeholder="Enter price"
-                  min="0"
-                  step="0.01"
-                />
-                {formErrors.price && (
-                  <p className="mt-2 text-sm text-red-600 flex items-center">
-                    <AlertTriangle className="h-3 w-3 mr-1" />
-                    {formErrors.price}
-                  </p>
-                )}
-              </div>
-
-              {/* On Credit Checkbox */}
-              <div className="flex items-center p-4 bg-gray-50 rounded-xl border border-gray-200">
-                <input
-                  type="checkbox"
-                  id="oncredit"
-                  name="oncredit"
-                  checked={formData.oncredit}
-                  onChange={handleInputChange}
-                  className="h-5 w-5 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                />
-                <label htmlFor="oncredit" className="ml-3 block text-sm font-medium text-gray-900">
-                  <div className="flex items-center">
-                    <CreditCard className="h-4 w-4 mr-2 text-purple-600" />
-                    Sell on Credit
+            {/* Order Items List */}
+            <div className="space-y-4 sm:space-y-6 mb-6 sm:mb-8">
+              {formData.items.map((item, index) => (
+                <div key={index} className="border border-gray-200 rounded-lg sm:rounded-xl p-3 sm:p-5 bg-gray-50">
+                  <div className="flex justify-between items-center mb-3 sm:mb-4">
+                    <h4 className="font-semibold text-gray-900 text-sm sm:text-base">Item {index + 1}</h4>
+                    {formData.items.length > 1 && !isEditing && (
+                      <button
+                        type="button"
+                        onClick={() => removeItemFromForm(index)}
+                        className="text-red-600 hover:text-red-800 text-xs sm:text-sm font-medium flex items-center"
+                      >
+                        <Trash2 className="h-3 w-3 sm:h-4 sm:w-4 mr-0.5 sm:mr-1" />
+                        Remove
+                      </button>
+                    )}
                   </div>
-                  <p className="text-gray-500 text-xs mt-1">Check if the customer will pay later</p>
-                </label>
-              </div>
 
-              {/* Customer Name (shown only when on credit is checked) */}
-              {formData.oncredit && (
-                <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    <span className="flex items-center">
-                      <UserCircle className="h-4 w-4 mr-1 text-purple-600" />
-                      Customer Name *
-                    </span>
-                  </label>
-                  <input
-                    type="text"
-                    name="name"
-                    value={formData.name || ''}
-                    onChange={handleInputChange}
-                    className={`w-full px-4 py-3 border rounded-xl text-sm focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition ${formErrors.name ? 'border-red-300 bg-red-50' : 'border-gray-300'
-                      }`}
-                    placeholder="Enter customer name"
-                  />
-                  {formErrors.name && (
-                    <p className="mt-2 text-sm text-red-600 flex items-center">
-                      <AlertTriangle className="h-3 w-3 mr-1" />
-                      {formErrors.name}
-                    </p>
-                  )}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
+                    {/* Food Item Selection */}
+                    <div>
+                      <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1 sm:mb-2">
+                        <span className="flex items-center">
+                          <Package className="h-3 w-3 sm:h-4 sm:w-4 mr-0.5 sm:mr-1 text-blue-600" />
+                          Food Item *
+                        </span>
+                      </label>
+                      <select
+                        name="food_item"
+                        value={item.food_item}
+                        onChange={(e) => handleItemInputChange(index, e)}
+                        className={`w-full px-3 sm:px-4 py-2 sm:py-3 border rounded-lg sm:rounded-xl text-xs sm:text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition ${formErrors[`item_${index}_food_item`] ? 'border-red-300 bg-red-50' : 'border-gray-300'
+                          }`}
+                      >
+                        <option value={0}>Select a food item...</option>
+                        {foodItems.map((foodItem) => (
+                          <option key={foodItem.id} value={foodItem.id}>
+                            {foodItem.name} - Ksh {foodItem.price}
+                            {foodItem.quantity && ` (Stock: ${foodItem.quantity})`}
+                          </option>
+                        ))}
+                      </select>
+                      {formErrors[`item_${index}_food_item`] && (
+                        <p className="mt-1 sm:mt-2 text-xs sm:text-sm text-red-600 flex items-center">
+                          <AlertTriangle className="h-2 w-2 sm:h-3 sm:w-3 mr-0.5 sm:mr-1" />
+                          {formErrors[`item_${index}_food_item`]}
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Quantity */}
+                    <div>
+                      <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1 sm:mb-2">
+                        Quantity *
+                      </label>
+                      <input
+                        type="number"
+                        name="quantity"
+                        value={item.quantity}
+                        onChange={(e) => handleItemInputChange(index, e)}
+                        className={`w-full px-3 sm:px-4 py-2 sm:py-3 border rounded-lg sm:rounded-xl text-xs sm:text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition ${formErrors[`item_${index}_quantity`] ? 'border-red-300 bg-red-50' : 'border-gray-300'
+                          }`}
+                        placeholder="Enter quantity"
+                        min="1"
+                      />
+                      {formErrors[`item_${index}_quantity`] && (
+                        <p className="mt-1 sm:mt-2 text-xs sm:text-sm text-red-600 flex items-center">
+                          <AlertTriangle className="h-2 w-2 sm:h-3 sm:w-3 mr-0.5 sm:mr-1" />
+                          {formErrors[`item_${index}_quantity`]}
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Price */}
+                    <div>
+                      <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1 sm:mb-2">
+                        Unit Price (Ksh) *
+                      </label>
+                      <input
+                        type="number"
+                        name="price"
+                        value={item.price}
+                        onChange={(e) => handleItemInputChange(index, e)}
+                        className={`w-full px-3 sm:px-4 py-2 sm:py-3 border rounded-lg sm:rounded-xl text-xs sm:text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition ${formErrors[`item_${index}_price`] ? 'border-red-300 bg-red-50' : 'border-gray-300'
+                          }`}
+                        placeholder="Enter unit price"
+                        min="0"
+                        step="0.01"
+                      />
+                      {formErrors[`item_${index}_price`] && (
+                        <p className="mt-1 sm:mt-2 text-xs sm:text-sm text-red-600 flex items-center">
+                          <AlertTriangle className="h-2 w-2 sm:h-3 sm:w-3 mr-0.5 sm:mr-1" />
+                          {formErrors[`item_${index}_price`]}
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Item Total */}
+                    <div>
+                      <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1 sm:mb-2">
+                        Item Total
+                      </label>
+                      <div className="w-full px-3 sm:px-4 py-2 sm:py-3 border border-gray-300 rounded-lg sm:rounded-xl text-xs sm:text-sm bg-gray-100">
+                        Ksh {formatPrice((parseFloat(item.price) || 0) * (item.quantity || 0))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+
+              {/* Add More Items Button (only for new orders) */}
+              {!isEditing && (
+                <div className="flex justify-center">
+                  <button
+                    type="button"
+                    onClick={addItemToForm}
+                    className="inline-flex items-center px-3 sm:px-4 py-1.5 sm:py-2 border border-gray-300 rounded-lg text-xs sm:text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 transition duration-200"
+                  >
+                    <Plus className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2" />
+                    Add Another Item
+                  </button>
                 </div>
               )}
             </div>
 
-            <div className="flex justify-end space-x-4 mt-8 pt-6 border-t border-gray-200">
+            {/* On Credit Checkbox */}
+            <div className="flex items-start p-3 sm:p-4 bg-gray-50 rounded-lg sm:rounded-xl border border-gray-200 mb-4 sm:mb-6">
+              <input
+                type="checkbox"
+                id="oncredit"
+                name="oncredit"
+                checked={formData.oncredit}
+                onChange={handleOrderInputChange}
+                className="h-4 w-4 sm:h-5 sm:w-5 text-blue-600 focus:ring-blue-500 border-gray-300 rounded mt-0.5"
+              />
+              <label htmlFor="oncredit" className="ml-2 sm:ml-3 block text-sm font-medium text-gray-900">
+                <div className="flex items-center">
+                  <CreditCard className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2 text-purple-600" />
+                  Sell on Credit
+                </div>
+                <p className="text-gray-500 text-xs mt-0.5 sm:mt-1">Check if the customer will pay later</p>
+              </label>
+            </div>
+
+            {/* Customer Name (shown only when on credit is checked) */}
+            {formData.oncredit && (
+              <div className="mb-4 sm:mb-6">
+                <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1 sm:mb-2">
+                  <span className="flex items-center">
+                    <UserCircle className="h-3 w-3 sm:h-4 sm:w-4 mr-0.5 sm:mr-1 text-purple-600" />
+                    Customer Name *
+                  </span>
+                </label>
+                <input
+                  type="text"
+                  name="customer_name"
+                  value={formData.customer_name || ''}
+                  onChange={handleOrderInputChange}
+                  className={`w-full px-3 sm:px-4 py-2 sm:py-3 border rounded-lg sm:rounded-xl text-xs sm:text-sm focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition ${formErrors.customer_name ? 'border-red-300 bg-red-50' : 'border-gray-300'
+                    }`}
+                  placeholder="Enter customer name"
+                />
+                {formErrors.customer_name && (
+                  <p className="mt-1 sm:mt-2 text-xs sm:text-sm text-red-600 flex items-center">
+                    <AlertTriangle className="h-2 w-2 sm:h-3 sm:w-3 mr-0.5 sm:mr-1" />
+                    {formErrors.customer_name}
+                  </p>
+                )}
+              </div>
+            )}
+
+            <div className="flex justify-center space-x-2 sm:space-x-4 mt-6 sm:mt-8 pt-4 sm:pt-6 border-t border-gray-200">
               <button
                 onClick={() => {
                   setShowCreateEditModal(false);
                   setCurrentItem(null);
+                  setCurrentOrder(null);
                   setIsEditing(false);
                 }}
-                className="px-5 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-800 font-medium rounded-xl transition-all duration-200 flex items-center"
+                className="px-4 sm:px-6 py-2 sm:py-3 bg-gray-300 hover:bg-gray-400 text-gray-800 font-semibold rounded-lg sm:rounded-xl transition-all duration-200 flex items-center text-sm sm:text-base"
               >
-                <X className="h-4 w-4 mr-2" />
+                <X className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2" />
                 Cancel
               </button>
               <button
-                onClick={handleSaveOrderItem}
-                className="px-5 py-2.5 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white font-medium rounded-xl transition-all duration-200 flex items-center shadow-md hover:shadow-lg"
+                onClick={handleSaveOrder}
+                className="px-4 sm:px-6 py-2 sm:py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg sm:rounded-xl transition-all duration-200 flex items-center shadow-md hover:shadow-lg text-sm sm:text-base"
               >
-                <Check className="h-4 w-4 mr-2" />
-                {isEditing ? 'Update Order Item' : 'Create Order Item'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Credit Orders Modal */}
-      {showCreditModal && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl p-6 max-w-4xl w-full shadow-2xl max-h-[90vh] overflow-y-auto animate-in fade-in slide-in-from-bottom-4 duration-300">
-            <div className="flex justify-between items-center mb-8">
-              <div>
-                <h3 className="text-2xl font-bold text-gray-900 flex items-center">
-                  <div className="mr-3 bg-gradient-to-br from-purple-100 to-purple-50 p-3 rounded-xl">
-                    <CreditCard className="h-6 w-6 text-purple-600" />
-                  </div>
-                  Credit Orders Summary
-                </h3>
-                <p className="text-gray-600 mt-2">All items sold on credit to customers</p>
-              </div>
-              <button
-                onClick={() => setShowCreditModal(false)}
-                className="text-gray-400 hover:text-gray-600 transition p-2 hover:bg-gray-100 rounded-lg"
-              >
-                <X className="h-6 w-6" />
-              </button>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-              <div className="bg-gradient-to-br from-purple-50 to-purple-100/50 border border-purple-200 rounded-xl p-6">
-                <div className="flex items-center">
-                  <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center mr-4 shadow-sm border border-purple-200">
-                    <CreditCard className="h-6 w-6 text-purple-600" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium text-gray-600">Total Credit Orders</p>
-                    <p className="text-2xl font-bold text-gray-900">{stats.creditOrdersCount}</p>
-                  </div>
-                </div>
-              </div>
-              <div className="bg-gradient-to-br from-purple-50 to-purple-100/50 border border-purple-200 rounded-xl p-6">
-                <div className="flex items-center">
-                  <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center mr-4 shadow-sm border border-purple-200">
-                    <DollarSign className="h-6 w-6 text-purple-600" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium text-gray-600">Total Credit Value</p>
-                    <p className="text-2xl font-bold text-gray-900">
-                      Ksh {stats.creditValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {stats.creditOrdersCount > 0 ? (
-              <div className="space-y-6">
-                {Object.entries(getCreditOrdersByCustomer()).map(([customerName, items]) => {
-                  const customerTotal = items.reduce((sum, item) => sum + parseFloat(getTotalPrice(item)), 0);
-                  const itemCount = items.length;
-
-                  return (
-                    <div key={customerName} className="border border-gray-200 rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-shadow">
-                      <div className="bg-gradient-to-r from-gray-50 to-gray-100/50 px-6 py-5 border-b border-gray-200">
-                        <div className="flex justify-between items-center">
-                          <div>
-                            <div className="flex items-center">
-                              <div className="h-10 w-10 rounded-full bg-gradient-to-br from-purple-100 to-purple-50 flex items-center justify-center mr-3 border border-purple-200">
-                                <Users className="h-5 w-5 text-purple-600" />
-                              </div>
-                              <div>
-                                <h4 className="font-bold text-gray-900 text-lg">{customerName}</h4>
-                                <p className="text-gray-600 text-sm">
-                                  {itemCount} item{itemCount !== 1 ? 's' : ''} • Total: Ksh {customerTotal.toFixed(2)}
-                                </p>
-                              </div>
-                            </div>
-                          </div>
-                          <div className="text-right">
-                            <span className="px-3 py-1.5 bg-gradient-to-r from-purple-50 to-purple-100 text-purple-800 text-xs font-semibold rounded-lg border border-purple-200">
-                              Credit Customer
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                      <div className="divide-y divide-gray-100">
-                        {items.map((item) => (
-                          <div key={item.id} className="px-6 py-4 hover:bg-gray-50/50 transition-colors">
-                            <div className="flex justify-between items-center">
-                              <div>
-                                <p className="font-medium text-gray-900">
-                                  {getFoodItemName(item)} × {item.quantity || 0}
-                                </p>
-                                <p className="text-sm text-gray-500 mt-1">
-                                  {formatDateTime(item)} • Served by: {getServedBy(item)}
-                                </p>
-                              </div>
-                              <div className="text-right">
-                                <p className="font-bold text-purple-600">
-                                  Ksh {getTotalPrice(item)}
-                                </p>
-                                <p className="text-xs text-gray-500 mt-1">
-                                  Unit: Ksh {item.price ? formatPrice(item.price) : '0.00'}
-                                </p>
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <div className="text-center py-12 border-2 border-dashed border-gray-300 rounded-xl">
-                <div className="w-16 h-16 bg-gradient-to-br from-gray-100 to-gray-50 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-gray-200">
-                  <CreditCard className="h-8 w-8 text-gray-400" />
-                </div>
-                <h4 className="text-xl font-bold text-gray-900 mb-2">No Credit Orders</h4>
-                <p className="text-gray-600">No items have been sold on credit yet.</p>
-              </div>
-            )}
-
-            <div className="flex justify-end mt-8 pt-6 border-t border-gray-200">
-              <button
-                onClick={() => setShowCreditModal(false)}
-                className="px-6 py-3 bg-gray-100 hover:bg-gray-200 text-gray-800 font-medium rounded-xl transition-all duration-200 flex items-center"
-              >
-                <X className="h-4 w-4 mr-2" />
-                Close Summary
+                {isEditing ? (
+                  <>
+                    <Edit className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2" />
+                    Update Order Item
+                  </>
+                ) : (
+                  <>
+                    <Save className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2" />
+                    Create Order ({formData.items.length} items)
+                  </>
+                )}
               </button>
             </div>
           </div>
@@ -1413,32 +1598,64 @@ export default function HotelOrderItems() {
 
       {/* Delete Confirmation Modal */}
       {showDeleteModal && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl animate-in fade-in zoom-in-95 duration-300">
-            <div className="text-center mb-6">
-              <div className="w-16 h-16 bg-gradient-to-br from-red-100 to-red-50 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-red-200">
-                <AlertTriangle className="h-8 w-8 text-red-600" />
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-2 sm:p-4">
+          <div className="bg-white rounded-xl sm:rounded-2xl p-4 sm:p-6 max-w-md w-full mx-2 sm:mx-4 shadow-2xl transform transition-all duration-300 scale-100">
+            <div className="text-center mb-3 sm:mb-4">
+              <div className="w-12 h-12 sm:w-16 sm:h-16 bg-red-100 rounded-lg sm:rounded-2xl flex items-center justify-center mx-auto mb-3 sm:mb-4">
+                <AlertTriangle className="h-6 w-6 sm:h-8 sm:w-8 text-red-600" />
               </div>
-              <h3 className="text-xl font-bold text-gray-900 mb-2">Confirm Deletion</h3>
-              <p className="text-gray-600">Are you sure you want to delete this order item? This action cannot be undone.</p>
+              <h3 className="text-lg sm:text-xl font-bold text-gray-900 mb-1 sm:mb-2">Confirm Deletion</h3>
+              <p className="text-gray-600 text-sm sm:text-base">Are you sure you want to delete this order item? This action cannot be undone.</p>
             </div>
-            <div className="flex justify-center space-x-4">
+            <div className="flex justify-center space-x-2 sm:space-x-4">
               <button
                 onClick={() => {
                   setShowDeleteModal(false);
                   setItemToDelete(null);
                 }}
-                className="px-6 py-3 bg-gray-100 hover:bg-gray-200 text-gray-800 font-medium rounded-xl transition-all duration-200 flex items-center"
+                className="px-4 sm:px-6 py-1.5 sm:py-2.5 bg-gray-300 hover:bg-gray-400 text-gray-800 font-semibold rounded-lg sm:rounded-xl transition-all duration-200 text-sm sm:text-base"
               >
-                <X className="h-4 w-4 mr-2" />
                 Cancel
               </button>
               <button
                 onClick={handleDeleteOrderItem}
-                className="px-6 py-3 bg-gradient-to-r from-red-600 to-red-700 hover:from-red-700 hover:to-red-800 text-white font-medium rounded-xl transition-all duration-200 flex items-center shadow-md hover:shadow-lg"
+                className="px-4 sm:px-6 py-1.5 sm:py-2.5 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-lg sm:rounded-xl transition-all duration-200 text-sm sm:text-base"
               >
-                <Trash2 className="h-4 w-4 mr-2" />
-                Delete Item
+                <Trash2 className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2 inline" />
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Order Confirmation Modal */}
+      {showDeleteOrderModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-2 sm:p-4">
+          <div className="bg-white rounded-xl sm:rounded-2xl p-4 sm:p-6 max-w-md w-full mx-2 sm:mx-4 shadow-2xl transform transition-all duration-300 scale-100">
+            <div className="text-center mb-3 sm:mb-4">
+              <div className="w-12 h-12 sm:w-16 sm:h-16 bg-red-100 rounded-lg sm:rounded-2xl flex items-center justify-center mx-auto mb-3 sm:mb-4">
+                <AlertTriangle className="h-6 w-6 sm:h-8 sm:w-8 text-red-600" />
+              </div>
+              <h3 className="text-lg sm:text-xl font-bold text-gray-900 mb-1 sm:mb-2">Confirm Order Deletion</h3>
+              <p className="text-gray-600 text-sm sm:text-base">Are you sure you want to delete this entire order? All items in this order will also be deleted. This action cannot be undone.</p>
+            </div>
+            <div className="flex justify-center space-x-2 sm:space-x-4">
+              <button
+                onClick={() => {
+                  setShowDeleteOrderModal(false);
+                  setOrderToDelete(null);
+                }}
+                className="px-4 sm:px-6 py-1.5 sm:py-2.5 bg-gray-300 hover:bg-gray-400 text-gray-800 font-semibold rounded-lg sm:rounded-xl transition-all duration-200 text-sm sm:text-base"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDeleteOrder}
+                className="px-4 sm:px-6 py-1.5 sm:py-2.5 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-lg sm:rounded-xl transition-all duration-200 text-sm sm:text-base"
+              >
+                <Trash2 className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2 inline" />
+                Delete Order
               </button>
             </div>
           </div>

@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -60,7 +60,6 @@ import {
   ChevronDown,
   ChevronUp,
   History,
-  Globe,
   ShoppingBag,
   Trash2,
   Edit,
@@ -95,6 +94,40 @@ interface ExtendedCustomer extends Customer {
   } | null;
 }
 
+// Extend HotelOrderItem interface to include missing properties
+interface ExtendedHotelOrderItem extends HotelOrderItem {
+  created_by?: User;
+  total_price?: number;
+  created_at?: string;
+}
+
+// Define user data interface
+interface UserData {
+  laundryOrders: LaundryOrder[];
+  hotelOrders: ExtendedHotelOrderItem[];
+  customers: ExtendedCustomer[];
+}
+
+// Helper function to ensure array type
+const ensureArray = <T,>(data: unknown): T[] => {
+  if (!data) return [];
+  if (Array.isArray(data)) return data as T[];
+  if (typeof data === 'object' && data !== null) {
+    // Handle cases where API returns object with results property
+    const anyData = data as any;
+    if (Array.isArray(anyData.results)) return anyData.results as T[];
+    if (Array.isArray(anyData.data)) return anyData.data as T[];
+  }
+  return [];
+};
+
+// Helper function to safely parse float
+const safeParseFloat = (value: string | number | null | undefined): number => {
+  if (value === null || value === undefined) return 0;
+  const num = typeof value === 'string' ? parseFloat(value) : value;
+  return isNaN(num) ? 0 : num;
+};
+
 // Get auth headers function
 const getAuthHeaders = () => {
   const token = getAccessToken();
@@ -109,20 +142,26 @@ const getAuthHeaders = () => {
   return headers;
 };
 
-// API functions
+// API functions with error handling
 const fetchUsers = async (): Promise<User[]> => {
-  const response = await fetch(`${API_BASE_URL}/Laundry/users/`, {
-    headers: getAuthHeaders(),
-  });
+  try {
+    const response = await fetch(`${API_BASE_URL}/Laundry/users/`, {
+      headers: getAuthHeaders(),
+    });
 
-  if (!response.ok) {
-    if (response.status === 401) {
-      throw new Error('Unauthorized. Please login again.');
+    if (!response.ok) {
+      if (response.status === 401) {
+        throw new Error('Unauthorized. Please login again.');
+      }
+      throw new Error('Failed to fetch users');
     }
-    throw new Error('Failed to fetch users');
-  }
 
-  return response.json();
+    const data = await response.json();
+    return ensureArray<User>(data);
+  } catch (error) {
+    console.error('Error fetching users:', error);
+    return [];
+  }
 };
 
 const createUser = async (userData: any): Promise<User> => {
@@ -179,77 +218,62 @@ const deleteUser = async (userId: number): Promise<void> => {
 
 // Fetch all laundry orders and filter by created_by
 const fetchAllLaundryOrders = async (): Promise<LaundryOrder[]> => {
-  const response = await fetch(`${API_BASE_URL}/Laundry/orders/`, {
-    headers: getAuthHeaders(),
-  });
+  try {
+    const response = await fetch(`${API_BASE_URL}/Laundry/orders/`, {
+      headers: getAuthHeaders(),
+    });
 
-  if (!response.ok) {
+    if (!response.ok) {
+      console.error('Failed to fetch laundry orders:', response.status);
+      return [];
+    }
+
+    const data = await response.json();
+    return ensureArray<LaundryOrder>(data);
+  } catch (error) {
+    console.error('Error fetching laundry orders:', error);
     return [];
   }
-
-  return response.json();
 };
 
 // Fetch all hotel order items and filter by created_by
-const fetchAllHotelOrderItems = async (): Promise<HotelOrderItem[]> => {
-  const response = await fetch(`${API_BASE_URL}/Hotel/order-items/`, {
-    headers: getAuthHeaders(),
-  });
+const fetchAllHotelOrderItems = async (): Promise<ExtendedHotelOrderItem[]> => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/Hotel/order-items/`, {
+      headers: getAuthHeaders(),
+    });
 
-  if (!response.ok) {
+    if (!response.ok) {
+      console.error('Failed to fetch hotel order items:', response.status);
+      return [];
+    }
+
+    const data = await response.json();
+    console.log('Hotel order items API response:', data); // Debug log
+    return ensureArray<ExtendedHotelOrderItem>(data);
+  } catch (error) {
+    console.error('Error fetching hotel order items:', error);
     return [];
   }
-
-  return response.json();
 };
 
 // Fetch all customers and filter by created_by
 const fetchAllCustomers = async (): Promise<ExtendedCustomer[]> => {
-  const response = await fetch(`${API_BASE_URL}/Laundry/customers/`, {
-    headers: getAuthHeaders(),
-  });
-
-  if (!response.ok) {
-    return [];
-  }
-
-  return response.json();
-};
-
-const fetchPageVisits = async (): Promise<any[]> => {
   try {
-    const response = await fetch(`${API_BASE_URL}/page-visits/`, {
+    const response = await fetch(`${API_BASE_URL}/Laundry/customers/`, {
       headers: getAuthHeaders(),
     });
 
     if (!response.ok) {
+      console.error('Failed to fetch customers:', response.status);
       return [];
     }
 
-    return response.json();
-  } catch {
+    const data = await response.json();
+    return ensureArray<ExtendedCustomer>(data);
+  } catch (error) {
+    console.error('Error fetching customers:', error);
     return [];
-  }
-};
-
-const fetchSiteAnalytics = async (): Promise<any> => {
-  try {
-    const response = await fetch(`${API_BASE_URL}/site-analytics/`, {
-      headers: getAuthHeaders(),
-    });
-
-    if (!response.ok) {
-      throw new Error('Analytics endpoint not available');
-    }
-
-    return response.json();
-  } catch {
-    return {
-      total_users: 0,
-      active_today: 0,
-      total_visits: 0,
-      average_session_duration: 0,
-    };
   }
 };
 
@@ -337,55 +361,149 @@ export default function SiteManagement() {
     retry: 1,
   });
 
-  const { data: pageVisits = [], isLoading: visitsLoading } = useQuery({
-    queryKey: ['page-visits'],
-    queryFn: fetchPageVisits,
-    retry: 1,
-  });
-
-  const { data: analytics, isLoading: analyticsLoading } = useQuery({
-    queryKey: ['site-analytics'],
-    queryFn: fetchSiteAnalytics,
-    retry: 1,
-  });
+  // Debug logging for hotel orders
+  useEffect(() => {
+    console.log('Hotel Orders Debug:', {
+      totalHotelOrders: allHotelOrderItems.length,
+      firstHotelOrder: allHotelOrderItems[0],
+      hotelOrderCreatedBy: allHotelOrderItems[0]?.created_by,
+      hotelOrderFoodItemCreatedBy: allHotelOrderItems[0]?.food_item?.created_by,
+      users: users.map(u => ({ id: u.id, email: u.email })),
+      hotelOrdersSample: allHotelOrderItems.slice(0, 3).map(order => ({
+        id: order.id,
+        created_by: order.created_by,
+        food_item_created_by: order.food_item?.created_by,
+        food_item_name: order.food_item?.name
+      }))
+    });
+  }, [allHotelOrderItems, users]);
 
   // Memoize filtered data for each user
   const userData = useMemo(() => {
-    const data: Record<number, {
-      laundryOrders: LaundryOrder[];
-      hotelOrders: HotelOrderItem[];
-      customers: ExtendedCustomer[];
-    }> = {};
+    console.log('Building user data mapping...');
+    const data: Record<number, UserData> = {};
 
+    // Initialize all users with empty arrays
     users.forEach(user => {
-      // Filter laundry orders by created_by
-      const laundryOrders = allLaundryOrders.filter(order =>
-        order.created_by?.id === user.id
-      );
-
-      // Filter hotel order items by created_by (handle both object and null cases)
-      const hotelOrders = allHotelOrderItems.filter(order => {
-        if (!order.created_by) return false;
-        if (typeof order.created_by === 'object') {
-          return order.created_by.id === user.id;
-        }
-        return order.created_by === user.id;
-      });
-
-      // Filter customers by created_by - using ExtendedCustomer type
-      const customers = allCustomers.filter(customer =>
-        customer.created_by?.id === user.id
-      );
-
       data[user.id] = {
-        laundryOrders,
-        hotelOrders,
-        customers
+        laundryOrders: [],
+        hotelOrders: [],
+        customers: []
       };
     });
 
+    // Debug: Log user IDs for reference
+    const userIds = users.map(u => u.id);
+    console.log('Available user IDs:', userIds);
+
+    // Filter laundry orders by created_by
+    allLaundryOrders.forEach(order => {
+      if (order.created_by) {
+        let userId: number | null = null;
+
+        // Check if created_by is an object with id property
+        if (typeof order.created_by === 'object' && order.created_by !== null) {
+          userId = (order.created_by as any).id;
+          console.log('Laundry order created_by object:', order.created_by, 'Extracted ID:', userId);
+        }
+        // Check if created_by is a number (ID)
+        else if (typeof order.created_by === 'number') {
+          userId = order.created_by;
+          console.log('Laundry order created_by ID:', userId);
+        }
+
+        if (userId && data[userId]) {
+          data[userId].laundryOrders.push(order);
+          console.log(`Added laundry order ${order.id} to user ${userId}`);
+        } else if (userId) {
+          console.log(`User ${userId} not found for laundry order ${order.id}`);
+        }
+      }
+    });
+
+    // Filter hotel order items by created_by - IMPORTANT FIX HERE
+    allHotelOrderItems.forEach(order => {
+      let userId: number | null = null;
+
+      // First check if order has created_by directly (even if null, check structure)
+      if (order.created_by !== undefined && order.created_by !== null) {
+        if (typeof order.created_by === 'object') {
+          userId = (order.created_by as any).id;
+          console.log('Hotel order direct created_by object:', order.created_by, 'Extracted ID:', userId);
+        }
+        else if (typeof order.created_by === 'number') {
+          userId = order.created_by;
+          console.log('Hotel order direct created_by ID:', userId);
+        }
+      }
+
+      // If no direct created_by or created_by is null, check food_item.created_by
+      if (!userId && order.food_item?.created_by) {
+        if (typeof order.food_item.created_by === 'object' && order.food_item.created_by !== null) {
+          userId = order.food_item.created_by.id;
+          console.log('Hotel order food_item.created_by object:', order.food_item.created_by, 'Extracted ID:', userId);
+        }
+        else if (typeof order.food_item.created_by === 'number') {
+          userId = order.food_item.created_by;
+          console.log('Hotel order food_item.created_by ID:', userId);
+        }
+      }
+
+      if (userId && data[userId]) {
+        data[userId].hotelOrders.push(order);
+        console.log(`Added hotel order ${order.id} to user ${userId} (via ${order.created_by ? 'direct' : 'food_item'})`);
+      } else if (userId) {
+        console.log(`User ${userId} not found for hotel order ${order.id}`);
+      } else {
+        console.log(`No user ID found for hotel order ${order.id}`, {
+          orderId: order.id,
+          created_by: order.created_by,
+          food_item_created_by: order.food_item?.created_by
+        });
+      }
+    });
+
+    // Filter customers by created_by
+    allCustomers.forEach(customer => {
+      if (customer.created_by) {
+        let userId: number | null = null;
+
+        // Check if created_by is an object with id property
+        if (typeof customer.created_by === 'object' && customer.created_by !== null) {
+          userId = (customer.created_by as any).id;
+        }
+        // Check if created_by is a number (ID)
+        else if (typeof customer.created_by === 'number') {
+          userId = customer.created_by;
+        }
+
+        if (userId && data[userId]) {
+          data[userId].customers.push(customer);
+        }
+      }
+    });
+
+    // Log summary
+    console.log('User Data Summary:', Object.keys(data).map(userId => ({
+      userId,
+      laundryOrders: data[parseInt(userId)].laundryOrders.length,
+      hotelOrders: data[parseInt(userId)].hotelOrders.length,
+      customers: data[parseInt(userId)].customers.length
+    })));
+
     return data;
   }, [users, allLaundryOrders, allHotelOrderItems, allCustomers]);
+
+  // Debug logging (remove in production)
+  useEffect(() => {
+    console.log('User Data Structure:', {
+      totalUsers: users.length,
+      totalLaundryOrders: allLaundryOrders.length,
+      totalHotelOrders: allHotelOrderItems.length,
+      userDataKeys: Object.keys(userData),
+      sampleUserData: users.length > 0 ? userData[users[0].id] : 'No users'
+    });
+  }, [users, allLaundryOrders, allHotelOrderItems, userData]);
 
   // Load user data when expanded
   const loadUserData = async (userId: number) => {
@@ -452,7 +570,6 @@ export default function SiteManagement() {
     mutationFn: createUser,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['users'] });
-      queryClient.invalidateQueries({ queryKey: ['site-analytics'] });
       toast.success('User created successfully!');
       setIsCreateUserOpen(false);
       setNewUser({
@@ -502,7 +619,6 @@ export default function SiteManagement() {
     mutationFn: deleteUser,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['users'] });
-      queryClient.invalidateQueries({ queryKey: ['site-analytics'] });
       toast.success('User deleted successfully');
       setIsDeleteConfirmOpen(false);
       setSelectedUserId(null);
@@ -542,31 +658,42 @@ export default function SiteManagement() {
   };
 
   // Format date
-  const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
+  const formatDate = (dateString: string | null | undefined) => {
+    if (!dateString) return 'Never';
+    try {
+      return new Date(dateString).toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+    } catch (error) {
+      console.error('Error formatting date:', error, dateString);
+      return 'Invalid date';
+    }
   };
 
   // Format time ago
-  const formatTimeAgo = (dateString: string | null) => {
+  const formatTimeAgo = (dateString: string | null | undefined) => {
     if (!dateString) return 'Never';
 
-    const now = new Date();
-    const past = new Date(dateString);
-    const diffMs = now.getTime() - past.getTime();
-    const diffMins = Math.floor(diffMs / 60000);
-    const diffHours = Math.floor(diffMs / 3600000);
-    const diffDays = Math.floor(diffMs / 86400000);
+    try {
+      const now = new Date();
+      const past = new Date(dateString);
+      const diffMs = now.getTime() - past.getTime();
+      const diffMins = Math.floor(diffMs / 60000);
+      const diffHours = Math.floor(diffMs / 3600000);
+      const diffDays = Math.floor(diffMs / 86400000);
 
-    if (diffMins < 60) return `${diffMins}m ago`;
-    if (diffHours < 24) return `${diffHours}h ago`;
-    if (diffDays < 30) return `${diffDays}d ago`;
-    return formatDate(dateString);
+      if (diffMins < 60) return `${diffMins}m ago`;
+      if (diffHours < 24) return `${diffHours}h ago`;
+      if (diffDays < 30) return `${diffDays}d ago`;
+      return formatDate(dateString);
+    } catch (error) {
+      console.error('Error formatting time ago:', error, dateString);
+      return 'Invalid date';
+    }
   };
 
   // Toggle user details expansion
@@ -709,14 +836,27 @@ export default function SiteManagement() {
 
   // Calculate total orders value for a user
   const calculateTotalOrdersValue = (orders: LaundryOrder[]): number => {
-    return orders.reduce((sum, order) => sum + parseFloat(order.total_price || '0'), 0);
+    if (!Array.isArray(orders)) {
+      console.warn('calculateTotalOrdersValue received non-array:', orders);
+      return 0;
+    }
+    return orders.reduce((sum, order) => {
+      return sum + safeParseFloat(order?.total_price || 0);
+    }, 0);
   };
 
   // Calculate total hotel orders value for a user
-  const calculateTotalHotelOrdersValue = (orders: HotelOrderItem[]): number => {
+  const calculateTotalHotelOrdersValue = (orders: ExtendedHotelOrderItem[]): number => {
+    if (!Array.isArray(orders)) {
+      console.warn('calculateTotalHotelOrdersValue received non-array:', orders);
+      return 0;
+    }
     return orders.reduce((sum, order) => {
-      const price = parseFloat(order.total_price || '0');
-      return sum + (isNaN(price) ? 0 : price);
+      // Use total_price if available, otherwise calculate from price * quantity
+      if (order.total_price !== undefined) {
+        return sum + safeParseFloat(order.total_price);
+      }
+      return sum + safeParseFloat(order.price) * order.quantity;
     }, 0);
   };
 
@@ -757,7 +897,7 @@ export default function SiteManagement() {
         )}
       </div>
 
-      {/* Analytics Cards */}
+      {/* User Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -766,7 +906,7 @@ export default function SiteManagement() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
-              {analyticsLoading ? "..." : analytics?.total_users || users.length}
+              {usersLoading ? "..." : users.length}
             </div>
             <p className="text-xs text-gray-500">Registered users</p>
           </CardContent>
@@ -774,40 +914,40 @@ export default function SiteManagement() {
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Active Today</CardTitle>
+            <CardTitle className="text-sm font-medium">Active Users</CardTitle>
             <Activity className="h-4 w-4 text-green-500" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
-              {analyticsLoading ? "..." : analytics?.active_today || 0}
+              {usersLoading ? "..." : users.filter(u => u.is_active).length}
             </div>
-            <p className="text-xs text-gray-500">Users active in last 24h</p>
+            <p className="text-xs text-gray-500">Currently active users</p>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Visits</CardTitle>
-            <Eye className="h-4 w-4 text-blue-500" />
+            <CardTitle className="text-sm font-medium">Staff Members</CardTitle>
+            <Shield className="h-4 w-4 text-blue-500" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
-              {analyticsLoading ? "..." : analytics?.total_visits || 0}
+              {usersLoading ? "..." : users.filter(u => u.is_staff).length}
             </div>
-            <p className="text-xs text-gray-500">Page visits today</p>
+            <p className="text-xs text-gray-500">Staff users</p>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Avg. Session</CardTitle>
-            <Clock className="h-4 w-4 text-orange-500" />
+            <CardTitle className="text-sm font-medium">Total Orders</CardTitle>
+            <ShoppingBag className="h-4 w-4 text-orange-500" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
-              {analyticsLoading ? "..." : Math.round(analytics?.average_session_duration || 0)}
+              {laundryOrdersLoading ? "..." : allLaundryOrders.length + allHotelOrderItems.length}
             </div>
-            <p className="text-xs text-gray-500">Average session duration (seconds)</p>
+            <p className="text-xs text-gray-500">All orders created</p>
           </CardContent>
         </Card>
       </div>
@@ -818,10 +958,6 @@ export default function SiteManagement() {
           <TabsTrigger value="users" className="flex items-center gap-2">
             <Users className="h-4 w-4" />
             Users
-          </TabsTrigger>
-          <TabsTrigger value="activity" className="flex items-center gap-2">
-            <Activity className="h-4 w-4" />
-            Site Activity
           </TabsTrigger>
         </TabsList>
 
@@ -892,9 +1028,8 @@ export default function SiteManagement() {
                 <div className="space-y-4">
                   {filteredUsers.map((user) => {
                     const isExpanded = expandedUsers.has(user.id);
-                    const userVisits = pageVisits.filter((visit: any) => visit.user === user.id);
                     const userDataForUser = userData[user.id] || { laundryOrders: [], hotelOrders: [], customers: [] };
-                    const { laundryOrders, hotelOrders, customers } = userDataForUser;
+                    const { laundryOrders = [], hotelOrders = [], customers = [] } = userDataForUser;
                     const isLoading = loadingOrders.has(user.id);
 
                     return (
@@ -1001,13 +1136,6 @@ export default function SiteManagement() {
                                         </>
                                       )}
                                     </DropdownMenuItem>
-                                    <DropdownMenuItem onClick={() => {
-                                      setSelectedUserId(user.id);
-                                      setIsUserDetailsOpen(true);
-                                    }}>
-                                      <History className="mr-2 h-4 w-4" />
-                                      View Activity
-                                    </DropdownMenuItem>
                                     {!user.is_superuser && (
                                       <>
                                         <DropdownMenuSeparator />
@@ -1093,12 +1221,17 @@ export default function SiteManagement() {
                                     <div key={order.id} className="text-sm border-l-2 border-orange-200 pl-2">
                                       <div className="flex justify-between">
                                         <span>Order #{order.id}</span>
-                                        <span className="font-medium">KSh {parseFloat(order.total_price || '0').toFixed(2)}</span>
+                                        <span className="font-medium">KSh {order.total_price ? safeParseFloat(order.total_price).toFixed(2) : (safeParseFloat(order.price) * order.quantity).toFixed(2)}</span>
                                       </div>
                                       <p className="text-xs text-gray-500">
                                         Item: {order.food_item?.name || 'N/A'} (Qty: {order.quantity})
                                       </p>
                                       <p className="text-xs text-gray-500">{formatDate(order.created_at)}</p>
+                                      {order.food_item?.created_by && (
+                                        <p className="text-xs text-gray-500 italic">
+                                          Via food item created by: {order.food_item.created_by.email}
+                                        </p>
+                                      )}
                                     </div>
                                   ))}
                                   {hotelOrders.length === 0 && (
@@ -1137,6 +1270,7 @@ export default function SiteManagement() {
                                               <TableHead>Status</TableHead>
                                               <TableHead>Payment</TableHead>
                                               <TableHead>Delivery Date</TableHead>
+                                              <TableHead>Created By</TableHead>
                                             </TableRow>
                                           </TableHeader>
                                           <TableBody>
@@ -1155,10 +1289,10 @@ export default function SiteManagement() {
                                                   <Badge variant="outline">{order.shop}</Badge>
                                                 </TableCell>
                                                 <TableCell className="font-medium">
-                                                  KSh {parseFloat(order.total_price || '0').toFixed(2)}
+                                                  KSh {safeParseFloat(order.total_price).toFixed(2)}
                                                 </TableCell>
                                                 <TableCell>
-                                                  KSh {parseFloat(order.amount_paid || '0').toFixed(2)}
+                                                  KSh {safeParseFloat(order.amount_paid).toFixed(2)}
                                                 </TableCell>
                                                 <TableCell>
                                                   <Badge className={getOrderStatusColor(order.order_status)}>
@@ -1174,7 +1308,13 @@ export default function SiteManagement() {
                                                   </div>
                                                 </TableCell>
                                                 <TableCell>
-                                                  {new Date(order.delivery_date).toLocaleDateString()}
+                                                  {formatDate(order.delivery_date)}
+                                                </TableCell>
+                                                <TableCell>
+                                                  <div className="text-xs">
+                                                    <p className="font-medium">{order.created_by?.email || 'Unknown'}</p>
+                                                    <p className="text-gray-500">ID: {order.created_by?.id || 'N/A'}</p>
+                                                  </div>
                                                 </TableCell>
                                               </TableRow>
                                             ))}
@@ -1201,6 +1341,7 @@ export default function SiteManagement() {
                                               <TableHead>Price</TableHead>
                                               <TableHead>Total</TableHead>
                                               <TableHead>Created At</TableHead>
+                                              <TableHead>Created By</TableHead>
                                             </TableRow>
                                           </TableHeader>
                                           <TableBody>
@@ -1214,7 +1355,7 @@ export default function SiteManagement() {
                                                     <p className="font-medium">{order.food_item?.name || 'N/A'}</p>
                                                     {order.food_item?.created_by && (
                                                       <p className="text-xs text-gray-500">
-                                                        Created by: {order.food_item.created_by.email}
+                                                        Food item created by: {order.food_item.created_by.email}
                                                       </p>
                                                     )}
                                                   </div>
@@ -1226,13 +1367,23 @@ export default function SiteManagement() {
                                                   {order.quantity}
                                                 </TableCell>
                                                 <TableCell>
-                                                  KSh {parseFloat(order.price || '0').toFixed(2)}
+                                                  KSh {safeParseFloat(order.price).toFixed(2)}
                                                 </TableCell>
                                                 <TableCell className="font-medium">
-                                                  KSh {parseFloat(order.total_price || '0').toFixed(2)}
+                                                  KSh {order.total_price ? safeParseFloat(order.total_price).toFixed(2) : (safeParseFloat(order.price) * order.quantity).toFixed(2)}
                                                 </TableCell>
                                                 <TableCell>
                                                   {formatDate(order.created_at)}
+                                                </TableCell>
+                                                <TableCell>
+                                                  <div className="text-xs">
+                                                    <p className="font-medium">
+                                                      {order.created_by?.email || order.food_item?.created_by?.email || 'Unknown'}
+                                                    </p>
+                                                    <p className="text-gray-500">
+                                                      ID: {order.created_by?.id || order.food_item?.created_by?.id || 'N/A'}
+                                                    </p>
+                                                  </div>
                                                 </TableCell>
                                               </TableRow>
                                             ))}
@@ -1254,19 +1405,6 @@ export default function SiteManagement() {
                                 variant="outline"
                                 size="sm"
                                 className="w-full"
-                                onClick={() => {
-                                  setSelectedUserId(user.id);
-                                  setIsUserDetailsOpen(true);
-                                }}
-                              >
-                                <History className="h-4 w-4 mr-2" />
-                                View Full Activity History
-                              </Button>
-
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="w-full"
                                 onClick={() => window.open(`/orders?created_by=${user.id}`, '_blank')}
                               >
                                 <ExternalLink className="h-4 w-4 mr-2" />
@@ -1278,87 +1416,6 @@ export default function SiteManagement() {
                       </div>
                     );
                   })}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="activity">
-          <Card>
-            <CardHeader>
-              <CardTitle>Recent Site Activity</CardTitle>
-              <CardDescription>
-                Track all page visits and user interactions
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              {visitsLoading ? (
-                <div className="flex items-center justify-center h-64">
-                  <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
-                </div>
-              ) : pageVisits.length === 0 ? (
-                <div className="text-center py-12">
-                  <Globe className="mx-auto h-12 w-12 text-gray-400" />
-                  <h3 className="mt-4 text-sm font-medium text-gray-900">No activity recorded</h3>
-                  <p className="mt-1 text-sm text-gray-500">
-                    User activity will appear here once users start browsing the site
-                  </p>
-                </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>User</TableHead>
-                        <TableHead>Page</TableHead>
-                        <TableHead>Time</TableHead>
-                        <TableHead>Duration</TableHead>
-                        <TableHead>IP Address</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {pageVisits.map((visit: any) => (
-                        <TableRow key={visit.id}>
-                          <TableCell>
-                            <div className="flex items-center space-x-3">
-                              <Avatar className="h-8 w-8">
-                                <AvatarFallback className="text-xs">
-                                  {visit.user_email?.charAt(0).toUpperCase() || 'U'}
-                                </AvatarFallback>
-                              </Avatar>
-                              <div>
-                                <p className="font-medium">{visit.user_email || 'Unknown User'}</p>
-                                <p className="text-xs text-gray-500">User ID: {visit.user}</p>
-                              </div>
-                            </div>
-                          </TableCell>
-                          <TableCell>
-                            <div>
-                              <p className="font-medium">{visit.page_title || 'No title'}</p>
-                              <p className="text-xs text-gray-500 truncate max-w-xs">{visit.page_url || 'No URL'}</p>
-                            </div>
-                          </TableCell>
-                          <TableCell>
-                            <div>
-                              <p>{formatDate(visit.timestamp)}</p>
-                              <p className="text-xs text-gray-500">{formatTimeAgo(visit.timestamp)}</p>
-                            </div>
-                          </TableCell>
-                          <TableCell>
-                            <Badge variant="outline">
-                              {Math.round(visit.duration_seconds || 0)}s
-                            </Badge>
-                          </TableCell>
-                          <TableCell>
-                            <code className="text-xs bg-gray-100 px-2 py-1 rounded">
-                              {visit.ip_address || 'N/A'}
-                            </code>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
                 </div>
               )}
             </CardContent>
@@ -1735,78 +1792,6 @@ export default function SiteManagement() {
               )}
             </Button>
           </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* User Details Dialog */}
-      <Dialog open={isUserDetailsOpen} onOpenChange={setIsUserDetailsOpen}>
-        <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>User Activity Details</DialogTitle>
-          </DialogHeader>
-
-          {selectedUserId && (() => {
-            const user = users.find(u => u.id === selectedUserId);
-            if (!user) return null;
-
-            const userVisits = pageVisits.filter((visit: any) => visit.user === selectedUserId);
-
-            return (
-              <div className="space-y-4">
-                <div className="bg-gray-50 p-4 rounded-lg">
-                  <div className="flex items-center space-x-4 mb-4">
-                    <Avatar className="h-12 w-12">
-                      <AvatarFallback className="text-lg">
-                        {getUserInitials(user)}
-                      </AvatarFallback>
-                    </Avatar>
-                    <div>
-                      <h3 className="font-semibold">
-                        {user.first_name || user.last_name ? `${user.first_name || ''} ${user.last_name || ''}`.trim() : user.email}
-                      </h3>
-                      <p className="text-sm text-gray-600">{user.email}</p>
-                    </div>
-                  </div>
-                </div>
-
-                <div>
-                  <h4 className="font-medium mb-2">Recent Page Visits</h4>
-                  {userVisits.length > 0 ? (
-                    <div className="space-y-2">
-                      {userVisits.map((visit: any) => (
-                        <div key={visit.id} className="border rounded-lg p-3 hover:bg-gray-50">
-                          <div className="flex justify-between items-start">
-                            <div>
-                              <p className="font-medium">{visit.page_title || 'No title'}</p>
-                              <p className="text-sm text-gray-600 truncate max-w-2xl">
-                                {visit.page_url || 'No URL'}
-                              </p>
-                            </div>
-                            <div className="text-right">
-                              <p className="text-sm font-medium">{formatDate(visit.timestamp)}</p>
-                              <p className="text-xs text-gray-500">
-                                Duration: {Math.round(visit.duration_seconds || 0)}s
-                              </p>
-                            </div>
-                          </div>
-                          <div className="mt-2 flex items-center justify-between text-xs text-gray-500">
-                            <code className="bg-gray-100 px-2 py-1 rounded">
-                              IP: {visit.ip_address || 'N/A'}
-                            </code>
-                            <span>Session: {visit.session_id?.substring(0, 8) || 'Unknown'}...</span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="text-center py-8 text-gray-500">
-                      No page visits recorded for this user
-                    </div>
-                  )}
-                </div>
-              </div>
-            );
-          })()}
         </DialogContent>
       </Dialog>
     </div>

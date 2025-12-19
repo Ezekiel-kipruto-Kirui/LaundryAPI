@@ -22,7 +22,7 @@ import 'chartjs-plugin-datalabels';
 // Type imports
 import type { ChartDataset, ChartTypeRegistry, TooltipItem } from 'chart.js';
 
-// Interfaces (keep the same)
+// Interfaces
 interface HotelOrderItem {
   id: number;
   food_item: {
@@ -197,6 +197,15 @@ interface ProcessedData {
   selectedMonth?: number;
 }
 
+// Helper function to safely extract array from response
+const extractArrayFromResponse = (response: any): any[] => {
+  if (!response) return [];
+  if (Array.isArray(response)) return response;
+  if (response.data && Array.isArray(response.data)) return response.data;
+  if (response.results && Array.isArray(response.results)) return response.results;
+  return [];
+};
+
 export default function PerformanceReport() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -247,56 +256,98 @@ export default function PerformanceReport() {
     laundryExpenses: LaundryExpense[],
     customers: Customer[]
   ): ProcessedData => {
+    // Ensure arrays exist
+    hotelOrderItems = hotelOrderItems || [];
+    hotelExpenses = hotelExpenses || [];
+    laundryOrders = laundryOrders || [];
+    laundryExpenses = laundryExpenses || [];
+    customers = customers || [];
+
     // Filter data by date range
     const filteredHotelOrders = hotelOrderItems.filter(item => {
-      const itemDate = new Date(item.created_at);
-      const filterFrom = fromDate ? new Date(fromDate) : null;
-      const filterTo = toDate ? new Date(toDate) : null;
+      try {
+        if (!item?.created_at) {
+          return false;
+        }
+        const itemDate = new Date(item.created_at);
+        const filterFrom = fromDate ? new Date(fromDate) : null;
+        const filterTo = toDate ? new Date(toDate) : null;
 
-      if (filterFrom && itemDate < filterFrom) return false;
-      if (filterTo && itemDate > filterTo) return false;
-      if (filterYear && itemDate.getFullYear() !== filterYear) return false;
-      if (filterMonth) {
-        const [year, month] = filterMonth.split('-').map(Number);
-        if (itemDate.getFullYear() !== year || (itemDate.getMonth() + 1) !== month) return false;
+        if (filterFrom && itemDate < filterFrom) return false;
+        if (filterTo && itemDate > filterTo) return false;
+        if (filterYear && itemDate.getFullYear() !== filterYear) return false;
+        if (filterMonth) {
+          const [year, month] = filterMonth.split('-').map(Number);
+          if (itemDate.getFullYear() !== year || (itemDate.getMonth() + 1) !== month) return false;
+        }
+        return true;
+      } catch (e) {
+        return false;
       }
-      return true;
     });
 
     const filteredLaundryOrders = laundryOrders.filter(order => {
-      const orderDate = new Date(order.created_at);
-      const filterFrom = fromDate ? new Date(fromDate) : null;
-      const filterTo = toDate ? new Date(toDate) : null;
+      try {
+        if (!order?.created_at) return false;
+        const orderDate = new Date(order.created_at);
+        const filterFrom = fromDate ? new Date(fromDate) : null;
+        const filterTo = toDate ? new Date(toDate) : null;
 
-      if (filterFrom && orderDate < filterFrom) return false;
-      if (filterTo && orderDate > filterTo) return false;
-      if (filterYear && orderDate.getFullYear() !== filterYear) return false;
-      if (filterMonth) {
-        const [year, month] = filterMonth.split('-').map(Number);
-        if (orderDate.getFullYear() !== year || (orderDate.getMonth() + 1) !== month) return false;
+        if (filterFrom && orderDate < filterFrom) return false;
+        if (filterTo && orderDate > filterTo) return false;
+        if (filterYear && orderDate.getFullYear() !== filterYear) return false;
+        if (filterMonth) {
+          const [year, month] = filterMonth.split('-').map(Number);
+          if (orderDate.getFullYear() !== year || (orderDate.getMonth() + 1) !== month) return false;
+        }
+        return true;
+      } catch (e) {
+        return false;
       }
-      return true;
     });
 
     // Calculate hotel revenue
-    const hotelRevenue = filteredHotelOrders.reduce((sum, item) =>
-      sum + parseFloat(item.total_price), 0
-    );
+    const hotelRevenue = filteredHotelOrders.reduce((sum, item) => {
+      try {
+        const priceStr = item.total_price || item.price || '0';
+        const price = parseFloat(priceStr);
+        if (isNaN(price)) {
+          return sum;
+        }
+        return sum + price;
+      } catch (e) {
+        return sum;
+      }
+    }, 0);
 
     // Calculate laundry revenue
-    const laundryRevenue = filteredLaundryOrders.reduce((sum, order) =>
-      sum + parseFloat(order.total_price), 0
-    );
+    const laundryRevenue = filteredLaundryOrders.reduce((sum, order) => {
+      try {
+        const price = parseFloat(order.total_price) || 0;
+        return sum + price;
+      } catch (e) {
+        return sum;
+      }
+    }, 0);
 
     // Calculate hotel expenses
-    const hotelExpensesTotal = hotelExpenses.reduce((sum, expense) =>
-      sum + parseFloat(expense.amount), 0
-    );
+    const hotelExpensesTotal = hotelExpenses.reduce((sum, expense) => {
+      try {
+        const amount = parseFloat(expense.amount || '0') || 0;
+        return sum + amount;
+      } catch (e) {
+        return sum;
+      }
+    }, 0);
 
     // Calculate laundry expenses
-    const laundryExpensesTotal = laundryExpenses.reduce((sum, expense) =>
-      sum + parseFloat(expense.amount), 0
-    );
+    const laundryExpensesTotal = laundryExpenses.reduce((sum, expense) => {
+      try {
+        return sum + (parseFloat(expense.amount) || 0);
+      } catch (e) {
+        return sum;
+      }
+    }, 0);
 
     // Calculate total expenses
     const totalBusinessExpenses = hotelExpensesTotal + laundryExpensesTotal;
@@ -310,12 +361,21 @@ export default function PerformanceReport() {
     const shopAOrders = filteredLaundryOrders.filter(order => order.shop === 'Shop A');
     const shopBOrders = filteredLaundryOrders.filter(order => order.shop === 'Shop B');
 
-    const shopARevenue = shopAOrders.reduce((sum, order) =>
-      sum + parseFloat(order.total_price), 0
-    );
-    const shopBRevenue = shopBOrders.reduce((sum, order) =>
-      sum + parseFloat(order.total_price), 0
-    );
+    const shopARevenue = shopAOrders.reduce((sum, order) => {
+      try {
+        return sum + (parseFloat(order.total_price) || 0);
+      } catch (e) {
+        return sum;
+      }
+    }, 0);
+
+    const shopBRevenue = shopBOrders.reduce((sum, order) => {
+      try {
+        return sum + (parseFloat(order.total_price) || 0);
+      } catch (e) {
+        return sum;
+      }
+    }, 0);
 
     // Calculate payment method amounts
     const cashPayments = filteredLaundryOrders.filter(order => order.payment_type === 'cash');
@@ -323,31 +383,60 @@ export default function PerformanceReport() {
     const cardPayments = filteredLaundryOrders.filter(order => order.payment_type === 'card');
     const bankPayments = filteredLaundryOrders.filter(order => order.payment_type === 'bank');
     const otherPayments = filteredLaundryOrders.filter(order =>
-      !['cash', 'mpesa', 'card', 'bank', 'none', 'None'].includes(order.payment_type)
+      order.payment_type && !['cash', 'mpesa', 'card', 'bank', 'none', 'None'].includes(order.payment_type)
     );
     const nonepayment = filteredLaundryOrders.filter(order =>
       order.payment_type === 'none' || order.payment_type === 'None'
     );
 
     // Calculate payment amounts for each method
-    const cashPaymentsAmount = cashPayments.reduce((sum, order) =>
-      sum + parseFloat(order.total_price), 0
-    );
-    const mpesaPaymentsAmount = mpesaPayments.reduce((sum, order) =>
-      sum + parseFloat(order.total_price), 0
-    );
-    const cardPaymentsAmount = cardPayments.reduce((sum, order) =>
-      sum + parseFloat(order.total_price), 0
-    );
-    const bankTransferPaymentsAmount = bankPayments.reduce((sum, order) =>
-      sum + parseFloat(order.total_price), 0
-    );
-    const otherPaymentsAmount = otherPayments.reduce((sum, order) =>
-      sum + parseFloat(order.total_price), 0
-    );
-    const nonePaymentsAmount = nonepayment.reduce((sum, order) =>
-      sum + parseFloat(order.total_price), 0
-    );
+    const cashPaymentsAmount = cashPayments.reduce((sum, order) => {
+      try {
+        return sum + (parseFloat(order.total_price) || 0);
+      } catch (e) {
+        return sum;
+      }
+    }, 0);
+
+    const mpesaPaymentsAmount = mpesaPayments.reduce((sum, order) => {
+      try {
+        return sum + (parseFloat(order.total_price) || 0);
+      } catch (e) {
+        return sum;
+      }
+    }, 0);
+
+    const cardPaymentsAmount = cardPayments.reduce((sum, order) => {
+      try {
+        return sum + (parseFloat(order.total_price) || 0);
+      } catch (e) {
+        return sum;
+      }
+    }, 0);
+
+    const bankTransferPaymentsAmount = bankPayments.reduce((sum, order) => {
+      try {
+        return sum + (parseFloat(order.total_price) || 0);
+      } catch (e) {
+        return sum;
+      }
+    }, 0);
+
+    const otherPaymentsAmount = otherPayments.reduce((sum, order) => {
+      try {
+        return sum + (parseFloat(order.total_price) || 0);
+      } catch (e) {
+        return sum;
+      }
+    }, 0);
+
+    const nonePaymentsAmount = nonepayment.reduce((sum, order) => {
+      try {
+        return sum + (parseFloat(order.total_price) || 0);
+      } catch (e) {
+        return sum;
+      }
+    }, 0);
 
     // Calculate payment status
     const pendingPayments = filteredLaundryOrders.filter(order => order.payment_status === 'pending');
@@ -355,25 +444,44 @@ export default function PerformanceReport() {
     const completePayments = filteredLaundryOrders.filter(order => order.payment_status === 'complete');
 
     // Calculate total amounts for each payment status
-    const totalPendingAmount = pendingPayments.reduce((sum, order) =>
-      sum + parseFloat(order.total_price), 0
-    );
-    const totalPartialAmount = partialPayments.reduce((sum, order) =>
-      sum + parseFloat(order.total_price), 0
-    );
-    const totalCompleteAmount = completePayments.reduce((sum, order) =>
-      sum + parseFloat(order.total_price), 0
-    );
+    const totalPendingAmount = pendingPayments.reduce((sum, order) => {
+      try {
+        return sum + (parseFloat(order.total_price) || 0);
+      } catch (e) {
+        return sum;
+      }
+    }, 0);
+
+    const totalPartialAmount = partialPayments.reduce((sum, order) => {
+      try {
+        return sum + (parseFloat(order.total_price) || 0);
+      } catch (e) {
+        return sum;
+      }
+    }, 0);
+
+    const totalCompleteAmount = completePayments.reduce((sum, order) => {
+      try {
+        return sum + (parseFloat(order.total_price) || 0);
+      } catch (e) {
+        return sum;
+      }
+    }, 0);
 
     // Calculate customer spending
     const customerSpending: Record<string, { name: string; count: number; total: number }> = {};
     filteredLaundryOrders.forEach(order => {
-      const customerName = order.customer.name;
-      if (!customerSpending[customerName]) {
-        customerSpending[customerName] = { name: customerName, count: 0, total: 0 };
+      try {
+        if (!order.customer?.name) return;
+        const customerName = order.customer.name;
+        if (!customerSpending[customerName]) {
+          customerSpending[customerName] = { name: customerName, count: 0, total: 0 };
+        }
+        customerSpending[customerName].count++;
+        customerSpending[customerName].total += (parseFloat(order.total_price) || 0);
+      } catch (e) {
+        // Silently handle errors
       }
-      customerSpending[customerName].count++;
-      customerSpending[customerName].total += parseFloat(order.total_price);
     });
 
     const topCustomers = Object.values(customerSpending)
@@ -388,11 +496,17 @@ export default function PerformanceReport() {
     // Calculate service frequencies
     const serviceCounts: Record<string, number> = {};
     filteredLaundryOrders.forEach(order => {
-      order.items.forEach(item => {
-        item.servicetype.forEach(service => {
-          serviceCounts[service] = (serviceCounts[service] || 0) + 1;
+      try {
+        order.items?.forEach(item => {
+          item.servicetype?.forEach(service => {
+            if (service) {
+              serviceCounts[service] = (serviceCounts[service] || 0) + 1;
+            }
+          });
         });
-      });
+      } catch (e) {
+        // Silently handle errors
+      }
     });
 
     const topServices = Object.entries(serviceCounts)
@@ -402,9 +516,15 @@ export default function PerformanceReport() {
     // Calculate item frequencies
     const itemCounts: Record<string, number> = {};
     filteredLaundryOrders.forEach(order => {
-      order.items.forEach(item => {
-        itemCounts[item.itemname] = (itemCounts[item.itemname] || 0) + 1;
-      });
+      try {
+        order.items?.forEach(item => {
+          if (item.itemname) {
+            itemCounts[item.itemname] = (itemCounts[item.itemname] || 0) + 1;
+          }
+        });
+      } catch (e) {
+        // Silently handle errors
+      }
     });
 
     const topItems = Object.entries(itemCounts)
@@ -417,13 +537,22 @@ export default function PerformanceReport() {
     const monthlyLaundryRevenue = Array(12).fill(0);
 
     filteredHotelOrders.forEach(item => {
-      const month = new Date(item.created_at).getMonth();
-      monthlyHotelRevenue[month] += parseFloat(item.total_price);
+      try {
+        const month = new Date(item.created_at).getMonth();
+        const price = parseFloat(item.total_price || item.price || '0') || 0;
+        monthlyHotelRevenue[month] += price;
+      } catch (e) {
+        // Silently handle errors
+      }
     });
 
     filteredLaundryOrders.forEach(order => {
-      const month = new Date(order.created_at).getMonth();
-      monthlyLaundryRevenue[month] += parseFloat(order.total_price);
+      try {
+        const month = new Date(order.created_at).getMonth();
+        monthlyLaundryRevenue[month] += (parseFloat(order.total_price) || 0);
+      } catch (e) {
+        // Silently handle errors
+      }
     });
 
     return {
@@ -435,8 +564,8 @@ export default function PerformanceReport() {
       // Hotel Stats
       hotelRevenue,
       hotelTotalOrders: filteredHotelOrders.length,
-      hotelInProgressOrders: 0,
-      hotelServedOrders: 0,
+      hotelInProgressOrders: filteredHotelOrders.filter(item => item.order?.status === 'in_progress').length || 0,
+      hotelServedOrders: filteredHotelOrders.filter(item => item.order?.status === 'served').length || 0,
       hotelNetProfit,
       hotelTotalExpenses: hotelExpensesTotal,
 
@@ -448,7 +577,13 @@ export default function PerformanceReport() {
       bankTransferPaymentsAmount,
       otherPaymentsAmount,
       nonePaymentsAmount,
-      totalBalanceAmount: filteredLaundryOrders.reduce((sum, order) => sum + parseFloat(order.balance), 0),
+      totalBalanceAmount: filteredLaundryOrders.reduce((sum, order) => {
+        try {
+          return sum + (parseFloat(order.balance) || 0);
+        } catch (e) {
+          return sum;
+        }
+      }, 0),
       pendingPayments: pendingPayments.length,
       totalPendingAmount,
       partialPayments: partialPayments.length,
@@ -462,33 +597,33 @@ export default function PerformanceReport() {
       shopATotalOrders: shopAOrders.length,
       shopAPendingPayments: shopAOrders.filter(o => o.payment_status === 'pending').length,
       shopAPendingAmount: shopAOrders.filter(o => o.payment_status === 'pending')
-        .reduce((sum, order) => sum + parseFloat(order.total_price), 0),
+        .reduce((sum, order) => sum + (parseFloat(order.total_price) || 0), 0),
       shopAPartialPayments: shopAOrders.filter(o => o.payment_status === 'partial').length,
       shopAPartialAmount: shopAOrders.filter(o => o.payment_status === 'partial')
-        .reduce((sum, order) => sum + parseFloat(order.total_price), 0),
+        .reduce((sum, order) => sum + (parseFloat(order.total_price) || 0), 0),
       shopACompletePayments: shopAOrders.filter(o => o.payment_status === 'complete').length,
       shopACompleteAmount: shopAOrders.filter(o => o.payment_status === 'complete')
-        .reduce((sum, order) => sum + parseFloat(order.total_price), 0),
+        .reduce((sum, order) => sum + (parseFloat(order.total_price) || 0), 0),
       shopANetProfit: shopARevenue - laundryExpenses.filter(e => e.shop === 'Shop A')
-        .reduce((sum, expense) => sum + parseFloat(expense.amount), 0),
+        .reduce((sum, expense) => sum + (parseFloat(expense.amount) || 0), 0),
       shopATotalExpenses: laundryExpenses.filter(e => e.shop === 'Shop A')
-        .reduce((sum, expense) => sum + parseFloat(expense.amount), 0),
+        .reduce((sum, expense) => sum + (parseFloat(expense.amount) || 0), 0),
 
       shopBRevenue,
       shopBTotalOrders: shopBOrders.length,
       shopBPendingPayments: shopBOrders.filter(o => o.payment_status === 'pending').length,
       shopBPendingAmount: shopBOrders.filter(o => o.payment_status === 'pending')
-        .reduce((sum, order) => sum + parseFloat(order.total_price), 0),
+        .reduce((sum, order) => sum + (parseFloat(order.total_price) || 0), 0),
       shopBPartialPayments: shopBOrders.filter(o => o.payment_status === 'partial').length,
       shopBPartialAmount: shopBOrders.filter(o => o.payment_status === 'partial')
-        .reduce((sum, order) => sum + parseFloat(order.total_price), 0),
+        .reduce((sum, order) => sum + (parseFloat(order.total_price) || 0), 0),
       shopBCompletePayments: shopBOrders.filter(o => o.payment_status === 'complete').length,
       shopBCompleteAmount: shopBOrders.filter(o => o.payment_status === 'complete')
-        .reduce((sum, order) => sum + parseFloat(order.total_price), 0),
+        .reduce((sum, order) => sum + (parseFloat(order.total_price) || 0), 0),
       shopBNetProfit: shopBRevenue - laundryExpenses.filter(e => e.shop === 'Shop B')
-        .reduce((sum, expense) => sum + parseFloat(expense.amount), 0),
+        .reduce((sum, expense) => sum + (parseFloat(expense.amount) || 0), 0),
       shopBTotalExpenses: laundryExpenses.filter(e => e.shop === 'Shop B')
-        .reduce((sum, expense) => sum + parseFloat(expense.amount), 0),
+        .reduce((sum, expense) => sum + (parseFloat(expense.amount) || 0), 0),
 
       // Chart Data
       revenueComparisonLabels: ['Laundry', 'Hotel'],
@@ -530,25 +665,139 @@ export default function PerformanceReport() {
 
     try {
       // Fetch all data in parallel
-      const [hotelOrderItems, hotelExpenses, laundryOrders, laundryExpenses, customers] = await Promise.all([
-        fetchApi<HotelOrderItem[]>('order-items/', { method: 'GET' }, 'hotel'),
-        fetchApi<HotelExpense[]>('Hotelexpense-records/', { method: 'GET' }, 'hotel'),
-        fetchApi<LaundryOrder[]>('orders/', { method: 'GET' }, 'laundry'),
-        fetchApi<LaundryExpense[]>('expense-records/', { method: 'GET' }, 'laundry'),
-        fetchApi<Customer[]>('customers/', { method: 'GET' }, 'laundry')
+      const [
+        hotelOrderItemsResponse,
+        hotelExpensesResponse,
+        laundryOrdersResponse,
+        laundryExpensesResponse,
+        customersResponse
+      ] = await Promise.allSettled([
+        fetchApi('order-items/', { method: 'GET' }, 'hotel'),
+        fetchApi('Hotelexpense-records/', { method: 'GET' }, 'hotel'),
+        fetchApi('orders/', { method: 'GET' }, 'laundry'),
+        fetchApi('expense-records/', { method: 'GET' }, 'laundry'),
+        fetchApi('customers/', { method: 'GET' }, 'laundry')
       ]);
 
-      // Process the data
-      const processedData = processData(hotelOrderItems, hotelExpenses, laundryOrders, laundryExpenses, customers);
+      // Extract data from responses with error handling
+      const hotelOrderItems = extractArrayFromResponse(
+        hotelOrderItemsResponse.status === 'fulfilled' ? hotelOrderItemsResponse.value : null
+      );
+
+      const hotelExpenses = extractArrayFromResponse(
+        hotelExpensesResponse.status === 'fulfilled' ? hotelExpensesResponse.value : null
+      );
+
+      const laundryOrders = extractArrayFromResponse(
+        laundryOrdersResponse.status === 'fulfilled' ? laundryOrdersResponse.value : null
+      );
+
+      const laundryExpenses = extractArrayFromResponse(
+        laundryExpensesResponse.status === 'fulfilled' ? laundryExpensesResponse.value : null
+      );
+
+      const customers = extractArrayFromResponse(
+        customersResponse.status === 'fulfilled' ? customersResponse.value : null
+      );
+
+      // Process the data even if some requests failed
+      const processedData = processData(
+        hotelOrderItems as HotelOrderItem[],
+        hotelExpenses as HotelExpense[],
+        laundryOrders as LaundryOrder[],
+        laundryExpenses as LaundryExpense[],
+        customers as Customer[]
+      );
+
       setData(processedData);
 
     } catch (err: any) {
-      console.error("Fetch Error:", err);
-      setError(`Failed to fetch dashboard data: ${err.message}`);
+      let errorMessage = `Failed to fetch dashboard data: ${err.message}`;
+      if (err.response) {
+        errorMessage += ` (Status: ${err.response.status})`;
+      }
+      setError(errorMessage);
+
+      // Set empty data structure to prevent further errors
+      setData({
+        // Summary Stats
+        totalBusinessRevenue: 0,
+        totalNetProfit: 0,
+        totalBusinessExpenses: 0,
+
+        // Hotel Stats
+        hotelRevenue: 0,
+        hotelTotalOrders: 0,
+        hotelInProgressOrders: 0,
+        hotelServedOrders: 0,
+        hotelNetProfit: 0,
+        hotelTotalExpenses: 0,
+
+        // Laundry Stats
+        laundryRevenue: 0,
+        cashPaymentsAmount: 0,
+        mpesaPaymentsAmount: 0,
+        cardPaymentsAmount: 0,
+        bankTransferPaymentsAmount: 0,
+        otherPaymentsAmount: 0,
+        nonePaymentsAmount: 0,
+        totalBalanceAmount: 0,
+        pendingPayments: 0,
+        totalPendingAmount: 0,
+        partialPayments: 0,
+        totalPartialAmount: 0,
+        completePayments: 0,
+        totalCompleteAmount: 0,
+        totalExpenses: 0,
+
+        // Shop Stats
+        shopARevenue: 0,
+        shopATotalOrders: 0,
+        shopAPendingPayments: 0,
+        shopAPendingAmount: 0,
+        shopAPartialPayments: 0,
+        shopAPartialAmount: 0,
+        shopACompletePayments: 0,
+        shopACompleteAmount: 0,
+        shopANetProfit: 0,
+        shopATotalExpenses: 0,
+
+        shopBRevenue: 0,
+        shopBTotalOrders: 0,
+        shopBPendingPayments: 0,
+        shopBPendingAmount: 0,
+        shopBPartialPayments: 0,
+        shopBPartialAmount: 0,
+        shopBCompletePayments: 0,
+        shopBCompleteAmount: 0,
+        shopBNetProfit: 0,
+        shopBTotalExpenses: 0,
+
+        // Chart Data
+        revenueComparisonLabels: [],
+        revenueComparisonData: [],
+        revenueComparisonColors: [],
+
+        pieChartLabels: [],
+        pieChartValues: [],
+
+        lineChartData: [],
+
+        servicesLabels: [],
+        servicesCounts: [],
+
+        itemLabels: [],
+        itemCounts: [],
+
+        commonCustomers: [],
+
+        currentYear: filterYear,
+        selectedMonth: filterMonth ? parseInt(filterMonth.split('-')[1]) : undefined
+      });
     } finally {
       setLoading(false);
     }
-  }, [processData]);
+  }, [processData, filterYear, filterMonth]);
 
   // Initialize real-time updates
   useEffect(() => {
@@ -1229,7 +1478,7 @@ export default function PerformanceReport() {
                 <span className="text-sm font-semibold text-gray-700">Revenue</span>
               </div>
               <div className="text-xl font-bold text-gray-900 mb-1">Ksh {formatCurrencyFull(data?.hotelRevenue || 0)}</div>
-              <div className="text-xs text-gray-500">Hotel earnings</div>
+              <div className="text-xs text-gray-500">{data?.hotelTotalOrders || 0} orders</div>
             </div>
 
             {/* Hotel Orders */}

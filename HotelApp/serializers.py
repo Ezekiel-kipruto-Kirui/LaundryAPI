@@ -21,128 +21,76 @@ class FoodCategorySerializer(serializers.ModelSerializer):
         model = FoodCategory
         fields = ['id', 'name']
 
-
-
 class FoodItemSerializer(serializers.ModelSerializer):
-    category = FoodCategorySerializer(read_only=True)
-    category_id = serializers.PrimaryKeyRelatedField(
-        queryset=FoodCategory.objects.all(),
-        write_only=True
-    )
-    created_by = UserProfileSerializer(read_only=True)
-
+    category_name = serializers.CharField(source='category.name', read_only=True)
+    created_by_name = serializers.CharField(source='created_by.username', read_only=True)
+    
     class Meta:
         model = FoodItem
-        fields = [
-            'id', 'name', 'category', 'category_id',
-            'created_by', 'quantity'
-        ]
-
-    def create(self, validated_data):
-        category = validated_data.pop("category_id")
-        validated_data["category"] = category
-        
-        request = self.context.get("request")
-        if request and request.user.is_authenticated:
-            validated_data['created_by'] = request.user
-            
-        return super().create(validated_data)
-
-
+        fields = '__all__'
+        read_only_fields = ['created_by']
 
 class HotelOrderItemSerializer(serializers.ModelSerializer):
+    food_item_name = serializers.CharField(source='food_item.name', read_only=True)
+    total_price = serializers.SerializerMethodField()
+    
     class Meta:
         model = HotelOrderItem
         fields = '__all__'
+        read_only_fields = ['created_at']
+    
+    def get_total_price(self, obj):
+        return obj.get_total_price()
 
-class HotelOrderSerializer(serializers.ModelSerializer):
-    created_by = UserProfileSerializer(read_only=True)
-    order_items = HotelOrderItemSerializer(many=True)
-    total_order_price = serializers.DecimalField(
-        max_digits=10, decimal_places=2,
-        read_only=True, source='get_total'
-    )
-
+class HotelOrderCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = HotelOrder
-        fields = [
-            'id', 'created_by', 'created_at',
-            'order_items', 'total_order_price'
-        ]
-        read_only_fields = ['created_at']
-
+        fields = ['id']  # Only need ID field for creation
+        read_only_fields = ['created_by', 'created_at']
+    
     def create(self, validated_data):
-        order_items_data = validated_data.pop("order_items")
+        request = self.context.get('request')
+        user = request.user if request else None
         
-        request = self.context.get("request")
-        if request and request.user.is_authenticated:
-            validated_data["created_by"] = request.user
-
-        order = HotelOrder.objects.create(**validated_data)
-
-        # Create order items
-        for item_data in order_items_data:
-            food_item = item_data.pop("food_item_id")
-            HotelOrderItem.objects.create(
-                order=order,
-                food_item=food_item,
-                **item_data
-            )
-
-        # Update food item quantities
-        for order_item in order.order_items.all():
-            food_item = order_item.food_item
-            if food_item.quantity >= order_item.quantity:
-                food_item.quantity -= order_item.quantity
-                food_item.save()
-            else:
-                raise serializers.ValidationError(
-                    f"Insufficient stock for {food_item.name}. "
-                    f"Available: {food_item.quantity}, Requested: {order_item.quantity}"
-                )
-
+        # Create order with current user
+        order = HotelOrder.objects.create(created_by=user)
         return order
 
-    def update(self, instance, validated_data):
-        order_items_data = validated_data.pop("order_items", None)
-
-        # Update order items if provided
-        if order_items_data is not None:
-            # Restore previous quantities
-            for old_item in instance.order_items.all():
-                food_item = old_item.food_item
-                food_item.quantity += old_item.quantity
-                food_item.save()
-            
-            # Delete old items
-            instance.order_items.all().delete()
-            
-            # Create new items
-            for item_data in order_items_data:
-                food_item = item_data.pop("food_item_id")
-                order_item = HotelOrderItem.objects.create(
-                    order=instance,
-                    food_item=food_item,
-                    **item_data
-                )
-                
-                # Update food item quantities
-                if food_item.quantity >= order_item.quantity:
-                    food_item.quantity -= order_item.quantity
-                    food_item.save()
-                else:
-                    raise serializers.ValidationError(
-                        f"Insufficient stock for {food_item.name}. "
-                        f"Available: {food_item.quantity}, Requested: {order_item.quantity}"
-                    )
-
-        # Update other order fields if any
-        for attr, value in validated_data.items():
-            setattr(instance, attr, value)
-        instance.save()
-
-        return instance
-
+class HotelOrderSerializer(serializers.ModelSerializer):
+    order_items = HotelOrderItemSerializer(many=True, read_only=True)
+    total_amount = serializers.SerializerMethodField()
+    created_by_username = serializers.CharField(source='created_by.username', read_only=True)
+    created_by_email = serializers.CharField(source='created_by.email', read_only=True)
+    
+    class Meta:
+        model = HotelOrder
+        fields = '__all__'
+        read_only_fields = ['created_by', 'created_at']
+    
+    def get_total_amount(self, obj):
+        return obj.get_total()
+# serializers.py
+class HotelOrderCreateSerializer(serializers.ModelSerializer):
+    items = HotelOrderItemSerializer(many=True, write_only=True, required=False)
+    
+    class Meta:
+        model = HotelOrder
+        fields = ['id', 'created_by', 'created_at', 'items']
+        read_only_fields = ['created_by', 'created_at']
+    
+    def create(self, validated_data):
+        items_data = validated_data.pop('items', [])
+        request = self.context.get('request')
+        
+        order = HotelOrder.objects.create(
+            created_by=request.user if request and request.user else None
+        )
+        
+        # Create order items
+        for item_data in items_data:
+            HotelOrderItem.objects.create(order=order, **item_data)
+        
+        return order
 
 
 class HotelExpenseFieldSerializer(serializers.ModelSerializer):

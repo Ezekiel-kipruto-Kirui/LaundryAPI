@@ -1,13 +1,14 @@
 // utils/auth.ts
 
 import { User } from "@/services/types";
+
 export type UserRole = 'admin' | 'staff';
 export type ShopType = 'Shop A' | 'Shop B' | null;
 
 const isBrowser = () => typeof window !== 'undefined';
 
 /* ------------------------------------------------------------------ */
-/* Core helpers                                                        */
+/* Storage Utilities                                                   */
 /* ------------------------------------------------------------------ */
 
 const getFromStorage = <T = any>(key: string): T | null => {
@@ -27,8 +28,7 @@ const setToStorage = (key: string, value: any): void => {
     if (!isBrowser()) return;
 
     try {
-        const serialized = JSON.stringify(value);
-        localStorage.setItem(key, serialized);
+        localStorage.setItem(key, JSON.stringify(value));
     } catch {
         // Silently fail on storage errors
     }
@@ -66,11 +66,8 @@ export const setAuthTokens = (accessToken: string, refreshToken: string): void =
 export const clearAuthTokens = (): void => {
     if (!isBrowser()) return;
 
-    ['access_token', 'refresh_token', 'accessToken', 'refreshToken', 'token'].forEach(
-        token => {
-            localStorage.removeItem(token);
-            sessionStorage.removeItem(token);
-        }
+    ['access_token', 'refresh_token', 'accessToken', 'refreshToken'].forEach(
+        key => localStorage.removeItem(key)
     );
 };
 
@@ -79,12 +76,10 @@ export const clearAuthTokens = (): void => {
 /* ------------------------------------------------------------------ */
 
 export const getUserData = (): User | null => {
-    const data = getFromStorage<User>('current_user');
-    return data;
+    return getFromStorage<User>('current_user');
 };
 
 export const setUserData = (userData: User): void => {
-    if (!isBrowser()) return;
     setToStorage('current_user', userData);
 };
 
@@ -92,88 +87,64 @@ export const setUserEmail = (email: string): void => {
     const userData = getUserData();
     if (!userData) return;
 
-    const updatedUser: User = {
-        ...userData,
-        email: email
-    };
-
-    setUserData(updatedUser);
+    setUserData({ ...userData, email });
 };
 
 /* ------------------------------------------------------------------ */
 /* Shop Management                                                     */
 /* ------------------------------------------------------------------ */
 
+const SHOP_MAPPING = {
+    'laundry': 'Shop A' as const,
+    'hotel': 'Shop B' as const
+} as const;
+
+const REVERSE_SHOP_MAPPING = {
+    'Shop A': 'laundry' as const,
+    'Shop B': 'hotel' as const
+} as const;
+
 export const getSelectedShop = (): ShopType => {
     if (!isBrowser()) return null;
-
     const shop = localStorage.getItem('selected_shop') as ShopType;
     return shop || null;
 };
 
 export const setSelectedShop = (shop: ShopType): void => {
     if (!isBrowser()) return;
-
-    if (shop) {
-        localStorage.setItem('selected_shop', shop);
-    } else {
-        localStorage.removeItem('selected_shop');
-    }
+    shop ? localStorage.setItem('selected_shop', shop) : localStorage.removeItem('selected_shop');
 };
 
 export const setSelectedShopByType = (shopType: 'laundry' | 'hotel'): void => {
-    if (!isBrowser()) return;
-
-    const shopMapping: Record<'laundry' | 'hotel', ShopType> = {
-        'laundry': 'Shop A',
-        'hotel': 'Shop B'
-    };
-
-    const shop = shopMapping[shopType];
-    setSelectedShop(shop);
+    setSelectedShop(SHOP_MAPPING[shopType]);
 };
 
 export const getSelectedShopType = (): 'laundry' | 'hotel' | null => {
     const shop = getSelectedShop();
-    if (!shop) return null;
-
-    const shopMapping: Record<ShopType, 'laundry' | 'hotel'> = {
-        'Shop A': 'laundry',
-        'Shop B': 'hotel'
-    };
-
-    return shopMapping[shop] || null;
+    return shop ? REVERSE_SHOP_MAPPING[shop] || null : null;
 };
 
 export const clearSelectedShop = (): void => {
-    if (!isBrowser()) return;
-    localStorage.removeItem('selected_shop');
+    removeFromStorage('selected_shop');
 };
 
 /* ------------------------------------------------------------------ */
-/* User & role helpers                                                 */
+/* User & Role Helpers                                                 */
 /* ------------------------------------------------------------------ */
 
 export const getUserRole = (): UserRole | null => {
     const user = getUserData();
     if (!user) return null;
 
-    if (user.user_type === 'admin' || user.is_superuser) {
-        return 'admin';
-    }
-
-    if (user.user_type === 'staff' || user.is_staff) {
-        return 'staff';
-    }
-
+    if (user.user_type === 'admin' || user.is_superuser) return 'admin';
+    if (user.user_type === 'staff' || user.is_staff) return 'staff';
     return null;
 };
 
 export const isAdmin = () => getUserRole() === 'admin';
 export const isStaff = () => getUserRole() === 'staff';
 
-export const getUserEmail = (): string =>
-    getUserData()?.email ?? '';
+export const getUserEmail = (): string => getUserData()?.email ?? '';
 
 export const getUserFullName = (): string => {
     const user = getUserData();
@@ -184,8 +155,17 @@ export const getUserFullName = (): string => {
 };
 
 /* ------------------------------------------------------------------ */
-/* Auth state validation                                               */
+/* Auth State Validation                                               */
 /* ------------------------------------------------------------------ */
+
+const validateToken = (token: string): boolean => {
+    try {
+        const payload = JSON.parse(atob(token.split('.')[1]));
+        return payload.exp * 1000 > Date.now();
+    } catch {
+        return false;
+    }
+};
 
 export const validateAuthState = (): boolean => {
     if (!isBrowser()) return false;
@@ -194,39 +174,24 @@ export const validateAuthState = (): boolean => {
     const user = getUserData();
 
     if (!token || !user) return false;
-
-    try {
-        const payload = JSON.parse(atob(token.split('.')[1]));
-        const isExpired = payload.exp * 1000 < Date.now();
-        return !isExpired;
-    } catch {
-        return true;
-    }
+    return validateToken(token);
 };
 
-export const isAuthenticated = (): boolean => {
-    return validateAuthState();
-};
+export const isAuthenticated = (): boolean => validateAuthState();
 
 /* ------------------------------------------------------------------ */
-/* Complete Auth cleanup                                               */
+/* Complete Auth Cleanup                                               */
 /* ------------------------------------------------------------------ */
 
 export const clearAuthData = (): void => {
     if (!isBrowser()) return;
 
-    removeFromStorage('current_user');
+    ['current_user', 'selected_shop'].forEach(removeFromStorage);
     clearAuthTokens();
-    clearSelectedShop();
-
-    ['current_user', 'user', 'selected_shop', 'shop_preference'].forEach(key => {
-        localStorage.removeItem(key);
-        sessionStorage.removeItem(key);
-    });
 };
 
 /* ------------------------------------------------------------------ */
-/* Helper functions for API integration                                */
+/* Helper Functions for API Integration                                */
 /* ------------------------------------------------------------------ */
 
 export const getAuthHeaders = (): Record<string, string> => {
@@ -235,18 +200,11 @@ export const getAuthHeaders = (): Record<string, string> => {
         'Content-Type': 'application/json',
     };
 
-    if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
-    }
-
+    if (token) headers['Authorization'] = `Bearer ${token}`;
     return headers;
 };
 
-export const handleLoginSuccess = (data: {
-    access: string;
-    refresh: string;
-    user: User;
-}): void => {
+export const handleLoginSuccess = (data: { access: string; refresh: string; user: User }): void => {
     setAuthTokens(data.access, data.refresh);
     setUserData(data.user);
 };

@@ -1,8 +1,14 @@
 # hotel/views.py
 
-from rest_framework import viewsets, permissions
-from rest_framework.permissions import IsAuthenticated, AllowAny
 from django.contrib.auth import get_user_model
+from rest_framework import viewsets, permissions, status
+from rest_framework.decorators import action
+from rest_framework.response import Response
+from rest_framework.permissions import AllowAny
+from django.db.models import Sum, Count
+from datetime import datetime, timedelta
+from django.utils import timezone
+from .models import FoodItem, HotelOrder, HotelOrderItem
 
 from .models import (
     FoodCategory, FoodItem, 
@@ -14,7 +20,7 @@ from .serializers import (
     FoodCategorySerializer, FoodItemSerializer,
     HotelOrderSerializer, HotelOrderItemSerializer,
     HotelExpenseFieldSerializer, HotelExpenseRecordSerializer,
-    SimpleFoodItemSerializer, SimpleHotelOrderSerializer
+    SimpleFoodItemSerializer, SimpleHotelOrderSerializer,HotelOrderCreateSerializer
 )
 from LaundryApp.pagination import CustomPageNumberPagination
 
@@ -47,30 +53,87 @@ class FoodItemViewSet(viewsets.ModelViewSet):
         return FoodItemSerializer
 
 
-# ---------------------------
-#   HOTEL ORDER ITEM VIEWSET
-# ---------------------------
 class HotelOrderItemViewSet(viewsets.ModelViewSet):
-    queryset = HotelOrderItem.objects.all().select_related("food_item", "order")
+    queryset = HotelOrderItem.objects.all().select_related("food_item", "order", "order__created_by")
     serializer_class = HotelOrderItemSerializer
-    #permission_classes = [permissions.IsAuthenticated]
     permission_classes = [AllowAny]
     pagination_class = CustomPageNumberPagination
+    
+    def get_queryset(self):
+        queryset = HotelOrderItem.objects.all().select_related("food_item", "order", "order__created_by")
+        
+        # Filter by date range
+        start_date = self.request.query_params.get('start_date')
+        end_date = self.request.query_params.get('end_date')
+        
+        if start_date and end_date:
+            try:
+                start_date_obj = datetime.strptime(start_date, '%Y-%m-%d')
+                end_date_obj = datetime.strptime(end_date, '%Y-%m-%d')
+                # Include the entire end_date day
+                end_date_obj = end_date_obj.replace(hour=23, minute=59, second=59)
+                queryset = queryset.filter(created_at__range=[start_date_obj, end_date_obj])
+            except ValueError:
+                pass
+        
+        return queryset.order_by('-created_at')
+    
+    def perform_create(self, serializer):
+        # Set the current user if available
+        serializer.save()
 
-# ---------------------------
-#   HOTEL ORDER VIEWSET
-# ---------------------------
 class HotelOrderViewSet(viewsets.ModelViewSet):
-    queryset = HotelOrder.objects.all().select_related("created_by")
-    permission_classes = [permissions.IsAuthenticated]
-    #permission_classes = [AllowAny]
-
+    queryset = HotelOrder.objects.all().order_by('-created_at')
+    permission_classes = [AllowAny]
+    pagination_class = CustomPageNumberPagination
+    
     def get_serializer_class(self):
-        if self.action in ["list"]: 
-            return SimpleHotelOrderSerializer
+        if self.action == 'create':
+            return HotelOrderCreateSerializer
         return HotelOrderSerializer
-
-
+    
+    def get_queryset(self):
+        queryset = HotelOrder.objects.all().order_by('-created_at')
+        
+        # Filter by date range
+        start_date = self.request.query_params.get('start_date')
+        end_date = self.request.query_params.get('end_date')
+        
+        if start_date and end_date:
+            try:
+                start_date_obj = datetime.strptime(start_date, '%Y-%m-%d')
+                end_date_obj = datetime.strptime(end_date, '%Y-%m-%d')
+                # Include the entire end_date day
+                end_date_obj = end_date_obj.replace(hour=23, minute=59, second=59)
+                queryset = queryset.filter(created_at__range=[start_date_obj, end_date_obj])
+            except ValueError:
+                pass
+        
+        return queryset
+    
+    def perform_create(self, serializer):
+        # Pass the request context to serializer
+        serializer.save()
+    
+    @action(detail=False, methods=['get'])
+    def summary(self, request):
+        """Get order summary statistics"""
+        queryset = self.get_queryset()
+        
+        total_orders = queryset.count()
+        total_revenue = HotelOrderItem.objects.filter(
+            order__in=queryset
+        ).aggregate(
+            total=Sum('price')
+        )['total'] or 0
+        
+        average_order_value = total_revenue / total_orders if total_orders > 0 else 0
+        
+        return Response({
+            'total_orders': total_orders,
+            'total_revenue': float(total_revenue),
+            'average_order_value': float(average_order_value)
+        })
 # ---------------------------
 #   EXPENSE FIELD VIEWSET
 # ---------------------------
