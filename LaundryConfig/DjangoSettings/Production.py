@@ -8,14 +8,14 @@ SECRET_KEY = env("SECRET_KEY")  # MUST be stored in Render env vars
 ALLOWED_HOSTS = [
     'www.cleanpage.shop',
     'cleanpage.shop',
-    'laundry12-40.onrender.com'
+    'clean-page-laundry:10000'
     # 'elite-laundry0010.onrender.com',
 ]
 
 CSRF_TRUSTED_ORIGINS = [
     'https://www.cleanpage.shop',
     'https://cleanpage.shop',
-    'https://laundry12-40.onrender.com'
+    'https://clean-page-laundry:10000'
     # 'https://elite-laundry0010.onrender.com',
 ]
 
