@@ -189,16 +189,16 @@ USE_TZ = True
 MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, '')
 # Configure static files for production
-FRONTEND_DIST = os.path.abspath(
-    os.path.join(BASE_DIR, '..', 'Front-end/dist', 'assets')
-)
+
 STATIC_URL = '/static/'
 
 # Tell Django where to collect all static files for production
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles') 
 
 STATICFILES_DIRS = [
-   FRONTEND_DIST,
+   os.path.abspath(
+    os.path.join(BASE_DIR, 'Front-end/dist/assets/')
+)
 ]
 
 # Tell Whitenoise to compress your static files
