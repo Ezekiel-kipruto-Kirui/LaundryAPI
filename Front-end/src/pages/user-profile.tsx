@@ -1,575 +1,728 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { API_BASE_URL } from "@/services/url"
-import { getAccessToken } from "@/services/api" // Import from your api.ts
+import { getAccessToken } from "@/services/api"
 import {
-    User,
-    Order as LaundryOrder,
-    HotelOrderItem,
-    HotelOrder // Import HotelOrder type
-} from "@/services/types"
+  Package,
+  Coffee,
+  DollarSign,
+  Calendar,
+  CheckCircle,
+  Clock,
+  AlertCircle,
+  RefreshCw,
+  TrendingUp
+} from 'lucide-react';
 
 // Constants for API endpoints
 const USER_PROFILE_URL = `${API_BASE_URL}/me/`
 const LAUNDRY_ORDERS_URL = `${API_BASE_URL}/Laundry/orders/`
-const HOTEL_ORDERS_URL = `${API_BASE_URL}/Hotel/orders/` // Changed to orders endpoint
+const HOTEL_ORDERS_URL = `${API_BASE_URL}/Hotel/orders/`
 
-// Helper function to get authorization header using your getAccessToken method
+// Helper function to get authorization header
 const getAuthHeader = () => {
-    const token = getAccessToken();
-    return token ? { Authorization: `Bearer ${token}` } : {};
+  const token = getAccessToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
 };
 
-// Extended interface for hotel order items with enriched data
-interface EnrichedHotelOrderItem extends HotelOrderItem {
-    _created_by?: User;
-    _created_at?: string;
-    _total_price?: number;
+// Define User interface (separate from imported User type)
+interface AppUser {
+  id: number;
+  email: string;
+  user_type: string;
+  first_name: string;
+  last_name: string;
+  is_active: boolean;
+  is_staff: boolean;
+  is_superuser: boolean;
 }
 
+interface LaundryOrder {
+  id: number;
+  uniquecode: string;
+  customer: {
+    id: number;
+    name: string;
+    phone: string;
+  } | null;
+  total_price: string;
+  order_status: string;
+  payment_status: string;
+  created_at: string;
+  updated_at: string;
+  created_by: {
+    id: number;
+    email: string;
+  } | null;
+  updated_by: {
+    id: number;
+    email: string;
+  } | null;
+  items: Array<{
+    id: number;
+    servicetype: string[];
+    itemtype: string;
+    itemname: string;
+    quantity: number;
+  }>;
+}
+
+interface HotelOrder {
+  id: number;
+  order_items: Array<{
+    id: number;
+    food_item_name: string;
+    total_price: number;
+    quantity: number;
+    price: string;
+  }>;
+  total_amount: number;
+  created_by_email: string;
+  created_at: string;
+  created_by: number;
+}
+
+type OrderView = 'hotel' | 'laundry';
+
 const UserProfile = () => {
-    const [user, setUser] = useState<User | null>(null);
-    const [loading, setLoading] = useState(true);
-    const [initialLoading, setInitialLoading] = useState(true);
-    const [error, setError] = useState<string | null>(null);
-    const [hotelOrders, setHotelOrders] = useState<HotelOrder[]>([]); // Changed to HotelOrder[]
-    const [laundryOrders, setLaundryOrders] = useState<LaundryOrder[]>([]);
-    const [enrichedHotelOrderItems, setEnrichedHotelOrderItems] = useState<EnrichedHotelOrderItem[]>([]);
-    const [filteredHotelOrderItems, setFilteredHotelOrderItems] = useState<EnrichedHotelOrderItem[]>([]);
-    const [filteredLaundryOrders, setFilteredLaundryOrders] = useState<LaundryOrder[]>([]);
+  const [user, setUser] = useState<AppUser | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [userLaundryOrders, setUserLaundryOrders] = useState<LaundryOrder[]>([]);
+  const [userHotelOrders, setUserHotelOrders] = useState<HotelOrder[]>([]);
+  const [activeView, setActiveView] = useState<OrderView>('laundry');
+  const [dateFilter, setDateFilter] = useState({ startDate: '', endDate: '' });
 
-    // Function to fetch all user data
-    const fetchUserData = async () => {
-        try {
-            const token = getAccessToken();
-            if (!token) {
-                setError('Please login to view your profile');
-                setLoading(false);
-                setInitialLoading(false);
-                return;
-            }
+  // Fetch user data
+  const fetchUserData = useCallback(async () => {
+    try {
+      const token = getAccessToken();
+      if (!token) {
+        setError('Please login to view your profile');
+        setLoading(false);
+        return;
+      }
 
-            setLoading(true);
-            setError(null);
+      setLoading(true);
+      setError(null);
 
-            // Fetch user profile
-            const userResponse = await axios.get(USER_PROFILE_URL, {
-                headers: getAuthHeader()
-            });
+      // Fetch user profile
+      const userResponse = await axios.get(USER_PROFILE_URL, {
+        headers: getAuthHeader()
+      });
+      
+      const currentUser = userResponse.data;
+      setUser(currentUser);
 
-            setUser(userResponse.data);
+      // Fetch laundry orders
+      try {
+        const laundryResponse = await axios.get(LAUNDRY_ORDERS_URL, {
+          headers: getAuthHeader(),
+          params: { page_size: 100 }
+        });
 
-            // Fetch hotel orders (now from orders endpoint)
-            const hotelResponse = await axios.get(HOTEL_ORDERS_URL, {
-                headers: getAuthHeader()
-            });
-
-            // Get the results from paginated response
-            const hotelOrdersData = hotelResponse.data.results || hotelResponse.data.data || hotelResponse.data || [];
-            setHotelOrders(hotelOrdersData);
-
-            // Enrich hotel order items with order data
-            const enrichedItems: EnrichedHotelOrderItem[] = [];
-            hotelOrdersData.forEach((order: HotelOrder) => {
-                if (order.order_items && Array.isArray(order.order_items)) {
-                    order.order_items.forEach((item: HotelOrderItem) => {
-                        // Create enriched item with order data
-                        const enrichedItem: EnrichedHotelOrderItem = {
-                            ...item,
-                            _created_by: order.created_by,
-                            _created_at: order.created_at,
-                            _total_price: order.total_order_price || (order as any).total_amount || 0
-                        };
-                        enrichedItems.push(enrichedItem);
-                    });
-                }
-            });
-            setEnrichedHotelOrderItems(enrichedItems);
-
-            // Fetch laundry orders
-            const laundryResponse = await axios.get(LAUNDRY_ORDERS_URL, {
-                headers: getAuthHeader()
-            });
-
-            // Get the results from paginated response
-            const laundryOrdersData = laundryResponse.data.results || laundryResponse.data.data || laundryResponse.data || [];
-            setLaundryOrders(laundryOrdersData);
-
-            setLoading(false);
-            setInitialLoading(false);
-        } catch (err: any) {
-            console.error('Error fetching user data:', err);
-
-            if (err.response?.status === 401) {
-                setError('Your session has expired. Please login again.');
-            } else if (err.response?.status === 403) {
-                setError('You do not have permission to access this data.');
-            } else if (err.response?.status === 404) {
-                setError('API endpoint not found. Please check the configuration.');
-            } else if (err.message?.includes('Network Error')) {
-                setError('Network error. Please check your connection.');
-            } else {
-                setError(err.message || 'Failed to fetch user data. Please try again.');
-            }
-
-            setLoading(false);
-            setInitialLoading(false);
+        let laundryOrdersData: LaundryOrder[] = [];
+        if (Array.isArray(laundryResponse.data)) {
+          laundryOrdersData = laundryResponse.data;
+        } else if (laundryResponse.data?.results) {
+          laundryOrdersData = laundryResponse.data.results;
         }
-    };
 
-    useEffect(() => {
-        fetchUserData();
-    }, []);
-
-    // Filter hotel order items created by the user
-    useEffect(() => {
-        if (user && enrichedHotelOrderItems.length > 0) {
-            const filtered = enrichedHotelOrderItems.filter((item) => {
-                // Check if _created_by exists and matches user ID
-                return item._created_by && item._created_by.id === user.id;
-            });
-            setFilteredHotelOrderItems(filtered);
-        }
-    }, [user, enrichedHotelOrderItems]);
-
-    // Filter laundry orders created or updated by the user
-    useEffect(() => {
-        if (user && laundryOrders.length > 0) {
-            const filtered = laundryOrders.filter((order) => {
-                // Check if created_by or updated_by matches user ID
-                const isCreator = order.created_by?.id === user.id;
-                const isUpdater = order.updated_by?.id === user.id;
-                return isCreator || isUpdater;
-            });
-            setFilteredLaundryOrders(filtered);
-        }
-    }, [user, laundryOrders]);
-
-    // Calculate hotel statistics
-    const calculateHotelStats = () => {
-        if (!filteredHotelOrderItems.length) return { totalHotelOrders: 0, totalHotelRevenue: 0 };
-
-        const totalHotelOrders = filteredHotelOrderItems.length;
-        const totalHotelRevenue = filteredHotelOrderItems.reduce((sum, item) => {
-            // Use _total_price if available, otherwise calculate from price and quantity
-            if (item._total_price !== undefined) {
-                return sum + (item._total_price || 0);
-            }
-            // Fallback: calculate from price and quantity
-            const price = parseFloat(item.price?.toString() || '0') || 0;
-            const quantity = item.quantity || 0;
-            return sum + (price * quantity);
-        }, 0);
-
-        return { totalHotelOrders, totalHotelRevenue };
-    };
-
-    // Calculate laundry statistics
-    const calculateLaundryStats = () => {
-        if (!filteredLaundryOrders.length) return {
-            totalLaundryOrders: 0,
-            totalLaundryRevenue: 0,
-            createdOrders: 0,
-            updatedOrders: 0
-        };
-
-        const totalLaundryOrders = filteredLaundryOrders.length;
-        const totalLaundryRevenue = filteredLaundryOrders.reduce((sum, order) => {
-            return sum + (parseFloat(order.total_price || '0') || 0);
-        }, 0);
-
-        // Calculate orders created vs updated
-        const createdOrders = filteredLaundryOrders.filter(order =>
-            order.created_by?.id === user?.id
-        ).length;
-
-        const updatedOrders = filteredLaundryOrders.filter(order =>
-            order.updated_by?.id === user?.id
-        ).length;
-
-        return { totalLaundryOrders, totalLaundryRevenue, createdOrders, updatedOrders };
-    };
-
-    const { totalHotelOrders, totalHotelRevenue } = calculateHotelStats();
-    const { totalLaundryOrders, totalLaundryRevenue, createdOrders, updatedOrders } = calculateLaundryStats();
-
-    // Refresh data function
-    const handleRefresh = () => {
-        fetchUserData();
-    };
-
-    // Get display price for hotel order item
-    const getHotelItemDisplayPrice = (item: EnrichedHotelOrderItem): string => {
-        if (item._total_price !== undefined) {
-            return (item._total_price || 0).toFixed(2);
-        }
-        // Calculate from price and quantity
-        const price = parseFloat(item.price?.toString() || '0') || 0;
-        const quantity = item.quantity || 0;
-        return (price * quantity).toFixed(2);
-    };
-
-    // Get display date for hotel order item
-    const getHotelItemDisplayDate = (item: EnrichedHotelOrderItem): string => {
-        if (item._created_at) {
-            return new Date(item._created_at).toLocaleDateString();
-        }
-        return 'N/A';
-    };
-
-    // If initial loading (first time)
-    if (initialLoading) {
-        return (
-            <div className="flex flex-col justify-center items-center h-64">
-                <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-blue-600 mb-4"></div>
-                <span className="text-gray-600 text-lg">Loading your profile...</span>
-                <p className="text-gray-400 text-sm mt-2">Please wait while we fetch your data</p>
-            </div>
+        // Filter orders created by current user
+        const userLaundryOrders = laundryOrdersData.filter(order => 
+          order.created_by?.id === currentUser.id
         );
-    }
+        setUserLaundryOrders(userLaundryOrders);
+      } catch (err) {
+        console.error('Error fetching laundry orders:', err);
+      }
 
-    // If still loading after initial load (refresh)
-    if (loading) {
-        return (
-            <div className="flex flex-col justify-center items-center h-64">
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mb-4"></div>
-                <span className="text-gray-600">Refreshing data...</span>
-            </div>
+      // Fetch hotel orders
+      try {
+        const hotelResponse = await axios.get(HOTEL_ORDERS_URL, {
+          headers: getAuthHeader(),
+          params: { page_size: 100 }
+        });
+
+        let hotelOrdersData: HotelOrder[] = [];
+        if (Array.isArray(hotelResponse.data)) {
+          hotelOrdersData = hotelResponse.data;
+        } else if (hotelResponse.data?.results) {
+          hotelOrdersData = hotelResponse.data.results;
+        }
+
+        // Filter orders created by current user
+        const userHotelOrders = hotelOrdersData.filter(order => 
+          order.created_by === currentUser.id || 
+          order.created_by_email === currentUser.email
         );
+        setUserHotelOrders(userHotelOrders);
+      } catch (err) {
+        console.error('Error fetching hotel orders:', err);
+      }
+
+    } catch (err: any) {
+      console.error('Error fetching user data:', err);
+      
+      if (err.response?.status === 401) {
+        setError('Your session has expired. Please login again.');
+      } else if (err.response?.status === 403) {
+        setError('You do not have permission to access this data.');
+      } else if (err.message?.includes('Network Error')) {
+        setError('Network error. Please check your connection.');
+      } else {
+        setError('Failed to fetch user data. Please try again.');
+      }
+    } finally {
+      setLoading(false);
     }
+  }, []);
 
-    if (error && !user) {
-        return (
-            <div className="container mx-auto px-4 py-8">
-                <div className="max-w-2xl mx-auto bg-red-50 border border-red-200 rounded-lg p-6 text-center">
-                    <div className="text-red-600 text-xl font-semibold mb-3">Authentication Required</div>
-                    <p className="text-red-700 mb-4">{error}</p>
-                    <div className="flex justify-center space-x-4">
-                        <button
-                            onClick={() => window.location.href = '/login'}
-                            className="bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-6 rounded-md transition duration-200"
-                        >
-                            Go to Login
-                        </button>
-                        <button
-                            onClick={handleRefresh}
-                            className="bg-gray-200 hover:bg-gray-300 text-gray-800 font-medium py-2 px-6 rounded-md transition duration-200"
-                        >
-                            Try Again
-                        </button>
-                    </div>
-                </div>
-            </div>
-        );
-    }
+  useEffect(() => {
+    fetchUserData();
+  }, [fetchUserData]);
 
-    if (!user) {
-        return (
-            <div className="text-center py-8">
-                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 max-w-md mx-auto">
-                    <p className="text-yellow-700">No user data available</p>
-                    <div className="mt-3 space-x-2">
-                        <button
-                            onClick={handleRefresh}
-                            className="bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-md"
-                        >
-                            Refresh
-                        </button>
-                        <button
-                            onClick={() => window.location.href = '/login'}
-                            className="bg-gray-200 hover:bg-gray-300 text-gray-800 font-medium py-2 px-4 rounded-md"
-                        >
-                            Login
-                        </button>
-                    </div>
-                </div>
-            </div>
-        );
-    }
+  // Calculate statistics
+  const getLaundryStats = () => {
+    const createdOrders = userLaundryOrders.filter(order => 
+      order.created_by?.id === user?.id
+    ).length;
+    
+    const updatedOrders = userLaundryOrders.filter(order => 
+      order.updated_by?.id === user?.id && 
+      order.created_by?.id !== user?.id
+    ).length;
 
-    return (
-        <div className="container mx-auto px-4 py-8">
-            <div className="max-w-6xl mx-auto bg-white rounded-lg shadow-md p-6">
-                {/* Header with refresh button */}
-                <div className="flex justify-between items-start mb-6">
-                    <div>
-                        <h1 className="text-3xl font-bold text-gray-800">My Profile</h1>
-                    </div>
-                    <button
-                        onClick={handleRefresh}
-                        className="flex items-center space-x-2 bg-blue-50 hover:bg-blue-100 text-blue-700 font-medium py-2 px-4 rounded-md transition duration-200"
-                    >
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                        </svg>
-                        <span>Refresh</span>
-                    </button>
-                </div>
+    const pendingOrders = userLaundryOrders.filter(order => 
+      order.order_status === 'pending'
+    ).length;
 
-                {/* User Profile Header */}
-                <div className="mb-8">
-                    <div className="border-b pb-4">
-                        <h2 className="text-xl font-semibold text-gray-700 mb-4">Personal Information</h2>
-                        <div className="mt-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                            <div className="bg-gray-50 p-3 rounded-lg">
-                                <p className="text-gray-600 text-sm">Email</p>
-                                <p className="font-medium">{user.email}</p>
-                            </div>
-                            <div className="bg-gray-50 p-3 rounded-lg">
-                                <p className="text-gray-600 text-sm">Full Name</p>
-                                <p className="font-medium">
-                                    {user.first_name || user.last_name
-                                        ? `${user.first_name} ${user.last_name}`.trim()
-                                        : 'Not specified'}
-                                </p>
-                            </div>
-                            <div className="bg-gray-50 p-3 rounded-lg">
-                                <p className="text-gray-600 text-sm">User Type</p>
-                                <p className="font-medium capitalize">{user.user_type || 'Not specified'}</p>
-                            </div>
-                            <div className="bg-gray-50 p-3 rounded-lg">
-                                <p className="text-gray-600 text-sm">User ID</p>
-                                <p className="font-medium">#{user.id}</p>
-                            </div>
-                            <div className="bg-gray-50 p-3 rounded-lg">
-                                <p className="text-gray-600 text-sm">Status</p>
-                                <p className="font-medium">
-                                    {user.is_active ? (
-                                        <span className="text-green-600 flex items-center">
-                                            <span className="w-2 h-2 bg-green-500 rounded-full mr-2"></span>
-                                            Active
-                                        </span>
-                                    ) : (
-                                        <span className="text-red-600 flex items-center">
-                                            <span className="w-2 h-2 bg-red-500 rounded-full mr-2"></span>
-                                            Inactive
-                                        </span>
-                                    )}
-                                </p>
-                            </div>
-                            <div className="bg-gray-50 p-3 rounded-lg">
-                                <p className="text-gray-600 text-sm">Role</p>
-                                <p className="font-medium">
-                                    {user.is_superuser ? 'Admin' : user.is_staff ? 'Staff' : 'Regular User'}
-                                </p>
-                            </div>
-                        </div>
-                    </div>
-                </div>
+    const completedOrders = userLaundryOrders.filter(order => 
+      order.order_status === 'Completed' || 
+      order.order_status === 'Delivered_picked'
+    ).length;
 
-                {/* Orders Sections */}
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                    {/* Hotel Orders Section */}
-                    <div className="bg-white border border-gray-200 rounded-lg shadow-sm p-5">
-                        <div className="flex justify-between items-center mb-5">
-                            <h2 className="text-xl font-semibold text-gray-800">Your Hotel Orders</h2>
-                            <span className="bg-blue-100 text-blue-800 text-sm font-medium px-3 py-1 rounded-full">
-                                {filteredHotelOrderItems.length} item{filteredHotelOrderItems.length !== 1 ? 's' : ''}
-                            </span>
-                        </div>
-
-                        {filteredHotelOrderItems.length > 0 ? (
-                            <>
-                                <div className="overflow-x-auto">
-                                    <table className="min-w-full">
-                                        <thead>
-                                            <tr className="border-b border-gray-200">
-                                                <th className="py-3 px-4 text-left text-gray-600 font-medium">Order ID</th>
-                                                <th className="py-3 px-4 text-left text-gray-600 font-medium">Food Item</th>
-                                                <th className="py-3 px-4 text-left text-gray-600 font-medium">Category</th>
-                                                <th className="py-3 px-4 text-left text-gray-600 font-medium">Qty</th>
-                                                <th className="py-3 px-4 text-left text-gray-600 font-medium">Total</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {filteredHotelOrderItems.slice(0, 5).map((item) => (
-                                                <tr key={item.id} className="border-b border-gray-100 hover:bg-gray-50">
-                                                    <td className="py-3 px-4 font-mono text-sm text-gray-700">#{item.id}</td>
-                                                    <td className="py-3 px-4">
-                                                        <div className="font-medium text-gray-800">{item.food_item_name || item.food_item?.name || 'N/A'}</div>
-                                                        <div className="text-xs text-gray-500">
-                                                            {getHotelItemDisplayDate(item)}
-                                                        </div>
-                                                    </td>
-                                                    <td className="py-3 px-4">
-                                                        <span className="bg-gray-100 text-gray-800 text-xs px-2 py-1 rounded">
-                                                            {item.food_item?.category?.name || 'N/A'}
-                                                        </span>
-                                                    </td>
-                                                    <td className="py-3 px-4 text-gray-700">{item.quantity}</td>
-                                                    <td className="py-3 px-4 font-medium text-green-700">
-                                                        Ksh {getHotelItemDisplayPrice(item)}
-                                                    </td>
-                                                </tr>
-                                            ))}
-                                        </tbody>
-                                    </table>
-                                </div>
-                                {filteredHotelOrderItems.length > 5 && (
-                                    <div className="mt-4 text-center">
-                                        <p className="text-sm text-gray-500">
-                                            Showing 5 of {filteredHotelOrderItems.length} items
-                                        </p>
-                                        <button className="mt-2 text-blue-600 hover:text-blue-800 text-sm font-medium">
-                                            View All Hotel Orders
-                                        </button>
-                                    </div>
-                                )}
-                            </>
-                        ) : (
-                            <div className="text-center py-8">
-                                <div className="text-gray-400 mb-3">
-                                    <svg className="w-12 h-12 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
-                                    </svg>
-                                </div>
-                                <p className="text-gray-500">No hotel orders created by you yet.</p>
-                                <p className="text-gray-400 text-sm mt-1">Your hotel orders will appear here.</p>
-                            </div>
-                        )}
-                    </div>
-
-                    {/* Laundry Orders Section */}
-                    <div className="bg-white border border-gray-200 rounded-lg shadow-sm p-5">
-                        <div className="flex justify-between items-center mb-5">
-                            <h2 className="text-xl font-semibold text-gray-800">Your Laundry Orders</h2>
-                            <span className="bg-purple-100 text-purple-800 text-sm font-medium px-3 py-1 rounded-full">
-                                {filteredLaundryOrders.length} order{filteredLaundryOrders.length !== 1 ? 's' : ''}
-                            </span>
-                        </div>
-
-                        {filteredLaundryOrders.length > 0 ? (
-                            <>
-                                <div className="overflow-x-auto">
-                                    <table className="min-w-full">
-                                        <thead>
-                                            <tr className="border-b border-gray-200">
-                                                <th className="py-3 px-4 text-left text-gray-600 font-medium">Order Code</th>
-                                                <th className="py-3 px-4 text-left text-gray-600 font-medium">Customer</th>
-                                                <th className="py-3 px-4 text-left text-gray-600 font-medium">Status</th>
-                                                <th className="py-3 px-4 text-left text-gray-600 font-medium">Total</th>
-                                                <th className="py-3 px-4 text-left text-gray-600 font-medium">Role</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {filteredLaundryOrders.slice(0, 5).map((order) => {
-                                                const isCreator = order.created_by?.id === user.id;
-                                                const role = isCreator ? 'Creator' : 'Updater';
-
-                                                return (
-                                                    <tr key={order.id} className="border-b border-gray-100 hover:bg-gray-50">
-                                                        <td className="py-3 px-4 font-mono text-sm text-gray-700">{order.uniquecode}</td>
-                                                        <td className="py-3 px-4">
-                                                            <div className="font-medium text-gray-800">{order.customer?.name || 'N/A'}</div>
-                                                            <div className="text-xs text-gray-500">
-                                                                {new Date(order.created_at).toLocaleDateString()}
-                                                            </div>
-                                                        </td>
-                                                        <td className="py-3 px-4">
-                                                            <span className={`px-2 py-1 rounded-full text-xs font-medium ${order.order_status === 'Completed' ? 'bg-green-100 text-green-800' :
-                                                                order.order_status === 'Delivered_picked' ? 'bg-blue-100 text-blue-800' :
-                                                                    'bg-yellow-100 text-yellow-800'
-                                                                }`}>
-                                                                {order.order_status}
-                                                            </span>
-                                                        </td>
-                                                        <td className="py-3 px-4 font-medium text-green-700">
-                                                            Ksh {order.total_price || '0.00'}
-                                                        </td>
-                                                        <td className="py-3 px-4">
-                                                            <span className={`px-2 py-1 rounded-full text-xs font-medium ${role === 'Creator' ? 'bg-blue-100 text-blue-800' :
-                                                                'bg-purple-100 text-purple-800'
-                                                                }`}>
-                                                                {role}
-                                                            </span>
-                                                        </td>
-                                                    </tr>
-                                                );
-                                            })}
-                                        </tbody>
-                                    </table>
-                                </div>
-                                {filteredLaundryOrders.length > 5 && (
-                                    <div className="mt-4 text-center">
-                                        <p className="text-sm text-gray-500">
-                                            Showing 5 of {filteredLaundryOrders.length} orders
-                                        </p>
-                                        <button className="mt-2 text-purple-600 hover:text-purple-800 text-sm font-medium">
-                                            View All Laundry Orders
-                                        </button>
-                                    </div>
-                                )}
-                            </>
-                        ) : (
-                            <div className="text-center py-8">
-                                <div className="text-gray-400 mb-3">
-                                    <svg className="w-12 h-12 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" />
-                                    </svg>
-                                </div>
-                                <p className="text-gray-500">No laundry orders created or updated by you yet.</p>
-                                <p className="text-gray-400 text-sm mt-1">Your laundry work will appear here.</p>
-                            </div>
-                        )}
-                    </div>
-                </div>
-
-                {/* Summary Section */}
-                <div className="mt-8 bg-gradient-to-r from-gray-50 to-gray-100 rounded-lg border border-gray-200 p-5">
-                    <h3 className="font-semibold text-gray-800 mb-4">Summary of Your Work</h3>
-                    <div className="grid grid-cols-1 md:grid-cols-4 gap-5">
-                        <div className="bg-white p-4 rounded-lg shadow-sm">
-                            <p className="text-gray-600 text-sm mb-1">Total Hotel Items (System)</p>
-                            <p className="text-lg font-bold text-gray-800">{enrichedHotelOrderItems.length}</p>
-                        </div>
-                        <div className="bg-white p-4 rounded-lg shadow-sm">
-                            <p className="text-gray-600 text-sm mb-1">Your Hotel Items</p>
-                            <p className="text-lg font-bold text-blue-600">{filteredHotelOrderItems.length}</p>
-                        </div>
-                        <div className="bg-white p-4 rounded-lg shadow-sm">
-                            <p className="text-gray-600 text-sm mb-1">Total Laundry Orders (System)</p>
-                            <p className="text-lg font-bold text-gray-800">{laundryOrders.length}</p>
-                        </div>
-                        <div className="bg-white p-4 rounded-lg shadow-sm">
-                            <p className="text-gray-600 text-sm mb-1">Your Laundry Orders</p>
-                            <p className="text-lg font-bold text-purple-600">{filteredLaundryOrders.length}</p>
-                        </div>
-                    </div>
-                    <div className="mt-5 pt-5 border-t border-gray-200">
-                        <div className="flex items-center justify-between">
-                            <div>
-                                <p className="text-gray-600">Total Combined Revenue from Your Work</p>
-                                <p className="text-2xl font-bold text-green-700">
-                                    Ksh {(totalHotelRevenue + totalLaundryRevenue).toFixed(2)}
-                                </p>
-                            </div>
-                            <div className="bg-green-100 text-green-800 px-4 py-2 rounded-lg font-medium">
-                                Your Contribution
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                {/* Error display if any */}
-                {error && user && (
-                    <div className="mt-4 bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-                        <div className="flex items-center">
-                            <svg className="w-5 h-5 text-yellow-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.998-.833-2.732 0L4.198 16.5c-.77.833.192 2.5 1.732 2.5z" />
-                            </svg>
-                            <p className="text-yellow-700">{error}</p>
-                        </div>
-                        <button
-                            onClick={handleRefresh}
-                            className="mt-2 text-yellow-700 hover:text-yellow-800 text-sm font-medium"
-                        >
-                            Try refreshing the data
-                        </button>
-                    </div>
-                )}
-            </div>
-        </div>
+    const totalRevenue = userLaundryOrders.reduce((sum, order) => 
+      sum + (parseFloat(order.total_price) || 0), 0
     );
+
+    return { createdOrders, updatedOrders, pendingOrders, completedOrders, totalRevenue };
+  };
+
+  const getHotelStats = () => {
+    const createdOrders = userHotelOrders.length;
+    const totalRevenue = userHotelOrders.reduce((sum, order) => 
+      sum + (order.total_amount || 0), 0
+    );
+
+    return { createdOrders, totalRevenue };
+  };
+
+  const laundryStats = getLaundryStats();
+  const hotelStats = getHotelStats();
+
+  // Calculate total orders created (FIXED: Now using numbers, not arrays)
+  const totalOrdersCreated = laundryStats.createdOrders + hotelStats.createdOrders;
+
+  // Filter orders by date
+  const getFilteredOrders = () => {
+    const orders = activeView === 'laundry' ? userLaundryOrders : userHotelOrders;
+    
+    if (!dateFilter.startDate && !dateFilter.endDate) {
+      return orders;
+    }
+
+    return orders.filter(order => {
+      const orderDate = new Date(order.created_at);
+      const startDate = dateFilter.startDate ? new Date(dateFilter.startDate) : null;
+      const endDate = dateFilter.endDate ? new Date(dateFilter.endDate) : null;
+      
+      if (startDate && orderDate < startDate) return false;
+      if (endDate && orderDate > new Date(endDate.getTime() + 86400000)) return false;
+      return true;
+    });
+  };
+
+  const filteredOrders = getFilteredOrders();
+
+  // Format date
+  const formatDate = (dateString: string) => {
+    if (!dateString) return 'N/A';
+    try {
+      return new Date(dateString).toLocaleDateString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+    } catch {
+      return 'Invalid date';
+    }
+  };
+
+  // Format currency
+  const formatCurrency = (amount: number) => {
+    return `KSh ${amount.toLocaleString('en-KE', { 
+      minimumFractionDigits: 2, 
+      maximumFractionDigits: 2 
+    })}`;
+  };
+
+  // Get status badge color
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'Completed':
+      case 'completed':
+        return 'bg-green-100 text-green-800';
+      case 'Delivered_picked':
+        return 'bg-blue-100 text-blue-800';
+      case 'pending':
+        return 'bg-yellow-100 text-yellow-800';
+      default:
+        return 'bg-gray-100 text-gray-800';
+    }
+  };
+
+  // Get payment status color
+  const getPaymentStatusColor = (status: string) => {
+    switch (status) {
+      case 'completed':
+        return 'bg-green-100 text-green-800';
+      case 'partial':
+        return 'bg-yellow-100 text-yellow-800';
+      case 'pending':
+        return 'bg-red-100 text-red-800';
+      default:
+        return 'bg-gray-100 text-gray-800';
+    }
+  };
+
+  // Clear filters
+  const clearFilters = () => {
+    setDateFilter({ startDate: '', endDate: '' });
+  };
+
+  // Loading state
+  if (loading) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[60vh]">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mb-4"></div>
+        <p className="text-gray-600">Loading profile data...</p>
+      </div>
+    );
+  }
+
+  // Error state
+  if (error && !user) {
+    return (
+      <div className="container mx-auto px-4 py-8">
+        <div className="max-w-2xl mx-auto bg-red-50 border border-red-200 rounded-xl p-6 text-center">
+          <div className="text-red-600 text-xl font-semibold mb-3">Authentication Required</div>
+          <p className="text-red-700 mb-4">{error}</p>
+          <div className="flex justify-center space-x-4">
+            <button
+              onClick={() => window.location.href = '/login'}
+              className="bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-6 rounded-lg transition-colors"
+            >
+              Go to Login
+            </button>
+            <button
+              onClick={fetchUserData}
+              className="bg-gray-200 hover:bg-gray-300 text-gray-800 font-medium py-2 px-6 rounded-lg transition-colors"
+            >
+              Try Again
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      {/* Header */}
+      
+
+      {/* Main Content */}
+      <div className="container mx-auto px-4 py-8">
+        {/* User Profile Card */}
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-8">
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-2xl font-bold text-gray-800">Profile Information</h2>
+            <div className="text-sm text-gray-500">User ID: #{user?.id}</div>
+          </div>
+          
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="space-y-4">
+              <div>
+                <label className="text-sm font-medium text-gray-500">Email Address</label>
+                <p className="text-gray-800 font-medium mt-1">{user?.email}</p>
+              </div>
+              <div>
+                <label className="text-sm font-medium text-gray-500">Full Name</label>
+                <p className="text-gray-800 font-medium mt-1">
+                  {user?.first_name || user?.last_name 
+                    ? `${user?.first_name} ${user?.last_name}`.trim()
+                    : 'Not specified'}
+                </p>
+              </div>
+            </div>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="text-sm font-medium text-gray-500">User Role</label>
+                <p className="text-gray-800 font-medium mt-1 capitalize">{user?.user_type || 'Not specified'}</p>
+              </div>
+              <div>
+                <label className="text-sm font-medium text-gray-500">Account Status</label>
+                <p className="flex items-center gap-2 mt-1">
+                  <span className={`w-2 h-2 rounded-full ${user?.is_active ? 'bg-green-500' : 'bg-red-500'}`}></span>
+                  <span className={`font-medium ${user?.is_active ? 'text-green-600' : 'text-red-600'}`}>
+                    {user?.is_active ? 'Active' : 'Inactive'}
+                  </span>
+                </p>
+              </div>
+            </div>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="text-sm font-medium text-gray-500">Total Orders Created</label>
+                <p className="text-2xl font-bold text-gray-800 mt-1">
+                  {totalOrdersCreated}
+                </p>
+              </div>
+              <div>
+                <label className="text-sm font-medium text-gray-500">Total Revenue Generated</label>
+                <p className="text-2xl font-bold text-green-600 mt-1">
+                  {formatCurrency(laundryStats.totalRevenue + hotelStats.totalRevenue)}
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Orders Summary Stats */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+            <div className="flex items-center">
+              <div className="p-3 bg-blue-100 rounded-xl mr-4">
+                <Package className="text-blue-600 w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-2xl font-bold text-gray-800">{laundryStats.createdOrders}</h3>
+                <p className="text-sm text-gray-500">Laundry Orders Created</p>
+              </div>
+            </div>
+            <div className="mt-4 flex items-center justify-between text-sm">
+              <span className="text-green-600">{laundryStats.completedOrders} completed</span>
+              <span className="text-yellow-600">{laundryStats.pendingOrders} pending</span>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+            <div className="flex items-center">
+              <div className="p-3 bg-amber-100 rounded-xl mr-4">
+                <Coffee className="text-amber-600 w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-2xl font-bold text-gray-800">{hotelStats.createdOrders}</h3>
+                <p className="text-sm text-gray-500">Hotel Orders Created</p>
+              </div>
+            </div>
+            <div className="mt-4 text-sm text-gray-500">
+              All hotel orders
+            </div>
+          </div>
+
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+            <div className="flex items-center">
+              <div className="p-3 bg-purple-100 rounded-xl mr-4">
+                <TrendingUp className="text-purple-600 w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-2xl font-bold text-gray-800">{laundryStats.updatedOrders}</h3>
+                <p className="text-sm text-gray-500">Orders Updated</p>
+              </div>
+            </div>
+            <div className="mt-4 text-sm text-gray-500">
+              Laundry orders you've updated
+            </div>
+          </div>
+
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+            <div className="flex items-center">
+              <div className="p-3 bg-green-100 rounded-xl mr-4">
+                <DollarSign className="text-green-600 w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-2xl font-bold text-gray-800">
+                  {formatCurrency(laundryStats.totalRevenue + hotelStats.totalRevenue)}
+                </h3>
+                <p className="text-sm text-gray-500">Total Revenue</p>
+              </div>
+            </div>
+            <div className="mt-4 flex items-center justify-between text-sm">
+              <span className="text-blue-600">{formatCurrency(laundryStats.totalRevenue)} laundry</span>
+              <span className="text-amber-600">{formatCurrency(hotelStats.totalRevenue)} hotel</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Orders Management Section */}
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+          <div className="px-6 py-4 border-b border-gray-200 bg-gray-50">
+            <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
+              <div>
+                <h2 className="text-xl font-semibold text-gray-800">My Orders</h2>
+                <p className="text-gray-500 text-sm mt-1">
+                  View and manage orders you've created and updated
+                </p>
+              </div>
+              
+              <div className="flex flex-col sm:flex-row gap-3 w-full lg:w-auto">
+                {/* Order Type Toggle */}
+                <div className="flex rounded-lg bg-gray-100 p-1">
+                  <button
+                    onClick={() => setActiveView('laundry')}
+                    className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                      activeView === 'laundry'
+                        ? 'bg-white text-blue-600 shadow-sm'
+                        : 'text-gray-600 hover:text-gray-800'
+                    }`}
+                  >
+                    <Package className="w-4 h-4 inline mr-2" />
+                    Laundry Orders
+                  </button>
+                  <button
+                    onClick={() => setActiveView('hotel')}
+                    className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                      activeView === 'hotel'
+                        ? 'bg-white text-amber-600 shadow-sm'
+                        : 'text-gray-600 hover:text-gray-800'
+                    }`}
+                  >
+                    <Coffee className="w-4 h-4 inline mr-2" />
+                    Hotel Orders
+                  </button>
+                </div>
+
+                {/* Date Filter */}
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <div className="flex items-center gap-2">
+                    <Calendar className="w-4 h-4 text-gray-400" />
+                    <span className="text-sm text-gray-700">Date Range:</span>
+                  </div>
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <input
+                      type="date"
+                      value={dateFilter.startDate}
+                      onChange={(e) => setDateFilter(prev => ({ ...prev, startDate: e.target.value }))}
+                      className="px-3 py-1.5 border border-gray-300 rounded-md text-sm"
+                    />
+                    <span className="hidden sm:inline text-gray-400 self-center">to</span>
+                    <input
+                      type="date"
+                      value={dateFilter.endDate}
+                      onChange={(e) => setDateFilter(prev => ({ ...prev, endDate: e.target.value }))}
+                      className="px-3 py-1.5 border border-gray-300 rounded-md text-sm"
+                    />
+                    {(dateFilter.startDate || dateFilter.endDate) && (
+                      <button
+                        onClick={clearFilters}
+                        className="px-3 py-1.5 bg-gray-200 text-gray-700 rounded-md text-sm hover:bg-gray-300 transition-colors"
+                      >
+                        Clear
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Orders Table */}
+          <div className="overflow-x-auto">
+            {filteredOrders.length === 0 ? (
+              <div className="text-center py-12">
+                {activeView === 'laundry' ? (
+                  <>
+                    <Package className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+                    <h3 className="text-lg font-medium text-gray-900 mb-2">No laundry orders found</h3>
+                  </>
+                ) : (
+                  <>
+                    <Coffee className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+                    <h3 className="text-lg font-medium text-gray-900 mb-2">No hotel orders found</h3>
+                  </>
+                )}
+                <p className="text-gray-500">
+                  {dateFilter.startDate || dateFilter.endDate
+                    ? 'No orders match your date filter. Try adjusting the date range.'
+                    : 'No orders created by you yet.'}
+                </p>
+              </div>
+            ) : (
+              <table className="w-full">
+                <thead>
+                  <tr className="bg-gray-50 border-b border-gray-200">
+                    {activeView === 'laundry' ? (
+                      <>
+                        <th className="py-4 px-6 text-left font-semibold text-gray-700 text-xs uppercase tracking-wider">
+                          Order Code
+                        </th>
+                        <th className="py-4 px-6 text-left font-semibold text-gray-700 text-xs uppercase tracking-wider">
+                          Customer
+                        </th>
+                        <th className="py-4 px-6 text-left font-semibold text-gray-700 text-xs uppercase tracking-wider">
+                          Order Status
+                        </th>
+                        <th className="py-4 px-6 text-left font-semibold text-gray-700 text-xs uppercase tracking-wider">
+                          Payment Status
+                        </th>
+                        <th className="py-4 px-6 text-left font-semibold text-gray-700 text-xs uppercase tracking-wider">
+                          Created/Updated
+                        </th>
+                        <th className="py-4 px-6 text-left font-semibold text-gray-700 text-xs uppercase tracking-wider">
+                          Total Amount
+                        </th>
+                      </>
+                    ) : (
+                      <>
+                        <th className="py-4 px-6 text-left font-semibold text-gray-700 text-xs uppercase tracking-wider">
+                          Order ID
+                        </th>
+                        <th className="py-4 px-6 text-left font-semibold text-gray-700 text-xs uppercase tracking-wider">
+                          Date
+                        </th>
+                        <th className="py-4 px-6 text-left font-semibold text-gray-700 text-xs uppercase tracking-wider">
+                          Items
+                        </th>
+                        <th className="py-4 px-6 text-left font-semibold text-gray-700 text-xs uppercase tracking-wider">
+                          Total Amount
+                        </th>
+                      </>
+                    )}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200">
+                  {activeView === 'laundry'
+                    ? (filteredOrders as LaundryOrder[]).map((order) => {
+                        const isCreator = order.created_by?.id === user?.id;
+                        const isUpdater = order.updated_by?.id === user?.id && !isCreator;
+                        
+                        return (
+                          <tr key={order.id} className="hover:bg-gray-50">
+                            <td className="py-4 px-6">
+                              <div className="font-mono text-sm font-medium text-gray-800">
+                                {order.uniquecode}
+                              </div>
+                            </td>
+                            <td className="py-4 px-6">
+                              <div className="font-medium text-gray-800">{order.customer?.name || 'N/A'}</div>
+                              <div className="text-xs text-gray-500">{order.customer?.phone || ''}</div>
+                            </td>
+                            <td className="py-4 px-6">
+                              <span className={`px-3 py-1 rounded-full text-xs font-medium ${getStatusColor(order.order_status)}`}>
+                                {order.order_status === 'Delivered_picked' ? 'Delivered' : order.order_status}
+                              </span>
+                            </td>
+                            <td className="py-4 px-6">
+                              <span className={`px-3 py-1 rounded-full text-xs font-medium ${getPaymentStatusColor(order.payment_status)}`}>
+                                {order.payment_status}
+                              </span>
+                            </td>
+                            <td className="py-4 px-6">
+                              <div className="flex items-center gap-2">
+                                <span className={`px-2 py-1 rounded text-xs font-medium ${
+                                  isCreator ? 'bg-blue-100 text-blue-800' : 'bg-purple-100 text-purple-800'
+                                }`}>
+                                  {isCreator ? 'Created' : 'Updated'}
+                                </span>
+                                <div className="text-sm text-gray-500">
+                                  {formatDate(isCreator ? order.created_at : order.updated_at)}
+                                </div>
+                              </div>
+                            </td>
+                            <td className="py-4 px-6">
+                              <div className="font-bold text-green-700">
+                                {formatCurrency(parseFloat(order.total_price))}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    : (filteredOrders as HotelOrder[]).map((order) => (
+                        <tr key={order.id} className="hover:bg-gray-50">
+                          <td className="py-4 px-6">
+                            <div className="font-mono text-sm font-medium text-gray-800">#{order.id}</div>
+                          </td>
+                          <td className="py-4 px-6">
+                            <div className="text-sm text-gray-600">
+                              {formatDate(order.created_at)}
+                            </div>
+                          </td>
+                          <td className="py-4 px-6">
+                            <div className="font-medium text-gray-800">
+                              {order.order_items?.length || 0} item{order.order_items?.length !== 1 ? 's' : ''}
+                            </div>
+                            {order.order_items && order.order_items.length > 0 && (
+                              <div className="text-xs text-gray-500 mt-1">
+                                {order.order_items[0].food_item_name}
+                                {order.order_items.length > 1 && ` +${order.order_items.length - 1} more`}
+                              </div>
+                            )}
+                          </td>
+                          <td className="py-4 px-6">
+                            <div className="font-bold text-green-700">
+                              {formatCurrency(order.total_amount || 0)}
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+
+          {/* Table Footer */}
+          {filteredOrders.length > 0 && (
+            <div className="px-6 py-4 border-t border-gray-200 bg-gray-50">
+              <div className="flex justify-between items-center">
+                <div className="text-sm text-gray-600">
+                  Showing {filteredOrders.length} of{' '}
+                  {activeView === 'laundry' ? userLaundryOrders.length : userHotelOrders.length} orders
+                </div>
+                <div className="text-sm text-gray-600">
+                  {dateFilter.startDate && (
+                    <span className="mr-3">From: {dateFilter.startDate}</span>
+                  )}
+                  {dateFilter.endDate && (
+                    <span>To: {dateFilter.endDate}</span>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Error Display */}
+        {error && (
+          <div className="mt-6 bg-red-50 border border-red-200 rounded-lg p-4">
+            <div className="flex items-center">
+              <AlertCircle className="w-5 h-5 text-red-600 mr-2" />
+              <p className="text-red-700">{error}</p>
+            </div>
+            <button
+              onClick={fetchUserData}
+              className="mt-2 text-red-700 hover:text-red-800 text-sm font-medium"
+            >
+              Try refreshing the data
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
 };
 
 export default UserProfile;

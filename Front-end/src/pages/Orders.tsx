@@ -377,7 +377,7 @@ export default function Orders() {
   const exportDropdownRef = useRef<HTMLDivElement>(null);
   const dropdownRefs = useRef<{ [key: number]: HTMLDivElement | null }>({});
 
-  // Pagination State - Fixed page size of 20
+  // Pagination State
   const [pagination, setPagination] = useState<PaginationInfo>({
     count: 0,
     next: null,
@@ -385,7 +385,7 @@ export default function Orders() {
     current_page: 1,
     total_pages: 1
   });
-  const pageSize = 20; // Fixed page size
+  const pageSize = 20;
 
   // Stats state
   const [stats, setStats] = useState({
@@ -456,23 +456,9 @@ export default function Orders() {
       const data = await response.json();
 
       if (data.results && Array.isArray(data.results)) {
-        let filteredResults = data.results;
-        
-        if (!orderStatusFilter) {
-          filteredResults = data.results.filter((order: Order) =>
-            order.order_status !== 'Delivered_picked'
-          );
-        }
-
-        setAllOrders(filteredResults);
+        setAllOrders(data.results);
       } else if (Array.isArray(data)) {
-        let filteredData = data;
-        if (!orderStatusFilter) {
-          filteredData = data.filter((order: Order) =>
-            order.order_status !== 'Delivered_picked'
-          );
-        }
-        setAllOrders(filteredData);
+        setAllOrders(data);
       }
 
     } catch (err: any) {
@@ -534,55 +520,64 @@ export default function Orders() {
 
       const data = await response.json();
 
-      // Calculate stats from ALL orders in the response
-      let allOrdersData = data.results || data;
-      if (!Array.isArray(allOrdersData)) allOrdersData = [];
+      // Handle both response formats
+      let ordersData = data.results || data;
+      if (!Array.isArray(ordersData)) ordersData = [];
 
-      // Calculate revenue
-      const totalRevenue = allOrdersData.reduce((sum: number, order: Order) => {
-        return sum + parseFloat(order.total_price || '0');
-      }, 0);
+      // Calculate stats from ALL orders (not just current page)
+      // We'll fetch stats separately
+      const statsResponse = await fetch(`${ORDERS_URL}stats/?${params.toString().replace(`page=${page}&`, '').replace(`page_size=${pageSize}&`, '')}`, {
+        headers,
+      });
 
-      const pendingRevenue = allOrdersData
-        .filter((order: Order) => order.order_status === 'pending')
-        .reduce((sum: number, order: Order) => {
+      if (statsResponse.ok) {
+        const statsData = await statsResponse.json();
+        setStats({
+          total_orders: statsData.total_count || 0,
+          pending_orders: statsData.pending_count || 0,
+          completed_orders: statsData.completed_count || 0,
+          delivered_orders: statsData.delivered_count || 0,
+          total_revenue: statsData.total_revenue || 0,
+          pending_revenue: statsData.pending_revenue || 0,
+          completed_revenue: statsData.completed_revenue || 0,
+        });
+      } else {
+        // Fallback calculation if stats endpoint doesn't exist
+        const totalRevenue = ordersData.reduce((sum: number, order: Order) => {
           return sum + parseFloat(order.total_price || '0');
         }, 0);
 
-      const completedRevenue = allOrdersData
-        .filter((order: Order) => order.order_status === 'Completed')
-        .reduce((sum: number, order: Order) => {
-          return sum + parseFloat(order.total_price || '0');
-        }, 0);
+        const pendingRevenue = ordersData
+          .filter((order: Order) => order.order_status === 'pending')
+          .reduce((sum: number, order: Order) => {
+            return sum + parseFloat(order.total_price || '0');
+          }, 0);
 
-      // Filter orders based on status filter
-      let filteredOrders = allOrdersData;
-      if (!orderStatusFilter) {
-        filteredOrders = allOrdersData.filter((order: Order) =>
-          order.order_status !== 'Delivered_picked'
-        );
+        const completedRevenue = ordersData
+          .filter((order: Order) => order.order_status === 'Completed')
+          .reduce((sum: number, order: Order) => {
+            return sum + parseFloat(order.total_price || '0');
+          }, 0);
+
+        setStats({
+          total_orders: data.count || ordersData.length,
+          pending_orders: ordersData.filter((order: Order) => order.order_status === 'pending').length,
+          completed_orders: ordersData.filter((order: Order) => order.order_status === 'Completed').length,
+          delivered_orders: ordersData.filter((order: Order) => order.order_status === 'Delivered_picked').length,
+          total_revenue: totalRevenue,
+          pending_revenue: pendingRevenue,
+          completed_revenue: completedRevenue,
+        });
       }
 
-      // Calculate counts
-      const statsData = {
-        total_orders: filteredOrders.length,
-        pending_orders: filteredOrders.filter((order: Order) => order.order_status === 'pending').length,
-        completed_orders: filteredOrders.filter((order: Order) => order.order_status === 'Completed').length,
-        delivered_orders: filteredOrders.filter((order: Order) => order.order_status === 'Delivered_picked').length,
-        total_revenue: totalRevenue,
-        pending_revenue: pendingRevenue,
-        completed_revenue: completedRevenue,
-      };
+      setOrders(ordersData);
 
-      setStats(statsData);
-      setOrders(filteredOrders);
-
-      // Update pagination
-      const filteredCount = filteredOrders.length;
-      const totalPages = Math.ceil(filteredCount / pageSize);
+      // Update pagination from API response
+      const totalCount = data.count || ordersData.length;
+      const totalPages = Math.ceil(totalCount / pageSize);
 
       setPagination({
-        count: filteredCount,
+        count: totalCount,
         next: data.next || null,
         previous: data.previous || null,
         current_page: page,
@@ -750,7 +745,7 @@ export default function Orders() {
     }
   };
 
-  // Pagination handlers - Next/Previous only
+  // Pagination handlers
   const goToPage = (page: number) => {
     console.log('Going to page:', page);
     if (page >= 1 && page <= pagination.total_pages) {
@@ -860,6 +855,11 @@ export default function Orders() {
             pending_orders: prev.pending_orders + 1,
             completed_revenue: prev.completed_revenue - parseFloat(order.total_price || '0'),
             pending_revenue: prev.pending_revenue + parseFloat(order.total_price || '0')
+          }));
+        } else if (status === 'Delivered_picked') {
+          setStats(prev => ({
+            ...prev,
+            delivered_orders: prev.delivered_orders + 1
           }));
         }
 
@@ -972,6 +972,7 @@ export default function Orders() {
           total_orders: prev.total_orders - 1,
           pending_orders: deletedOrder.order_status === 'pending' ? prev.pending_orders - 1 : prev.pending_orders,
           completed_orders: deletedOrder.order_status === 'Completed' ? prev.completed_orders - 1 : prev.completed_orders,
+          delivered_orders: deletedOrder.order_status === 'Delivered_picked' ? prev.delivered_orders - 1 : prev.delivered_orders,
           total_revenue: prev.total_revenue - parseFloat(deletedOrder.total_price || '0'),
           pending_revenue: deletedOrder.order_status === 'pending' ? prev.pending_revenue - parseFloat(deletedOrder.total_price || '0') : prev.pending_revenue,
           completed_revenue: deletedOrder.order_status === 'Completed' ? prev.completed_revenue - parseFloat(deletedOrder.total_price || '0') : prev.completed_revenue
@@ -1605,10 +1606,10 @@ export default function Orders() {
               ))}
             </div>
 
-            {/* Showing information - Fixed 20 per page */}
+            {/* Showing information */}
             <div className="flex items-center gap-2 ml-auto">
               <span className="text-sm text-gray-600">
-                Showing {Math.min(pageSize, orders.length)} of {pagination.count} orders
+                Showing {orders.length} of {pagination.count} orders (Page {pagination.current_page} of {pagination.total_pages})
               </span>
             </div>
           </div>
@@ -1895,7 +1896,7 @@ export default function Orders() {
                 </table>
               </div>
 
-              {/* Pagination Controls - With Next button */}
+              {/* Pagination Controls */}
               {pagination.total_pages > 1 && (
                 <div className="flex flex-col md:flex-row items-center justify-between px-6 py-4 border-t border-gray-200 bg-gray-50">
                   <div className="text-sm text-gray-700 mb-4 md:mb-0">
@@ -1903,7 +1904,7 @@ export default function Orders() {
                     <span className="font-medium">
                       {Math.min(pagination.current_page * pageSize, pagination.count)}
                     </span> of{' '}
-                    <span className="font-medium">{pagination.count}</span> results
+                    <span className="font-medium">{pagination.count}</span> orders
                     <span className="ml-2 text-gray-500">
                       (Page {pagination.current_page} of {pagination.total_pages})
                     </span>
@@ -1959,7 +1960,7 @@ export default function Orders() {
                       )}
                     </div>
 
-                    {/* NEXT BUTTON - This is what you asked for */}
+                    {/* NEXT BUTTON */}
                     <button
                       onClick={goToNextPage}
                       disabled={!pagination.next}

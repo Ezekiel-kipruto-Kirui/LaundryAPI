@@ -29,6 +29,13 @@ class FoodItemSerializer(serializers.ModelSerializer):
         model = FoodItem
         fields = '__all__'
         read_only_fields = ['created_by']
+    def get_queryset(self):
+        # This calculates the total price and quantity for every food item 
+        # exactly when the user requests the list. No manual update needed!
+        return FoodItem.objects.annotate(
+            total_order_price=Sum('hotelorderitem__price'),
+            quantity=Count('hotelorderitem')
+        )
 
 class HotelOrderItemSerializer(serializers.ModelSerializer):
     food_item_name = serializers.CharField(source='food_item.name', read_only=True)

@@ -22,28 +22,38 @@ import 'chartjs-plugin-datalabels';
 // Type imports
 import type { ChartDataset, ChartTypeRegistry, TooltipItem } from 'chart.js';
 
-// Interfaces
+// Interfaces - UPDATED BASED ON API RESPONSES
 interface HotelOrderItem {
   id: number;
-  food_item: {
-    id: number;
-    name: string;
-    category: {
-      id: number;
-      name: string;
-    };
-    created_by: {
-      id: number;
-      email: string;
-    };
-    quantity: number;
-  };
-  total_price: string;
+  food_item_name: string;
+  total_price: number;
   quantity: number;
   price: string;
+  name: string | null;
+  oncredit: boolean;
+  created_at: string | null;
+  order: number;
+  food_item: number;
+}
+
+interface HotelOrder {
+  id: number;
+  order_items: HotelOrderItem[];
+  total_amount: number;
+  created_by_username: string | null;
+  created_by_email: string;
   created_at: string;
-  order: any;
-  created_by: any;
+  created_by: number;
+}
+
+interface HotelOrdersResponse {
+  total_items: number;
+  total_pages: number;
+  current_page: number;
+  page_size: number;
+  next: string | null;
+  previous: string | null;
+  results: HotelOrder[];
 }
 
 interface HotelExpense {
@@ -58,6 +68,19 @@ interface HotelExpense {
   notes: string | null;
 }
 
+interface LaundryOrderItem {
+  id: number;
+  servicetype: string[];
+  itemtype: string;
+  itemname: string;
+  quantity: number;
+  itemcondition: string;
+  additional_info: string | null;
+  unit_price: string;
+  total_item_price: string;
+  created_at: string;
+}
+
 interface LaundryOrder {
   id: number;
   uniquecode: string;
@@ -65,6 +88,7 @@ interface LaundryOrder {
     id: number;
     name: string;
     phone: string;
+    created_by: any;
   };
   payment_type: string;
   payment_status: "pending" | "partial" | "complete";
@@ -77,18 +101,9 @@ interface LaundryOrder {
   balance: string;
   created_at: string;
   updated_at: string;
-  items: Array<{
-    id: number;
-    servicetype: string[];
-    itemtype: string;
-    itemname: string;
-    quantity: number;
-    itemcondition: string;
-    additional_info: string;
-    unit_price: string;
-    total_item_price: string;
-    created_at: string;
-  }>;
+  created_by: any;
+  updated_by: any;
+  items: LaundryOrderItem[];
 }
 
 interface LaundryExpense {
@@ -206,6 +221,51 @@ const extractArrayFromResponse = (response: any): any[] => {
   return [];
 };
 
+// Type guard for paginated response
+const isPaginatedResponse = (response: any): response is { next: string | null; results: any[] } => {
+  return response && typeof response === 'object' && 'results' in response;
+};
+
+// Type guard for HotelOrdersResponse
+const isHotelOrdersResponse = (response: any): response is HotelOrdersResponse => {
+  return response && typeof response === 'object' && 'results' in response;
+};
+
+// Helper function to fetch all paginated data
+const fetchAllPaginatedData = async (endpoint: string, service: "hotel" | "laundry" | "auth"): Promise<any[]> => {
+  let allData: any[] = [];
+  let nextUrl: string | null = endpoint;
+  
+  while (nextUrl) {
+    try {
+      const response = await fetchApi(nextUrl, { method: 'GET' }, service);
+      
+      // Check if response is a paginated response
+      if (isPaginatedResponse(response)) {
+        const data = extractArrayFromResponse(response);
+        allData = [...allData, ...data];
+        
+        // Check for next page
+        if (response.next) {
+          nextUrl = response.next;
+        } else {
+          nextUrl = null;
+        }
+      } else {
+        // If not paginated, treat as array
+        const data = extractArrayFromResponse(response);
+        allData = [...allData, ...data];
+        nextUrl = null;
+      }
+    } catch (error) {
+      console.error(`Error fetching paginated data from ${endpoint}:`, error);
+      nextUrl = null;
+    }
+  }
+  
+  return allData;
+};
+
 export default function PerformanceReport() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -250,26 +310,24 @@ export default function PerformanceReport() {
   };
 
   const processData = useCallback((
-    hotelOrderItems: HotelOrderItem[],
+    hotelOrders: HotelOrder[],
     hotelExpenses: HotelExpense[],
     laundryOrders: LaundryOrder[],
     laundryExpenses: LaundryExpense[],
     customers: Customer[]
   ): ProcessedData => {
     // Ensure arrays exist
-    hotelOrderItems = hotelOrderItems || [];
+    hotelOrders = hotelOrders || [];
     hotelExpenses = hotelExpenses || [];
     laundryOrders = laundryOrders || [];
     laundryExpenses = laundryExpenses || [];
     customers = customers || [];
 
-    // Filter data by date range
-    const filteredHotelOrders = hotelOrderItems.filter(item => {
+    // Helper function to parse date and check filters
+    const isDateInRange = (dateString: string): boolean => {
       try {
-        if (!item?.created_at) {
-          return false;
-        }
-        const itemDate = new Date(item.created_at);
+        if (!dateString) return false;
+        const itemDate = new Date(dateString);
         const filterFrom = fromDate ? new Date(fromDate) : null;
         const filterTo = toDate ? new Date(toDate) : null;
 
@@ -284,41 +342,36 @@ export default function PerformanceReport() {
       } catch (e) {
         return false;
       }
+    };
+
+    // Filter hotel orders by date range
+    const filteredHotelOrders = hotelOrders.filter(order => {
+      return isDateInRange(order.created_at);
     });
 
+    // Filter laundry orders by date range
     const filteredLaundryOrders = laundryOrders.filter(order => {
-      try {
-        if (!order?.created_at) return false;
-        const orderDate = new Date(order.created_at);
-        const filterFrom = fromDate ? new Date(fromDate) : null;
-        const filterTo = toDate ? new Date(toDate) : null;
-
-        if (filterFrom && orderDate < filterFrom) return false;
-        if (filterTo && orderDate > filterTo) return false;
-        if (filterYear && orderDate.getFullYear() !== filterYear) return false;
-        if (filterMonth) {
-          const [year, month] = filterMonth.split('-').map(Number);
-          if (orderDate.getFullYear() !== year || (orderDate.getMonth() + 1) !== month) return false;
-        }
-        return true;
-      } catch (e) {
-        return false;
-      }
+      return isDateInRange(order.created_at);
     });
 
-    // Calculate hotel revenue
-    const hotelRevenue = filteredHotelOrders.reduce((sum, item) => {
+    // Calculate hotel revenue from order items
+    const hotelRevenue = filteredHotelOrders.reduce((sum, order) => {
       try {
-        const priceStr = item.total_price || item.price || '0';
-        const price = parseFloat(priceStr);
-        if (isNaN(price)) {
-          return sum;
-        }
-        return sum + price;
+        // Sum up all order items' total_price
+        const orderTotal = order.order_items.reduce((orderSum, item) => {
+          const price = item.total_price || 0;
+          return orderSum + price;
+        }, 0);
+        
+        // Also add the order's total_amount if available
+        return sum + (order.total_amount || orderTotal);
       } catch (e) {
         return sum;
       }
     }, 0);
+
+    // Calculate total hotel orders count
+    const hotelTotalOrders = filteredHotelOrders.length;
 
     // Calculate laundry revenue
     const laundryRevenue = filteredLaundryOrders.reduce((sum, order) => {
@@ -334,6 +387,8 @@ export default function PerformanceReport() {
     const hotelExpensesTotal = hotelExpenses.reduce((sum, expense) => {
       try {
         const amount = parseFloat(expense.amount || '0') || 0;
+        // Filter expenses by date
+        if (!isDateInRange(expense.date)) return sum;
         return sum + amount;
       } catch (e) {
         return sum;
@@ -343,6 +398,8 @@ export default function PerformanceReport() {
     // Calculate laundry expenses
     const laundryExpensesTotal = laundryExpenses.reduce((sum, expense) => {
       try {
+        // Filter expenses by date
+        if (!isDateInRange(expense.date)) return sum;
         return sum + (parseFloat(expense.amount) || 0);
       } catch (e) {
         return sum;
@@ -378,15 +435,25 @@ export default function PerformanceReport() {
     }, 0);
 
     // Calculate payment method amounts
-    const cashPayments = filteredLaundryOrders.filter(order => order.payment_type === 'cash');
-    const mpesaPayments = filteredLaundryOrders.filter(order => order.payment_type === 'mpesa');
-    const cardPayments = filteredLaundryOrders.filter(order => order.payment_type === 'card');
-    const bankPayments = filteredLaundryOrders.filter(order => order.payment_type === 'bank');
-    const otherPayments = filteredLaundryOrders.filter(order =>
-      order.payment_type && !['cash', 'mpesa', 'card', 'bank', 'none', 'None'].includes(order.payment_type)
+    const cashPayments = filteredLaundryOrders.filter(order => 
+      order.payment_type && order.payment_type.toLowerCase() === 'cash'
     );
-    const nonepayment = filteredLaundryOrders.filter(order =>
-      order.payment_type === 'none' || order.payment_type === 'None'
+    const mpesaPayments = filteredLaundryOrders.filter(order => 
+      order.payment_type && order.payment_type.toLowerCase() === 'mpesa'
+    );
+    const cardPayments = filteredLaundryOrders.filter(order => 
+      order.payment_type && order.payment_type.toLowerCase() === 'card'
+    );
+    const bankPayments = filteredLaundryOrders.filter(order => 
+      order.payment_type && order.payment_type.toLowerCase() === 'bank'
+    );
+    const otherPayments = filteredLaundryOrders.filter(order => {
+      if (!order.payment_type) return false;
+      const paymentType = order.payment_type.toLowerCase();
+      return !['cash', 'mpesa', 'card', 'bank', 'none'].includes(paymentType);
+    });
+    const nonepayment = filteredLaundryOrders.filter(order => 
+      order.payment_type && order.payment_type.toLowerCase() === 'none'
     );
 
     // Calculate payment amounts for each method
@@ -536,11 +603,11 @@ export default function PerformanceReport() {
     const monthlyHotelRevenue = Array(12).fill(0);
     const monthlyLaundryRevenue = Array(12).fill(0);
 
-    filteredHotelOrders.forEach(item => {
+    filteredHotelOrders.forEach(order => {
       try {
-        const month = new Date(item.created_at).getMonth();
-        const price = parseFloat(item.total_price || item.price || '0') || 0;
-        monthlyHotelRevenue[month] += price;
+        const month = new Date(order.created_at).getMonth();
+        const orderTotal = order.order_items.reduce((sum, item) => sum + (item.total_price || 0), 0);
+        monthlyHotelRevenue[month] += (order.total_amount || orderTotal);
       } catch (e) {
         // Silently handle errors
       }
@@ -555,6 +622,22 @@ export default function PerformanceReport() {
       }
     });
 
+    // Calculate total balance amount
+    const totalBalanceAmount = filteredLaundryOrders.reduce((sum, order) => {
+      try {
+        return sum + (parseFloat(order.balance) || 0);
+      } catch (e) {
+        return sum;
+      }
+    }, 0);
+
+    // Calculate shop-specific expenses
+    const shopAExpenses = laundryExpenses.filter(e => e.shop === 'Shop A' && isDateInRange(e.date))
+      .reduce((sum, expense) => sum + (parseFloat(expense.amount) || 0), 0);
+    
+    const shopBExpenses = laundryExpenses.filter(e => e.shop === 'Shop B' && isDateInRange(e.date))
+      .reduce((sum, expense) => sum + (parseFloat(expense.amount) || 0), 0);
+
     return {
       // Summary Stats
       totalBusinessRevenue: hotelRevenue + laundryRevenue,
@@ -563,9 +646,9 @@ export default function PerformanceReport() {
 
       // Hotel Stats
       hotelRevenue,
-      hotelTotalOrders: filteredHotelOrders.length,
-      hotelInProgressOrders: filteredHotelOrders.filter(item => item.order?.status === 'in_progress').length || 0,
-      hotelServedOrders: filteredHotelOrders.filter(item => item.order?.status === 'served').length || 0,
+      hotelTotalOrders,
+      hotelInProgressOrders: 0, // This field doesn't exist in the API response
+      hotelServedOrders: 0,     // This field doesn't exist in the API response
       hotelNetProfit,
       hotelTotalExpenses: hotelExpensesTotal,
 
@@ -577,13 +660,7 @@ export default function PerformanceReport() {
       bankTransferPaymentsAmount,
       otherPaymentsAmount,
       nonePaymentsAmount,
-      totalBalanceAmount: filteredLaundryOrders.reduce((sum, order) => {
-        try {
-          return sum + (parseFloat(order.balance) || 0);
-        } catch (e) {
-          return sum;
-        }
-      }, 0),
+      totalBalanceAmount,
       pendingPayments: pendingPayments.length,
       totalPendingAmount,
       partialPayments: partialPayments.length,
@@ -604,10 +681,8 @@ export default function PerformanceReport() {
       shopACompletePayments: shopAOrders.filter(o => o.payment_status === 'complete').length,
       shopACompleteAmount: shopAOrders.filter(o => o.payment_status === 'complete')
         .reduce((sum, order) => sum + (parseFloat(order.total_price) || 0), 0),
-      shopANetProfit: shopARevenue - laundryExpenses.filter(e => e.shop === 'Shop A')
-        .reduce((sum, expense) => sum + (parseFloat(expense.amount) || 0), 0),
-      shopATotalExpenses: laundryExpenses.filter(e => e.shop === 'Shop A')
-        .reduce((sum, expense) => sum + (parseFloat(expense.amount) || 0), 0),
+      shopANetProfit: shopARevenue - shopAExpenses,
+      shopATotalExpenses: shopAExpenses,
 
       shopBRevenue,
       shopBTotalOrders: shopBOrders.length,
@@ -620,10 +695,8 @@ export default function PerformanceReport() {
       shopBCompletePayments: shopBOrders.filter(o => o.payment_status === 'complete').length,
       shopBCompleteAmount: shopBOrders.filter(o => o.payment_status === 'complete')
         .reduce((sum, order) => sum + (parseFloat(order.total_price) || 0), 0),
-      shopBNetProfit: shopBRevenue - laundryExpenses.filter(e => e.shop === 'Shop B')
-        .reduce((sum, expense) => sum + (parseFloat(expense.amount) || 0), 0),
-      shopBTotalExpenses: laundryExpenses.filter(e => e.shop === 'Shop B')
-        .reduce((sum, expense) => sum + (parseFloat(expense.amount) || 0), 0),
+      shopBNetProfit: shopBRevenue - shopBExpenses,
+      shopBTotalExpenses: shopBExpenses,
 
       // Chart Data
       revenueComparisonLabels: ['Laundry', 'Hotel'],
@@ -664,49 +737,54 @@ export default function PerformanceReport() {
     setError(null);
 
     try {
-      // Fetch all data in parallel
+      // Fetch all data in parallel with pagination support
       const [
-        hotelOrderItemsResponse,
+        hotelOrdersResponse,
         hotelExpensesResponse,
         laundryOrdersResponse,
         laundryExpensesResponse,
         customersResponse
       ] = await Promise.allSettled([
-        fetchApi('order-items/', { method: 'GET' }, 'hotel'),
-        fetchApi('Hotelexpense-records/', { method: 'GET' }, 'hotel'),
-        fetchApi('orders/', { method: 'GET' }, 'laundry'),
-        fetchApi('expense-records/', { method: 'GET' }, 'laundry'),
-        fetchApi('customers/', { method: 'GET' }, 'laundry')
+        // Fetch hotel orders (paginated)
+        fetchAllPaginatedData('orders/', 'hotel'),
+        // Fetch hotel expenses
+        fetchAllPaginatedData('Hotelexpense-records/', 'hotel'),
+        // Fetch laundry orders (paginated)
+        fetchAllPaginatedData('orders/', 'laundry'),
+        // Fetch laundry expenses
+        fetchAllPaginatedData('expense-records/', 'laundry'),
+        // Fetch customers
+        fetchAllPaginatedData('customers/', 'laundry')
       ]);
 
       // Extract data from responses with error handling
-      const hotelOrderItems = extractArrayFromResponse(
-        hotelOrderItemsResponse.status === 'fulfilled' ? hotelOrderItemsResponse.value : null
-      );
+      const hotelOrders = hotelOrdersResponse.status === 'fulfilled' 
+        ? hotelOrdersResponse.value as HotelOrder[] 
+        : [];
 
-      const hotelExpenses = extractArrayFromResponse(
-        hotelExpensesResponse.status === 'fulfilled' ? hotelExpensesResponse.value : null
-      );
+      const hotelExpenses = hotelExpensesResponse.status === 'fulfilled' 
+        ? hotelExpensesResponse.value as HotelExpense[] 
+        : [];
 
-      const laundryOrders = extractArrayFromResponse(
-        laundryOrdersResponse.status === 'fulfilled' ? laundryOrdersResponse.value : null
-      );
+      const laundryOrders = laundryOrdersResponse.status === 'fulfilled' 
+        ? laundryOrdersResponse.value as LaundryOrder[] 
+        : [];
 
-      const laundryExpenses = extractArrayFromResponse(
-        laundryExpensesResponse.status === 'fulfilled' ? laundryExpensesResponse.value : null
-      );
+      const laundryExpenses = laundryExpensesResponse.status === 'fulfilled' 
+        ? laundryExpensesResponse.value as LaundryExpense[] 
+        : [];
 
-      const customers = extractArrayFromResponse(
-        customersResponse.status === 'fulfilled' ? customersResponse.value : null
-      );
+      const customers = customersResponse.status === 'fulfilled' 
+        ? customersResponse.value as Customer[] 
+        : [];
 
       // Process the data even if some requests failed
       const processedData = processData(
-        hotelOrderItems as HotelOrderItem[],
-        hotelExpenses as HotelExpense[],
-        laundryOrders as LaundryOrder[],
-        laundryExpenses as LaundryExpense[],
-        customers as Customer[]
+        hotelOrders,
+        hotelExpenses,
+        laundryOrders,
+        laundryExpenses,
+        customers
       );
 
       setData(processedData);
@@ -1490,10 +1568,6 @@ export default function PerformanceReport() {
                 <span className="text-sm font-semibold text-gray-700">Orders</span>
               </div>
               <div className="text-xl font-bold text-gray-900 mb-1">{data?.hotelTotalOrders || 0}</div>
-              <div className="flex flex-col gap-1 text-xs">
-                <span className="text-blue-600">{data?.hotelInProgressOrders || 0} in progress</span>
-                <span className="text-green-600">{data?.hotelServedOrders || 0} served</span>
-              </div>
             </div>
 
             {/* Hotel Profit */}
@@ -1597,7 +1671,7 @@ export default function PerformanceReport() {
               </div>
               <div>
                 <h3 className="text-sm font-medium text-gray-500 uppercase tracking-wider">Payments & Balance</h3>
-                <div className="text-xl font-bold text-gray-900">{formatCurrency(data?.totalBalanceAmount || 0)}</div>
+                <div className="text-xl font-bold text-gray-900">Ksh {formatCurrency(data?.totalBalanceAmount || 0)}</div>
               </div>
             </div>
             <div className="space-y-3 mt-4">

@@ -66,16 +66,6 @@ const shopSections = [
   },
 ];
 
-// Admin-only bottom navigation (site management)
-const adminBottomNavItem = {
-  id: "site-management",
-  label: "Site Management",
-  icon: Settings,
-  items: [
-    { to: ROUTES.siteManagement, icon: Users, label: "Users & Permissions" },
-  ],
-};
-
 /* ------------------------------------------------------------------ */
 /* Sidebar                                                             */
 /* ------------------------------------------------------------------ */
@@ -90,7 +80,6 @@ export function Sidebar() {
   const [expandedSections, setExpandedSections] = useState({
     laundry: true,
     hotel: true,
-    'site-management': true,
   });
 
   /* ------------------------------------------------------------------ */
@@ -110,14 +99,12 @@ export function Sidebar() {
       setExpandedSections({
         laundry: selectedShopType === 'laundry',
         hotel: selectedShopType === 'hotel',
-        'site-management': false, // Staff don't see this
       });
     } else if (userRole === 'admin') {
       // Admin: expand all sections
       setExpandedSections({
         laundry: true,
         hotel: true,
-        'site-management': true,
       });
     }
   }, []);
@@ -176,7 +163,7 @@ export function Sidebar() {
 
   /* ------------------------------------------------------------------ */
   /* Render                                                             */
-/* ------------------------------------------------------------------ */
+  /* ------------------------------------------------------------------ */
 
   return (
     <aside className="fixed left-0 top-0 z-40 h-screen w-64 bg-sidebar text-sidebar-foreground">
@@ -200,12 +187,14 @@ export function Sidebar() {
             <RouterNavLink
               key={item.to}
               to={item.to}
+              end={item.to === ROUTES.dashboard || item.to === ROUTES.reports}
               className={({ isActive }) =>
                 cn(
                   "flex items-center gap-3 rounded-lg px-4 py-3 text-sm font-medium mb-1",
+                  "transition-colors duration-200",
                   isActive
                     ? "bg-sidebar-primary text-sidebar-primary-foreground"
-                    : "opacity-70 hover:bg-sidebar-accent"
+                    : "opacity-70 hover:bg-sidebar-accent hover:opacity-100"
                 )
               }
             >
@@ -219,7 +208,7 @@ export function Sidebar() {
             <div key={section.id} className="mt-3">
               <button
                 onClick={() => toggleSection(section.id)}
-                className="flex w-full items-center justify-between rounded-lg px-4 py-3 text-sm font-medium opacity-70 hover:bg-sidebar-accent"
+                className="flex w-full items-center justify-between rounded-lg px-4 py-3 text-sm font-medium opacity-70 hover:bg-sidebar-accent hover:opacity-100 transition-colors duration-200"
               >
                 <div className="flex items-center gap-3">
                   <section.icon className="h-5 w-5" />
@@ -231,17 +220,20 @@ export function Sidebar() {
               </button>
 
               {expandedSections[section.id] && (
-                <div className="ml-6 mt-1 space-y-1 border-l pl-3">
+                <div className="ml-6 mt-1 space-y-1 border-l border-sidebar-border/30 pl-3">
                   {section.items.map(item => (
                     <RouterNavLink
                       key={item.to}
                       to={item.to}
+                      end={item.to === ROUTES.laundryDashboard || 
+                           item.to === ROUTES.fooditems}
                       className={({ isActive }) =>
                         cn(
-                          "flex items-center gap-3 rounded-lg px-3 py-2 text-sm",
+                          "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm",
+                          "transition-colors duration-200",
                           isActive
-                            ? "bg-sidebar-primary/20 border-l-2 border-sidebar-primary"
-                            : "opacity-60 hover:bg-sidebar-accent"
+                            ? "bg-sidebar-primary/15 text-sidebar-primary"
+                            : "opacity-60 hover:bg-sidebar-accent hover:opacity-100"
                         )
                       }
                     >
@@ -253,53 +245,33 @@ export function Sidebar() {
               )}
             </div>
           ))}
-
-          {/* Admin Bottom Navigation - Site Management (after hotel activities) */}
-          {showSiteManagement && (
-            <div className="mt-3">
-              <button
-                onClick={() => toggleSection(adminBottomNavItem.id)}
-                className="flex w-full items-center justify-between rounded-lg px-4 py-3 text-sm font-medium opacity-70 hover:bg-sidebar-accent"
-              >
-                <div className="flex items-center gap-3">
-                  <adminBottomNavItem.icon className="h-5 w-5" />
-                  {adminBottomNavItem.label}
-                </div>
-                {expandedSections[adminBottomNavItem.id]
-                  ? <ChevronDown className="h-4 w-4" />
-                  : <ChevronRight className="h-4 w-4" />}
-              </button>
-
-              {expandedSections[adminBottomNavItem.id] && (
-                <div className="ml-6 mt-1 space-y-1 border-l pl-3">
-                  {adminBottomNavItem.items.map(item => (
-                    <RouterNavLink
-                      key={item.to}
-                      to={item.to}
-                      className={({ isActive }) =>
-                        cn(
-                          "flex items-center gap-3 rounded-lg px-3 py-2 text-sm",
-                          isActive
-                            ? "bg-sidebar-primary/20 border-l-2 border-sidebar-primary"
-                            : "opacity-60 hover:bg-sidebar-accent"
-                        )
-                      }
-                    >
-                      <item.icon className="h-4 w-4" />
-                      {item.label}
-                    </RouterNavLink>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
         </nav>
 
-        {/* Footer */}
-        <div className="border-t-1 p-2">
+        {/* Footer - Site Management & Logout */}
+        <div className="border-t border-sidebar-border/30 p-2 space-y-1">
+          {/* Site Management - Only for admin */}
+          {showSiteManagement && (
+            <RouterNavLink
+              to={ROUTES.siteManagement}
+              className={({ isActive }) =>
+                cn(
+                  "flex items-center gap-3 rounded-lg px-4 py-3 text-sm font-medium",
+                  "transition-colors duration-200",
+                  isActive
+                    ? "bg-sidebar-primary text-sidebar-primary-foreground"
+                    : "opacity-70 hover:bg-sidebar-accent hover:opacity-100"
+                )
+              }
+            >
+              <Settings className="h-5 w-5" />
+              Site Management
+            </RouterNavLink>
+          )}
+
+          {/* Logout */}
           <button
             onClick={handleLogout}
-            className="flex w-full items-center gap-3 rounded-lg px-4 py-3 text-sm opacity-70 hover:bg-sidebar-accent"
+            className="flex w-full items-center gap-3 rounded-lg px-4 py-3 text-sm opacity-70 hover:bg-sidebar-accent hover:opacity-100 transition-colors duration-200"
           >
             <LogOut className="h-5 w-5" />
             Logout

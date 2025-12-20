@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -22,7 +22,6 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
   DialogFooter,
   DialogDescription,
 } from "@/components/ui/dialog";
@@ -36,7 +35,6 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -50,7 +48,6 @@ import {
   User as UserIcon,
   Users,
   Clock,
-  Eye,
   Activity,
   Search,
   Shield,
@@ -59,15 +56,17 @@ import {
   MoreVertical,
   ChevronDown,
   ChevronUp,
-  History,
   ShoppingBag,
   Trash2,
   Edit,
-  Key,
   UserPlus,
   Loader2,
   Store,
-  ExternalLink,
+  Filter,
+  Calendar,
+  DollarSign,
+  Package,
+  Eye,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { API_BASE_URL } from "@/services/url";
@@ -76,11 +75,9 @@ import {
   User,
   Order as LaundryOrder,
   Customer,
-  HotelOrderItem,
-  FoodItem
 } from "@/services/types";
 
-// Extend Customer interface to include created_by
+// Extended interfaces
 interface ExtendedCustomer extends Customer {
   created_by?: {
     id: number;
@@ -94,26 +91,44 @@ interface ExtendedCustomer extends Customer {
   } | null;
 }
 
-// Extend HotelOrderItem interface to include missing properties
-interface ExtendedHotelOrderItem extends HotelOrderItem {
-  created_by?: User;
-  total_price?: number;
-  created_at?: string;
+interface ApiHotelOrderItem {
+  id: number;
+  food_item_name: string;
+  total_price: number;
+  quantity: number;
+  price: string;
+  name: string | null;
+  oncredit: boolean;
+  created_at: string | null;
+  order: number;
+  food_item: number;
 }
 
-// Define user data interface
-interface UserData {
+interface ApiHotelOrder {
+  id: number;
+  order_items: ApiHotelOrderItem[];
+  total_amount: number;
+  created_by_username: string | null;
+  created_by_email: string;
+  created_at: string;
+  created_by: number | User;
+}
+
+interface UserPerformanceData {
   laundryOrders: LaundryOrder[];
-  hotelOrders: ExtendedHotelOrderItem[];
+  hotelOrders: ApiHotelOrder[];
   customers: ExtendedCustomer[];
+  totalRevenue: number;
+  totalOrders: number;
+  laundryRevenue: number;
+  hotelRevenue: number;
 }
 
-// Helper function to ensure array type
+// Utility functions
 const ensureArray = <T,>(data: unknown): T[] => {
   if (!data) return [];
   if (Array.isArray(data)) return data as T[];
   if (typeof data === 'object' && data !== null) {
-    // Handle cases where API returns object with results property
     const anyData = data as any;
     if (Array.isArray(anyData.results)) return anyData.results as T[];
     if (Array.isArray(anyData.data)) return anyData.data as T[];
@@ -121,14 +136,12 @@ const ensureArray = <T,>(data: unknown): T[] => {
   return [];
 };
 
-// Helper function to safely parse float
 const safeParseFloat = (value: string | number | null | undefined): number => {
   if (value === null || value === undefined) return 0;
   const num = typeof value === 'string' ? parseFloat(value) : value;
   return isNaN(num) ? 0 : num;
 };
 
-// Get auth headers function
 const getAuthHeaders = () => {
   const token = getAccessToken();
   const headers: HeadersInit = {
@@ -142,7 +155,7 @@ const getAuthHeaders = () => {
   return headers;
 };
 
-// API functions with error handling
+// API functions
 const fetchUsers = async (): Promise<User[]> => {
   try {
     const response = await fetch(`${API_BASE_URL}/Laundry/users/`, {
@@ -150,9 +163,7 @@ const fetchUsers = async (): Promise<User[]> => {
     });
 
     if (!response.ok) {
-      if (response.status === 401) {
-        throw new Error('Unauthorized. Please login again.');
-      }
+      if (response.status === 401) throw new Error('Unauthorized. Please login again.');
       throw new Error('Failed to fetch users');
     }
 
@@ -216,7 +227,6 @@ const deleteUser = async (userId: number): Promise<void> => {
   }
 };
 
-// Fetch all laundry orders and filter by created_by
 const fetchAllLaundryOrders = async (): Promise<LaundryOrder[]> => {
   try {
     const response = await fetch(`${API_BASE_URL}/Laundry/orders/`, {
@@ -236,28 +246,25 @@ const fetchAllLaundryOrders = async (): Promise<LaundryOrder[]> => {
   }
 };
 
-// Fetch all hotel order items and filter by created_by
-const fetchAllHotelOrderItems = async (): Promise<ExtendedHotelOrderItem[]> => {
+const fetchAllHotelOrders = async (): Promise<ApiHotelOrder[]> => {
   try {
-    const response = await fetch(`${API_BASE_URL}/Hotel/order-items/`, {
+    const response = await fetch(`${API_BASE_URL}/Hotel/orders/`, {
       headers: getAuthHeaders(),
     });
 
     if (!response.ok) {
-      console.error('Failed to fetch hotel order items:', response.status);
+      console.error('Failed to fetch hotel orders:', response.status);
       return [];
     }
 
     const data = await response.json();
-    console.log('Hotel order items API response:', data); // Debug log
-    return ensureArray<ExtendedHotelOrderItem>(data);
+    return ensureArray<ApiHotelOrder>(data);
   } catch (error) {
-    console.error('Error fetching hotel order items:', error);
+    console.error('Error fetching hotel orders:', error);
     return [];
   }
 };
 
-// Fetch all customers and filter by created_by
 const fetchAllCustomers = async (): Promise<ExtendedCustomer[]> => {
   try {
     const response = await fetch(`${API_BASE_URL}/Laundry/customers/`, {
@@ -277,7 +284,7 @@ const fetchAllCustomers = async (): Promise<ExtendedCustomer[]> => {
   }
 };
 
-// Function to get current user
+// Helper functions
 const getCurrentUser = (): User | null => {
   if (typeof window !== 'undefined') {
     const userStr = localStorage.getItem('current_user') ||
@@ -293,21 +300,277 @@ const getCurrentUser = (): User | null => {
   return null;
 };
 
+const isDateInRange = (dateString: string, startDate?: Date, endDate?: Date): boolean => {
+  if (!dateString) return false;
+  try {
+    const date = new Date(dateString);
+    if (startDate && date < startDate) return false;
+    if (endDate && date > endDate) return false;
+    return true;
+  } catch (error) {
+    console.error('Error parsing date:', error);
+    return false;
+  }
+};
+
+const extractUserId = (createdBy: any): number | null => {
+  if (!createdBy) return null;
+  
+  if (typeof createdBy === 'object' && createdBy !== null) {
+    return (createdBy as any).id;
+  }
+  
+  if (typeof createdBy === 'number') {
+    return createdBy;
+  }
+  
+  if (typeof createdBy === 'string') {
+    const parsed = parseInt(createdBy);
+    return isNaN(parsed) ? null : parsed;
+  }
+  
+  return null;
+};
+
+const getOrderTotal = (order: LaundryOrder | ApiHotelOrder): number => {
+  if ('total_price' in order) {
+    return safeParseFloat(order.total_price);
+  } else {
+    return order.total_amount || 0;
+  }
+};
+
+const formatDate = (dateString: string | null | undefined) => {
+  if (!dateString) return 'Never';
+  try {
+    return new Date(dateString).toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+    });
+  } catch (error) {
+    console.error('Error formatting date:', error, dateString);
+    return 'Invalid date';
+  }
+};
+
+const formatDateTime = (dateString: string | null | undefined) => {
+  if (!dateString) return 'Never';
+  try {
+    return new Date(dateString).toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  } catch (error) {
+    console.error('Error formatting date:', error, dateString);
+    return 'Invalid date';
+  }
+};
+
+const formatCurrency = (amount: number) => {
+  return new Intl.NumberFormat('en-KE', {
+    style: 'currency',
+    currency: 'KES',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(amount).replace('KES', 'KSh');
+};
+
+// Orders Dialog Component
+interface OrdersDialogProps {
+  isOpen: boolean;
+  onOpenChange: (open: boolean) => void;
+  title: string;
+  orders: any[];
+  type: 'laundry' | 'hotel';
+}
+
+const OrdersDialog = ({ isOpen, onOpenChange, title, orders, type }: OrdersDialogProps) => {
+  const getOrderStatusColor = (status: string) => {
+    const colors: Record<string, string> = {
+      'pending': 'bg-yellow-100 text-yellow-800 border-yellow-200',
+      'Completed': 'bg-green-100 text-green-800 border-green-200',
+      'Delivered_picked': 'bg-blue-100 text-blue-800 border-blue-200',
+    };
+    return colors[status] || 'bg-gray-100 text-gray-800 border-gray-200';
+  };
+
+  const getPaymentStatusColor = (status: string) => {
+    const colors: Record<string, string> = {
+      'pending': 'bg-red-100 text-red-800 border-red-200',
+      'completed': 'bg-green-100 text-green-800 border-green-200',
+      'partial': 'bg-orange-100 text-orange-800 border-orange-200',
+    };
+    return colors[status] || 'bg-gray-100 text-gray-800 border-gray-200';
+  };
+
+  return (
+    <Dialog open={isOpen} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-6xl max-h-[80vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            {type === 'laundry' ? (
+              <ShoppingBag className="h-5 w-5 text-blue-600" />
+            ) : (
+              <Store className="h-5 w-5 text-orange-600" />
+            )}
+            {title}
+          </DialogTitle>
+          <DialogDescription>
+            {orders.length} {type === 'laundry' ? 'laundry' : 'hotel'} orders found
+          </DialogDescription>
+        </DialogHeader>
+
+        {orders.length > 0 ? (
+          <div className="overflow-hidden rounded-lg border border-gray-200">
+            <Table>
+              <TableHeader className="bg-gray-50">
+                <TableRow>
+                  {type === 'laundry' ? (
+                    <>
+                      <TableHead className="font-medium">Date</TableHead>
+                      <TableHead className="font-medium">Order Code</TableHead>
+                      <TableHead className="font-medium">Customer</TableHead>
+                      <TableHead className="font-medium text-right">Total Amount</TableHead>
+                      <TableHead className="font-medium">Status</TableHead>
+                    </>
+                  ) : (
+                    <>
+                      <TableHead className="font-medium">Date</TableHead>
+                      <TableHead className="font-medium">Order ID</TableHead>
+                      <TableHead className="font-medium">Items</TableHead>
+                      <TableHead className="font-medium text-right">Total Amount</TableHead>
+                    </>
+                  )}
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {orders.map((order) => (
+                  <TableRow key={order.id} className="hover:bg-gray-50/50">
+                    <TableCell className="font-medium text-gray-900">
+                      {formatDate(order.created_at)}
+                    </TableCell>
+                    
+                    {type === 'laundry' ? (
+                      <>
+                        <TableCell>
+                          <div className="font-medium text-blue-600">{order.uniquecode}</div>
+                        </TableCell>
+                        <TableCell>
+                          <div>
+                            <p className="font-medium text-gray-900">{order.customer?.name || 'Unknown'}</p>
+                            <p className="text-xs text-gray-500">{order.customer?.phone || 'No phone'}</p>
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <span className="font-bold text-gray-900">
+                            {formatCurrency(safeParseFloat(order.total_price))}
+                          </span>
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex flex-col gap-1">
+                            <Badge className={cn("font-medium", getOrderStatusColor(order.order_status))}>
+                              {order.order_status}
+                            </Badge>
+                            <Badge variant="outline" className={cn("text-xs", getPaymentStatusColor(order.payment_status))}>
+                              {order.payment_status}
+                            </Badge>
+                          </div>
+                        </TableCell>
+                      </>
+                    ) : (
+                      <>
+                        <TableCell>
+                          <div className="font-medium text-orange-600">#{order.id}</div>
+                        </TableCell>
+                        <TableCell>
+                          <div className="space-y-1 max-w-md">
+                            {order.order_items.map((item: any) => (
+                              <div key={item.id} className="text-sm">
+                                <div className="flex justify-between">
+                                  <span className="font-medium text-gray-900">{item.food_item_name}</span>
+                                  <span className="text-gray-600">x{item.quantity}</span>
+                                </div>
+                                <div className="text-xs text-gray-500">
+                                  Unit: {formatCurrency(safeParseFloat(item.price))} | Total: {formatCurrency(item.total_price)}
+                                </div>
+                              </div>
+                            ))}
+                            {order.order_items.length === 0 && (
+                              <span className="text-sm text-gray-500 italic">No items</span>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <span className="font-bold text-gray-900">
+                            {formatCurrency(order.total_amount || 0)}
+                          </span>
+                        </TableCell>
+                      </>
+                    )}
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        ) : (
+          <div className="text-center py-12">
+            <div className="mx-auto w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-4">
+              {type === 'laundry' ? (
+                <ShoppingBag className="h-8 w-8 text-gray-400" />
+              ) : (
+                <Store className="h-8 w-8 text-gray-400" />
+              )}
+            </div>
+            <h3 className="text-lg font-medium text-gray-900 mb-2">No {type === 'laundry' ? 'Laundry' : 'Hotel'} Orders</h3>
+            <p className="text-gray-500">This user hasn't created any {type === 'laundry' ? 'laundry' : 'hotel'} orders yet.</p>
+          </div>
+        )}
+
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Close
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+};
+
 export default function SiteManagement() {
   const queryClient = useQueryClient();
   const currentUser = getCurrentUser();
   const isSuperUser = currentUser?.is_superuser || false;
 
+  // State
   const [selectedUserId, setSelectedUserId] = useState<number | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [userTypeFilter, setUserTypeFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
-  const [isUserDetailsOpen, setIsUserDetailsOpen] = useState(false);
   const [isCreateUserOpen, setIsCreateUserOpen] = useState(false);
   const [isEditUserOpen, setIsEditUserOpen] = useState(false);
   const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
   const [expandedUsers, setExpandedUsers] = useState<Set<number>>(new Set());
-  const [loadingOrders, setLoadingOrders] = useState<Set<number>>(new Set());
+  const [dateFilter, setDateFilter] = useState<{
+    startDate?: string;
+    endDate?: string;
+  }>({});
+  
+  // Orders dialogs state
+  const [laundryOrdersDialog, setLaundryOrdersDialog] = useState<{
+    isOpen: boolean;
+    userId: number | null;
+    userName: string;
+  }>({ isOpen: false, userId: null, userName: '' });
+  
+  const [hotelOrdersDialog, setHotelOrdersDialog] = useState<{
+    isOpen: boolean;
+    userId: number | null;
+    userName: string;
+  }>({ isOpen: false, userId: null, userName: '' });
 
   // Form states
   const [newUser, setNewUser] = useState({
@@ -336,7 +599,7 @@ export default function SiteManagement() {
     edit?: Record<string, string>;
   }>({});
 
-  // Fetch data using React Query
+  // React Query
   const { data: users = [], isLoading: usersLoading, error: usersError } = useQuery({
     queryKey: ['users'],
     queryFn: fetchUsers,
@@ -349,9 +612,9 @@ export default function SiteManagement() {
     retry: 1,
   });
 
-  const { data: allHotelOrderItems = [], isLoading: hotelOrdersLoading } = useQuery({
-    queryKey: ['hotel-order-items'],
-    queryFn: fetchAllHotelOrderItems,
+  const { data: allHotelOrders = [], isLoading: hotelOrdersLoading } = useQuery({
+    queryKey: ['hotel-orders'],
+    queryFn: fetchAllHotelOrders,
     retry: 1,
   });
 
@@ -361,165 +624,81 @@ export default function SiteManagement() {
     retry: 1,
   });
 
-  // Debug logging for hotel orders
-  useEffect(() => {
-    console.log('Hotel Orders Debug:', {
-      totalHotelOrders: allHotelOrderItems.length,
-      firstHotelOrder: allHotelOrderItems[0],
-      hotelOrderCreatedBy: allHotelOrderItems[0]?.created_by,
-      hotelOrderFoodItemCreatedBy: allHotelOrderItems[0]?.food_item?.created_by,
-      users: users.map(u => ({ id: u.id, email: u.email })),
-      hotelOrdersSample: allHotelOrderItems.slice(0, 3).map(order => ({
-        id: order.id,
-        created_by: order.created_by,
-        food_item_created_by: order.food_item?.created_by,
-        food_item_name: order.food_item?.name
-      }))
-    });
-  }, [allHotelOrderItems, users]);
-
-  // Memoize filtered data for each user
-  const userData = useMemo(() => {
-    console.log('Building user data mapping...');
-    const data: Record<number, UserData> = {};
-
-    // Initialize all users with empty arrays
+  // Memoized user performance data
+  const userPerformanceData = useMemo(() => {
+    const data: Record<number, UserPerformanceData> = {};
+    
+    const startDate = dateFilter.startDate ? new Date(dateFilter.startDate) : undefined;
+    const endDate = dateFilter.endDate ? new Date(dateFilter.endDate) : undefined;
+    
+    // Initialize all users
     users.forEach(user => {
       data[user.id] = {
         laundryOrders: [],
         hotelOrders: [],
-        customers: []
+        customers: [],
+        totalRevenue: 0,
+        totalOrders: 0,
+        laundryRevenue: 0,
+        hotelRevenue: 0
       };
     });
 
-    // Debug: Log user IDs for reference
-    const userIds = users.map(u => u.id);
-    console.log('Available user IDs:', userIds);
-
-    // Filter laundry orders by created_by
+    // Process laundry orders
     allLaundryOrders.forEach(order => {
-      if (order.created_by) {
-        let userId: number | null = null;
-
-        // Check if created_by is an object with id property
-        if (typeof order.created_by === 'object' && order.created_by !== null) {
-          userId = (order.created_by as any).id;
-          console.log('Laundry order created_by object:', order.created_by, 'Extracted ID:', userId);
-        }
-        // Check if created_by is a number (ID)
-        else if (typeof order.created_by === 'number') {
-          userId = order.created_by;
-          console.log('Laundry order created_by ID:', userId);
-        }
-
-        if (userId && data[userId]) {
-          data[userId].laundryOrders.push(order);
-          console.log(`Added laundry order ${order.id} to user ${userId}`);
-        } else if (userId) {
-          console.log(`User ${userId} not found for laundry order ${order.id}`);
-        }
+      const userId = extractUserId(order.created_by);
+      if (userId && data[userId] && isDateInRange(order.created_at, startDate, endDate)) {
+        data[userId].laundryOrders.push(order);
       }
     });
 
-    // Filter hotel order items by created_by - IMPORTANT FIX HERE
-    allHotelOrderItems.forEach(order => {
-      let userId: number | null = null;
-
-      // First check if order has created_by directly (even if null, check structure)
-      if (order.created_by !== undefined && order.created_by !== null) {
-        if (typeof order.created_by === 'object') {
-          userId = (order.created_by as any).id;
-          console.log('Hotel order direct created_by object:', order.created_by, 'Extracted ID:', userId);
-        }
-        else if (typeof order.created_by === 'number') {
-          userId = order.created_by;
-          console.log('Hotel order direct created_by ID:', userId);
-        }
-      }
-
-      // If no direct created_by or created_by is null, check food_item.created_by
-      if (!userId && order.food_item?.created_by) {
-        if (typeof order.food_item.created_by === 'object' && order.food_item.created_by !== null) {
-          userId = order.food_item.created_by.id;
-          console.log('Hotel order food_item.created_by object:', order.food_item.created_by, 'Extracted ID:', userId);
-        }
-        else if (typeof order.food_item.created_by === 'number') {
-          userId = order.food_item.created_by;
-          console.log('Hotel order food_item.created_by ID:', userId);
-        }
-      }
-
-      if (userId && data[userId]) {
+    // Process hotel orders
+    allHotelOrders.forEach(order => {
+      const userId = extractUserId(order.created_by);
+      if (userId && data[userId] && isDateInRange(order.created_at, startDate, endDate)) {
         data[userId].hotelOrders.push(order);
-        console.log(`Added hotel order ${order.id} to user ${userId} (via ${order.created_by ? 'direct' : 'food_item'})`);
-      } else if (userId) {
-        console.log(`User ${userId} not found for hotel order ${order.id}`);
-      } else {
-        console.log(`No user ID found for hotel order ${order.id}`, {
-          orderId: order.id,
-          created_by: order.created_by,
-          food_item_created_by: order.food_item?.created_by
-        });
       }
     });
 
-    // Filter customers by created_by
+    // Process customers
     allCustomers.forEach(customer => {
-      if (customer.created_by) {
-        let userId: number | null = null;
-
-        // Check if created_by is an object with id property
-        if (typeof customer.created_by === 'object' && customer.created_by !== null) {
-          userId = (customer.created_by as any).id;
-        }
-        // Check if created_by is a number (ID)
-        else if (typeof customer.created_by === 'number') {
-          userId = customer.created_by;
-        }
-
-        if (userId && data[userId]) {
-          data[userId].customers.push(customer);
-        }
+      const userId = extractUserId(customer.created_by);
+      if (userId && data[userId]) {
+        data[userId].customers.push(customer);
       }
     });
 
-    // Log summary
-    console.log('User Data Summary:', Object.keys(data).map(userId => ({
-      userId,
-      laundryOrders: data[parseInt(userId)].laundryOrders.length,
-      hotelOrders: data[parseInt(userId)].hotelOrders.length,
-      customers: data[parseInt(userId)].customers.length
-    })));
+    // Calculate totals
+    Object.keys(data).forEach(userId => {
+      const userData = data[parseInt(userId)];
+      
+      // Calculate laundry revenue
+      userData.laundryRevenue = userData.laundryOrders.reduce((sum, order) => 
+        sum + getOrderTotal(order), 0);
+      
+      // Calculate hotel revenue
+      userData.hotelRevenue = userData.hotelOrders.reduce((sum, order) => 
+        sum + getOrderTotal(order), 0);
+      
+      // Calculate totals
+      userData.totalRevenue = userData.laundryRevenue + userData.hotelRevenue;
+      userData.totalOrders = userData.laundryOrders.length + userData.hotelOrders.length;
+    });
 
     return data;
-  }, [users, allLaundryOrders, allHotelOrderItems, allCustomers]);
+  }, [users, allLaundryOrders, allHotelOrders, allCustomers, dateFilter]);
 
-  // Debug logging (remove in production)
-  useEffect(() => {
-    console.log('User Data Structure:', {
-      totalUsers: users.length,
-      totalLaundryOrders: allLaundryOrders.length,
-      totalHotelOrders: allHotelOrderItems.length,
-      userDataKeys: Object.keys(userData),
-      sampleUserData: users.length > 0 ? userData[users[0].id] : 'No users'
-    });
-  }, [users, allLaundryOrders, allHotelOrderItems, userData]);
-
-  // Load user data when expanded
-  const loadUserData = async (userId: number) => {
-    if (loadingOrders.has(userId)) return;
-    setLoadingOrders(prev => new Set([...prev, userId]));
-    // Data is already loaded via useQuery, just simulate loading
-    setTimeout(() => {
-      setLoadingOrders(prev => {
-        const newSet = new Set(prev);
-        newSet.delete(userId);
-        return newSet;
-      });
-    }, 300);
+  // Utility functions
+  const getUserInitials = (user: User) => {
+    const firstName = user.first_name || '';
+    const lastName = user.last_name || '';
+    if (firstName || lastName) {
+      return `${firstName.charAt(0)}${lastName.charAt(0)}`.toUpperCase();
+    }
+    return user.email.charAt(0).toUpperCase();
   };
 
-  // Validate create form
+  // Validation functions
   const validateCreateForm = (): boolean => {
     const errors: Record<string, string> = {};
 
@@ -545,7 +724,6 @@ export default function SiteManagement() {
     return Object.keys(errors).length === 0;
   };
 
-  // Validate edit form
   const validateEditForm = (): boolean => {
     const errors: Record<string, string> = {};
 
@@ -565,7 +743,7 @@ export default function SiteManagement() {
     return Object.keys(errors).length === 0;
   };
 
-  // CREATE user mutation
+  // Mutations
   const createUserMutation = useMutation({
     mutationFn: createUser,
     onSuccess: () => {
@@ -589,7 +767,6 @@ export default function SiteManagement() {
     },
   });
 
-  // UPDATE user mutation
   const updateUserMutation = useMutation({
     mutationFn: ({ userId, data }: { userId: number; data: any }) =>
       updateUser(userId, data),
@@ -614,7 +791,6 @@ export default function SiteManagement() {
     },
   });
 
-  // DELETE user mutation
   const deleteUserMutation = useMutation({
     mutationFn: deleteUser,
     onSuccess: () => {
@@ -628,7 +804,7 @@ export default function SiteManagement() {
     },
   });
 
-  // Filter users based on search and filters
+  // Filter users
   const filteredUsers = users.filter((user) => {
     const searchLower = searchQuery.toLowerCase();
     const matchesSearch =
@@ -647,70 +823,19 @@ export default function SiteManagement() {
     return matchesSearch && matchesUserType && matchesStatus;
   });
 
-  // Get user's initials for avatar
-  const getUserInitials = (user: User) => {
-    const firstName = user.first_name || '';
-    const lastName = user.last_name || '';
-    if (firstName || lastName) {
-      return `${firstName.charAt(0)}${lastName.charAt(0)}`.toUpperCase();
-    }
-    return user.email.charAt(0).toUpperCase();
-  };
-
-  // Format date
-  const formatDate = (dateString: string | null | undefined) => {
-    if (!dateString) return 'Never';
-    try {
-      return new Date(dateString).toLocaleDateString('en-US', {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-      });
-    } catch (error) {
-      console.error('Error formatting date:', error, dateString);
-      return 'Invalid date';
-    }
-  };
-
-  // Format time ago
-  const formatTimeAgo = (dateString: string | null | undefined) => {
-    if (!dateString) return 'Never';
-
-    try {
-      const now = new Date();
-      const past = new Date(dateString);
-      const diffMs = now.getTime() - past.getTime();
-      const diffMins = Math.floor(diffMs / 60000);
-      const diffHours = Math.floor(diffMs / 3600000);
-      const diffDays = Math.floor(diffMs / 86400000);
-
-      if (diffMins < 60) return `${diffMins}m ago`;
-      if (diffHours < 24) return `${diffHours}h ago`;
-      if (diffDays < 30) return `${diffDays}d ago`;
-      return formatDate(dateString);
-    } catch (error) {
-      console.error('Error formatting time ago:', error, dateString);
-      return 'Invalid date';
-    }
-  };
-
-  // Toggle user details expansion
-  const toggleUserExpansion = async (userId: number) => {
+  // Handlers
+  const toggleUserExpansion = (userId: number) => {
     setExpandedUsers(prev => {
       const newSet = new Set(prev);
       if (newSet.has(userId)) {
         newSet.delete(userId);
       } else {
         newSet.add(userId);
-        loadUserData(userId);
       }
       return newSet;
     });
   };
 
-  // Handle CREATE user
   const handleCreateUser = () => {
     if (!validateCreateForm()) {
       toast.error("Please fix the form errors");
@@ -730,7 +855,6 @@ export default function SiteManagement() {
     createUserMutation.mutate(userData);
   };
 
-  // Handle UPDATE user
   const handleEditUser = () => {
     if (!selectedUserId) return;
 
@@ -758,7 +882,6 @@ export default function SiteManagement() {
     });
   };
 
-  // Handle DELETE user
   const handleDeleteUser = () => {
     if (!selectedUserId) return;
 
@@ -770,7 +893,6 @@ export default function SiteManagement() {
     deleteUserMutation.mutate(selectedUserId);
   };
 
-  // Open edit dialog
   const openEditDialog = (user: User) => {
     setSelectedUserId(user.id);
     setEditUser({
@@ -785,7 +907,6 @@ export default function SiteManagement() {
     setIsEditUserOpen(true);
   };
 
-  // Open delete confirmation
   const openDeleteConfirm = (userId: number) => {
     const userToDelete = users.find(u => u.id === userId);
 
@@ -803,62 +924,67 @@ export default function SiteManagement() {
     setIsDeleteConfirmOpen(true);
   };
 
-  // Get user type badge color
+  const openLaundryOrdersDialog = (userId: number, userName: string) => {
+    setLaundryOrdersDialog({
+      isOpen: true,
+      userId,
+      userName
+    });
+  };
+
+  const openHotelOrdersDialog = (userId: number, userName: string) => {
+    setHotelOrdersDialog({
+      isOpen: true,
+      userId,
+      userName
+    });
+  };
+
+  const clearDateFilters = () => {
+    setDateFilter({});
+  };
+
+  // Helper functions for UI
   const getUserTypeColor = (userType: string) => {
     const colors: Record<string, string> = {
-      'admin': 'bg-purple-100 text-purple-800',
-      'staff': 'bg-blue-100 text-blue-800',
-      'customer': 'bg-green-100 text-green-800',
-      'manager': 'bg-orange-100 text-orange-800',
+      'admin': 'bg-purple-100 text-purple-800 border-purple-200',
+      'staff': 'bg-blue-100 text-blue-800 border-blue-200',
+      'customer': 'bg-green-100 text-green-800 border-green-200',
+      'manager': 'bg-orange-100 text-orange-800 border-orange-200',
     };
-    return colors[userType] || 'bg-gray-100 text-gray-800';
+    return colors[userType] || 'bg-gray-100 text-gray-800 border-gray-200';
   };
 
-  // Get order status badge color
-  const getOrderStatusColor = (status: string) => {
-    const colors: Record<string, string> = {
-      'pending': 'bg-yellow-100 text-yellow-800',
-      'Completed': 'bg-green-100 text-green-800',
-      'Delivered_picked': 'bg-blue-100 text-blue-800',
-    };
-    return colors[status] || 'bg-gray-100 text-gray-800';
-  };
+  // Calculate totals for stats
+  const totalOrders = useMemo(() => {
+    const startDate = dateFilter.startDate ? new Date(dateFilter.startDate) : undefined;
+    const endDate = dateFilter.endDate ? new Date(dateFilter.endDate) : undefined;
+    
+    const filteredLaundryOrders = allLaundryOrders.filter(order => 
+      isDateInRange(order.created_at, startDate, endDate)
+    );
+    
+    const filteredHotelOrders = allHotelOrders.filter(order => 
+      isDateInRange(order.created_at, startDate, endDate)
+    );
+    
+    return filteredLaundryOrders.length + filteredHotelOrders.length;
+  }, [allLaundryOrders, allHotelOrders, dateFilter]);
 
-  // Get payment status badge color
-  const getPaymentStatusColor = (status: string) => {
-    const colors: Record<string, string> = {
-      'pending': 'bg-red-100 text-red-800',
-      'completed': 'bg-green-100 text-green-800',
-      'partial': 'bg-orange-100 text-orange-800',
-    };
-    return colors[status] || 'bg-gray-100 text-gray-800';
-  };
-
-  // Calculate total orders value for a user
-  const calculateTotalOrdersValue = (orders: LaundryOrder[]): number => {
-    if (!Array.isArray(orders)) {
-      console.warn('calculateTotalOrdersValue received non-array:', orders);
-      return 0;
-    }
-    return orders.reduce((sum, order) => {
-      return sum + safeParseFloat(order?.total_price || 0);
-    }, 0);
-  };
-
-  // Calculate total hotel orders value for a user
-  const calculateTotalHotelOrdersValue = (orders: ExtendedHotelOrderItem[]): number => {
-    if (!Array.isArray(orders)) {
-      console.warn('calculateTotalHotelOrdersValue received non-array:', orders);
-      return 0;
-    }
-    return orders.reduce((sum, order) => {
-      // Use total_price if available, otherwise calculate from price * quantity
-      if (order.total_price !== undefined) {
-        return sum + safeParseFloat(order.total_price);
-      }
-      return sum + safeParseFloat(order.price) * order.quantity;
-    }, 0);
-  };
+  const totalRevenue = useMemo(() => {
+    const startDate = dateFilter.startDate ? new Date(dateFilter.startDate) : undefined;
+    const endDate = dateFilter.endDate ? new Date(dateFilter.endDate) : undefined;
+    
+    const laundryRevenue = allLaundryOrders
+      .filter(order => isDateInRange(order.created_at, startDate, endDate))
+      .reduce((sum, order) => sum + safeParseFloat(order.total_price), 0);
+    
+    const hotelRevenue = allHotelOrders
+      .filter(order => isDateInRange(order.created_at, startDate, endDate))
+      .reduce((sum, order) => sum + (order.total_amount || 0), 0);
+    
+    return laundryRevenue + hotelRevenue;
+  }, [allLaundryOrders, allHotelOrders, dateFilter]);
 
   if (usersError) {
     return (
@@ -883,13 +1009,13 @@ export default function SiteManagement() {
       <div className="flex justify-between items-center mb-8">
         <div>
           <h1 className="text-3xl font-bold text-gray-900 mb-2">Site Management</h1>
-          <p className="text-gray-600">Manage users and track site activity</p>
+          <p className="text-gray-600">Manage users and track their performance</p>
         </div>
 
         {isSuperUser && (
           <Button
             onClick={() => setIsCreateUserOpen(true)}
-            className="bg-blue-600 hover:bg-blue-700"
+            className="bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800"
           >
             <UserPlus className="mr-2 h-4 w-4" />
             Create New User
@@ -897,89 +1023,164 @@ export default function SiteManagement() {
         )}
       </div>
 
+      {/* Date Filters */}
+      <Card className="mb-6 border-gray-200 shadow-sm">
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Filter className="h-5 w-5 text-gray-500" />
+              <CardTitle className="text-lg font-semibold">Date Filters</CardTitle>
+            </div>
+            {(dateFilter.startDate || dateFilter.endDate) && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={clearDateFilters}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                Clear Filters
+              </Button>
+            )}
+          </div>
+          <CardDescription>Filter orders by date range</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="start-date" className="flex items-center gap-2">
+                <Calendar className="h-4 w-4" />
+                Start Date
+              </Label>
+              <Input
+                id="start-date"
+                type="date"
+                value={dateFilter.startDate || ''}
+                onChange={(e) => setDateFilter(prev => ({ ...prev, startDate: e.target.value }))}
+                className="border-gray-300"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="end-date" className="flex items-center gap-2">
+                <Calendar className="h-4 w-4" />
+                End Date
+              </Label>
+              <Input
+                id="end-date"
+                type="date"
+                value={dateFilter.endDate || ''}
+                onChange={(e) => setDateFilter(prev => ({ ...prev, endDate: e.target.value }))}
+                className="border-gray-300"
+              />
+            </div>
+            <div className="flex items-end">
+              <Button
+                variant="outline"
+                onClick={clearDateFilters}
+                className="w-full border-gray-300"
+              >
+                Clear Dates
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
       {/* User Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Users</CardTitle>
-            <Users className="h-4 w-4 text-gray-500" />
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+        <Card className="border-gray-200 shadow-sm hover:shadow-md transition-shadow">
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-sm font-medium text-gray-600">Total Users</CardTitle>
+              <div className="p-2 bg-blue-50 rounded-lg">
+                <Users className="h-5 w-5 text-blue-600" />
+              </div>
+            </div>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">
+            <div className="text-3xl font-bold text-gray-900">
               {usersLoading ? "..." : users.length}
             </div>
-            <p className="text-xs text-gray-500">Registered users</p>
+            <p className="text-sm text-gray-500 mt-1">Registered users</p>
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Active Users</CardTitle>
-            <Activity className="h-4 w-4 text-green-500" />
+        <Card className="border-gray-200 shadow-sm hover:shadow-md transition-shadow">
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-sm font-medium text-gray-600">Active Users</CardTitle>
+              <div className="p-2 bg-green-50 rounded-lg">
+                <Activity className="h-5 w-5 text-green-600" />
+              </div>
+            </div>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">
+            <div className="text-3xl font-bold text-gray-900">
               {usersLoading ? "..." : users.filter(u => u.is_active).length}
             </div>
-            <p className="text-xs text-gray-500">Currently active users</p>
+            <p className="text-sm text-gray-500 mt-1">Currently active</p>
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Staff Members</CardTitle>
-            <Shield className="h-4 w-4 text-blue-500" />
+        <Card className="border-gray-200 shadow-sm hover:shadow-md transition-shadow">
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-sm font-medium text-gray-600">Total Orders</CardTitle>
+              <div className="p-2 bg-orange-50 rounded-lg">
+                <Package className="h-5 w-5 text-orange-600" />
+              </div>
+            </div>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">
-              {usersLoading ? "..." : users.filter(u => u.is_staff).length}
+            <div className="text-3xl font-bold text-gray-900">
+              {laundryOrdersLoading || hotelOrdersLoading ? "..." : totalOrders}
             </div>
-            <p className="text-xs text-gray-500">Staff users</p>
+            <p className="text-sm text-gray-500 mt-1">Filtered orders</p>
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Orders</CardTitle>
-            <ShoppingBag className="h-4 w-4 text-orange-500" />
+        <Card className="border-gray-200 shadow-sm hover:shadow-md transition-shadow">
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-sm font-medium text-gray-600">Total Revenue</CardTitle>
+              <div className="p-2 bg-emerald-50 rounded-lg">
+                <DollarSign className="h-5 w-5 text-emerald-600" />
+              </div>
+            </div>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">
-              {laundryOrdersLoading ? "..." : allLaundryOrders.length + allHotelOrderItems.length}
+            <div className="text-3xl font-bold text-gray-900">
+              {laundryOrdersLoading || hotelOrdersLoading ? "..." : formatCurrency(totalRevenue)}
             </div>
-            <p className="text-xs text-gray-500">All orders created</p>
+            <p className="text-sm text-gray-500 mt-1">Filtered revenue</p>
           </CardContent>
         </Card>
       </div>
 
-      {/* Main Content with Tabs */}
-      <Tabs defaultValue="users" className="space-y-4">
-        <TabsList>
-          <TabsTrigger value="users" className="flex items-center gap-2">
-            <Users className="h-4 w-4" />
-            Users
-          </TabsTrigger>
-        </TabsList>
+      {/* Main Content */}
+      <Card className="border-gray-200 shadow-sm">
+        <CardHeader className="border-b border-gray-200">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div>
+              <CardTitle>User Management</CardTitle>
+              <CardDescription>
+                {filteredUsers.length} users found
+              </CardDescription>
+            </div>
 
-        <TabsContent value="users">
-          {/* Filters and Search */}
-          <div className="bg-white p-4 rounded-lg border shadow-sm mb-6">
             <div className="flex flex-col md:flex-row gap-4">
-              <div className="flex-1">
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
-                  <Input
-                    placeholder="Search users by email or name..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="pl-10"
-                  />
-                </div>
+              <div className="relative flex-1 md:w-64">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+                <Input
+                  placeholder="Search users..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-10 border-gray-300"
+                />
               </div>
 
               <div className="flex gap-2">
                 <Select value={userTypeFilter} onValueChange={setUserTypeFilter}>
-                  <SelectTrigger className="w-[180px]">
+                  <SelectTrigger className="w-[140px] border-gray-300">
                     <SelectValue placeholder="User Type" />
                   </SelectTrigger>
                   <SelectContent>
@@ -990,7 +1191,7 @@ export default function SiteManagement() {
                 </Select>
 
                 <Select value={statusFilter} onValueChange={setStatusFilter}>
-                  <SelectTrigger className="w-[180px]">
+                  <SelectTrigger className="w-[140px] border-gray-300">
                     <SelectValue placeholder="Status" />
                   </SelectTrigger>
                   <SelectContent>
@@ -1002,426 +1203,297 @@ export default function SiteManagement() {
               </div>
             </div>
           </div>
+        </CardHeader>
 
-          {/* Users Table */}
-          <Card>
-            <CardHeader>
-              <CardTitle>User Management</CardTitle>
-              <CardDescription>
-                {filteredUsers.length} users found
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              {usersLoading ? (
-                <div className="flex items-center justify-center h-64">
-                  <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
-                </div>
-              ) : filteredUsers.length === 0 ? (
-                <div className="text-center py-12">
-                  <UserIcon className="mx-auto h-12 w-12 text-gray-400" />
-                  <h3 className="mt-4 text-sm font-medium text-gray-900">No users found</h3>
-                  <p className="mt-1 text-sm text-gray-500">
-                    {searchQuery ? 'Try a different search term' : 'No users match the selected filters'}
-                  </p>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  {filteredUsers.map((user) => {
-                    const isExpanded = expandedUsers.has(user.id);
-                    const userDataForUser = userData[user.id] || { laundryOrders: [], hotelOrders: [], customers: [] };
-                    const { laundryOrders = [], hotelOrders = [], customers = [] } = userDataForUser;
-                    const isLoading = loadingOrders.has(user.id);
+        <CardContent className="p-0">
+          {usersLoading ? (
+            <div className="flex items-center justify-center h-64">
+              <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
+            </div>
+          ) : filteredUsers.length === 0 ? (
+            <div className="text-center py-16">
+              <div className="mx-auto w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-4">
+                <UserIcon className="h-8 w-8 text-gray-400" />
+              </div>
+              <h3 className="text-lg font-medium text-gray-900 mb-2">No users found</h3>
+              <p className="text-gray-500 max-w-sm mx-auto">
+                {searchQuery ? 'Try a different search term' : 'No users match the selected filters'}
+              </p>
+            </div>
+          ) : (
+            <div className="divide-y divide-gray-200">
+              {filteredUsers.map((user) => {
+                const isExpanded = expandedUsers.has(user.id);
+                const performanceData = userPerformanceData[user.id] || {
+                  laundryOrders: [],
+                  hotelOrders: [],
+                  customers: [],
+                  totalRevenue: 0,
+                  totalOrders: 0,
+                  laundryRevenue: 0,
+                  hotelRevenue: 0
+                };
 
-                    return (
-                      <div key={user.id} className="border rounded-lg overflow-hidden">
-                        {/* User Header */}
-                        <div className="bg-gray-50 p-4 flex items-center justify-between hover:bg-gray-100 transition-colors">
-                          <div className="flex items-center space-x-4">
-                            <Avatar>
-                              <AvatarFallback className={cn(
-                                "font-semibold",
-                                user.is_active ? "bg-green-100 text-green-800" : "bg-gray-100 text-gray-800"
-                              )}>
-                                {getUserInitials(user)}
-                              </AvatarFallback>
-                            </Avatar>
-                            <div>
-                              <div className="flex items-center gap-2">
-                                <h3 className="font-semibold">
-                                  {user.first_name || user.last_name ? `${user.first_name || ''} ${user.last_name || ''}`.trim() : user.email}
-                                </h3>
-                                <Badge variant="outline" className={getUserTypeColor(user.user_type)}>
-                                  {user.user_type}
-                                </Badge>
-                                {user.is_staff && (
-                                  <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">
-                                    <Shield className="h-3 w-3 mr-1" />
-                                    Staff
-                                  </Badge>
-                                )}
-                                {user.is_superuser && (
-                                  <Badge variant="outline" className="bg-purple-50 text-purple-700 border-purple-200">
-                                    <Key className="h-3 w-3 mr-1" />
-                                    Superuser
-                                  </Badge>
-                                )}
-                              </div>
-                              <p className="text-sm text-gray-600">{user.email}</p>
-                            </div>
+                return (
+                  <div key={user.id} className="hover:bg-gray-50 transition-colors">
+                    {/* User Header */}
+                    <div className="p-6 flex items-center justify-between">
+                      <div className="flex items-center space-x-4">
+                        <Avatar className="h-12 w-12 border-2 border-white shadow-sm">
+                          <AvatarFallback className={cn(
+                            "font-semibold text-base",
+                            user.is_active ? "bg-gradient-to-br from-green-100 to-green-50 text-green-700" : "bg-gradient-to-br from-gray-100 to-gray-50 text-gray-700"
+                          )}>
+                            {getUserInitials(user)}
+                          </AvatarFallback>
+                        </Avatar>
+                        <div >
+                          <div className="flex items-center gap-2 mb-1">
+                           
+                            <h3 className="font-semibold text-gray-900">
+                              {user.first_name || user.last_name ? `${user.first_name || ''} ${user.last_name || ''}`.trim() : user.email}
+                            </h3>
+                            <Badge variant="outline" className={cn("text-xs font-medium", getUserTypeColor(user.user_type))}>
+                              {user.user_type}
+                            </Badge>
+                            {user.is_staff && (
+                              <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200 text-xs font-medium">
+                                <Shield className="h-3 w-3 mr-1" />
+                                Staff
+                              </Badge>
+                            )}
                           </div>
-
-                          <div className="flex items-center gap-4">
-                            <div className="text-right">
-                              <p className="text-sm font-medium">
-                                {user.is_active ? (
-                                  <span className="text-green-600 flex items-center gap-1">
-                                    <CheckCircle className="h-4 w-4" />
-                                    Active
-                                  </span>
-                                ) : (
-                                  <span className="text-red-600 flex items-center gap-1">
-                                    <XCircle className="h-4 w-4" />
-                                    Inactive
-                                  </span>
-                                )}
-                              </p>
-                              <p className="text-xs text-gray-500">
-                                Last login: {formatTimeAgo(user.last_login)}
-                              </p>
+                         
+                          <div className="flex items-center gap-4 mt-2">
+                             <p className="text-sm text-gray-600">{user.email}</p>
+                            <div className="flex items-center gap-1">
+                              <ShoppingBag className="h-4 w-4 text-gray-400" />
+                              <span className="text-sm font-medium text-gray-700">{performanceData.totalOrders} orders</span>
                             </div>
-
-                            <div className="flex items-center gap-2">
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => toggleUserExpansion(user.id)}
-                                disabled={isLoading}
-                              >
-                                {isLoading ? (
-                                  <Loader2 className="h-4 w-4 animate-spin" />
-                                ) : isExpanded ? (
-                                  <ChevronUp className="h-4 w-4" />
-                                ) : (
-                                  <ChevronDown className="h-4 w-4" />
-                                )}
-                              </Button>
-
-                              {isSuperUser && (
-                                <DropdownMenu>
-                                  <DropdownMenuTrigger asChild>
-                                    <Button variant="ghost" size="sm">
-                                      <MoreVertical className="h-4 w-4" />
-                                    </Button>
-                                  </DropdownMenuTrigger>
-                                  <DropdownMenuContent align="end">
-                                    <DropdownMenuItem onClick={() => openEditDialog(user)}>
-                                      <Edit className="mr-2 h-4 w-4" />
-                                      Edit User
-                                    </DropdownMenuItem>
-                                    <DropdownMenuItem onClick={() => {
-                                      updateUserMutation.mutate({
-                                        userId: user.id,
-                                        data: { is_active: !user.is_active }
-                                      });
-                                    }}>
-                                      {user.is_active ? (
-                                        <>
-                                          <XCircle className="mr-2 h-4 w-4" />
-                                          Deactivate User
-                                        </>
-                                      ) : (
-                                        <>
-                                          <CheckCircle className="mr-2 h-4 w-4" />
-                                          Activate User
-                                        </>
-                                      )}
-                                    </DropdownMenuItem>
-                                    {!user.is_superuser && (
-                                      <>
-                                        <DropdownMenuSeparator />
-                                        <DropdownMenuItem
-                                          onClick={() => openDeleteConfirm(user.id)}
-                                          className="text-red-600"
-                                        >
-                                          <Trash2 className="mr-2 h-4 w-4" />
-                                          Delete User
-                                        </DropdownMenuItem>
-                                      </>
-                                    )}
-                                  </DropdownMenuContent>
-                                </DropdownMenu>
-                              )}
+                            <div className="flex items-center gap-1">
+                              <DollarSign className="h-4 w-4 text-green-600" />
+                              <span className="text-sm font-medium text-green-700">{formatCurrency(performanceData.totalRevenue)}</span>
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <Clock className="h-4 w-4 text-gray-400" />
+                              <span className="text-xs text-gray-500">Last login: {user.last_login ? formatDateTime(user.last_login) : 'Never'}</span>
                             </div>
                           </div>
                         </div>
-
-                        {/* Expanded Details */}
-                        {isExpanded && (
-                          <div className="border-t p-4 bg-white">
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-                              <div>
-                                <h4 className="text-sm font-medium text-gray-700 mb-2">User Details</h4>
-                                <div className="space-y-1 text-sm">
-                                  <p><span className="text-gray-500">Joined:</span> {formatDate(user.date_joined)}</p>
-                                  <p><span className="text-gray-500">Type:</span> {user.user_type}</p>
-                                  <p><span className="text-gray-500">Staff:</span> {user.is_staff ? 'Yes' : 'No'}</p>
-                                  <p><span className="text-gray-500">Superuser:</span> {user.is_superuser ? 'Yes' : 'No'}</p>
-                                  <p><span className="text-gray-500">Customers Created:</span> {customers.length}</p>
-                                </div>
-                              </div>
-
-                              <div>
-                                <h4 className="text-sm font-medium text-gray-700 mb-2">Laundry Orders</h4>
-                                <div className="space-y-2">
-                                  <div className="flex items-center justify-between">
-                                    <span className="text-sm">Total Orders:</span>
-                                    <Badge variant="outline">{laundryOrders.length}</Badge>
-                                  </div>
-                                  <div className="flex items-center justify-between">
-                                    <span className="text-sm">Total Value:</span>
-                                    <Badge variant="secondary" className="bg-green-50 text-green-700">
-                                      KSh {calculateTotalOrdersValue(laundryOrders).toFixed(2)}
-                                    </Badge>
-                                  </div>
-                                  {laundryOrders.slice(0, 3).map((order) => (
-                                    <div key={order.id} className="text-sm border-l-2 border-blue-200 pl-2">
-                                      <div className="flex justify-between items-start">
-                                        <div>
-                                          <p className="font-medium truncate">{order.uniquecode}</p>
-                                          <p className="text-xs text-gray-500">{order.customer?.name || 'Unknown Customer'}</p>
-                                        </div>
-                                        <div className="text-right">
-                                          <Badge className={getOrderStatusColor(order.order_status)}>
-                                            {order.order_status}
-                                          </Badge>
-                                        </div>
-                                      </div>
-                                    </div>
-                                  ))}
-                                  {laundryOrders.length === 0 && (
-                                    <p className="text-sm text-gray-500">No laundry orders</p>
-                                  )}
-                                </div>
-                              </div>
-
-                              <div>
-                                <h4 className="text-sm font-medium text-gray-700 mb-2">Hotel Orders</h4>
-                                <div className="space-y-2">
-                                  <div className="flex items-center justify-between">
-                                    <span className="text-sm">Total Orders:</span>
-                                    <Badge variant="outline">{hotelOrders.length}</Badge>
-                                  </div>
-                                  <div className="flex items-center justify-between">
-                                    <span className="text-sm">Total Value:</span>
-                                    <Badge variant="secondary" className="bg-orange-50 text-orange-700">
-                                      KSh {calculateTotalHotelOrdersValue(hotelOrders).toFixed(2)}
-                                    </Badge>
-                                  </div>
-                                  {hotelOrders.slice(0, 3).map((order) => (
-                                    <div key={order.id} className="text-sm border-l-2 border-orange-200 pl-2">
-                                      <div className="flex justify-between">
-                                        <span>Order #{order.id}</span>
-                                        <span className="font-medium">KSh {order.total_price ? safeParseFloat(order.total_price).toFixed(2) : (safeParseFloat(order.price) * order.quantity).toFixed(2)}</span>
-                                      </div>
-                                      <p className="text-xs text-gray-500">
-                                        Item: {order.food_item?.name || 'N/A'} (Qty: {order.quantity})
-                                      </p>
-                                      <p className="text-xs text-gray-500">{formatDate(order.created_at)}</p>
-                                      {order.food_item?.created_by && (
-                                        <p className="text-xs text-gray-500 italic">
-                                          Via food item created by: {order.food_item.created_by.email}
-                                        </p>
-                                      )}
-                                    </div>
-                                  ))}
-                                  {hotelOrders.length === 0 && (
-                                    <p className="text-sm text-gray-500">No hotel orders</p>
-                                  )}
-                                </div>
-                              </div>
-                            </div>
-
-                            {/* Orders Table */}
-                            {(laundryOrders.length > 0 || hotelOrders.length > 0) && (
-                              <div className="mt-6">
-                                <Tabs defaultValue="laundry">
-                                  <TabsList className="mb-4">
-                                    <TabsTrigger value="laundry" className="flex items-center gap-2">
-                                      <ShoppingBag className="h-4 w-4" />
-                                      Laundry Orders ({laundryOrders.length})
-                                    </TabsTrigger>
-                                    <TabsTrigger value="hotel" className="flex items-center gap-2">
-                                      <Store className="h-4 w-4" />
-                                      Hotel Orders ({hotelOrders.length})
-                                    </TabsTrigger>
-                                  </TabsList>
-
-                                  <TabsContent value="laundry">
-                                    {laundryOrders.length > 0 ? (
-                                      <div className="overflow-x-auto">
-                                        <Table>
-                                          <TableHeader>
-                                            <TableRow>
-                                              <TableHead>Order Code</TableHead>
-                                              <TableHead>Customer</TableHead>
-                                              <TableHead>Shop</TableHead>
-                                              <TableHead>Total</TableHead>
-                                              <TableHead>Paid</TableHead>
-                                              <TableHead>Status</TableHead>
-                                              <TableHead>Payment</TableHead>
-                                              <TableHead>Delivery Date</TableHead>
-                                              <TableHead>Created By</TableHead>
-                                            </TableRow>
-                                          </TableHeader>
-                                          <TableBody>
-                                            {laundryOrders.map((order) => (
-                                              <TableRow key={order.id}>
-                                                <TableCell className="font-medium">
-                                                  {order.uniquecode}
-                                                </TableCell>
-                                                <TableCell>
-                                                  <div>
-                                                    <p>{order.customer?.name || 'Unknown Customer'}</p>
-                                                    <p className="text-xs text-gray-500">{order.customer?.phone || 'No phone'}</p>
-                                                  </div>
-                                                </TableCell>
-                                                <TableCell>
-                                                  <Badge variant="outline">{order.shop}</Badge>
-                                                </TableCell>
-                                                <TableCell className="font-medium">
-                                                  KSh {safeParseFloat(order.total_price).toFixed(2)}
-                                                </TableCell>
-                                                <TableCell>
-                                                  KSh {safeParseFloat(order.amount_paid).toFixed(2)}
-                                                </TableCell>
-                                                <TableCell>
-                                                  <Badge className={getOrderStatusColor(order.order_status)}>
-                                                    {order.order_status}
-                                                  </Badge>
-                                                </TableCell>
-                                                <TableCell>
-                                                  <div className="flex flex-col gap-1">
-                                                    <Badge className={getPaymentStatusColor(order.payment_status)}>
-                                                      {order.payment_status}
-                                                    </Badge>
-                                                    <span className="text-xs text-gray-500">{order.payment_type}</span>
-                                                  </div>
-                                                </TableCell>
-                                                <TableCell>
-                                                  {formatDate(order.delivery_date)}
-                                                </TableCell>
-                                                <TableCell>
-                                                  <div className="text-xs">
-                                                    <p className="font-medium">{order.created_by?.email || 'Unknown'}</p>
-                                                    <p className="text-gray-500">ID: {order.created_by?.id || 'N/A'}</p>
-                                                  </div>
-                                                </TableCell>
-                                              </TableRow>
-                                            ))}
-                                          </TableBody>
-                                        </Table>
-                                      </div>
-                                    ) : (
-                                      <div className="text-center py-8 text-gray-500">
-                                        No laundry orders found
-                                      </div>
-                                    )}
-                                  </TabsContent>
-
-                                  <TabsContent value="hotel">
-                                    {hotelOrders.length > 0 ? (
-                                      <div className="overflow-x-auto">
-                                        <Table>
-                                          <TableHeader>
-                                            <TableRow>
-                                              <TableHead>Order ID</TableHead>
-                                              <TableHead>Food Item</TableHead>
-                                              <TableHead>Category</TableHead>
-                                              <TableHead>Quantity</TableHead>
-                                              <TableHead>Price</TableHead>
-                                              <TableHead>Total</TableHead>
-                                              <TableHead>Created At</TableHead>
-                                              <TableHead>Created By</TableHead>
-                                            </TableRow>
-                                          </TableHeader>
-                                          <TableBody>
-                                            {hotelOrders.map((order) => (
-                                              <TableRow key={order.id}>
-                                                <TableCell className="font-medium">
-                                                  #{order.id}
-                                                </TableCell>
-                                                <TableCell>
-                                                  <div>
-                                                    <p className="font-medium">{order.food_item?.name || 'N/A'}</p>
-                                                    {order.food_item?.created_by && (
-                                                      <p className="text-xs text-gray-500">
-                                                        Food item created by: {order.food_item.created_by.email}
-                                                      </p>
-                                                    )}
-                                                  </div>
-                                                </TableCell>
-                                                <TableCell>
-                                                  {order.food_item?.category?.name || 'N/A'}
-                                                </TableCell>
-                                                <TableCell>
-                                                  {order.quantity}
-                                                </TableCell>
-                                                <TableCell>
-                                                  KSh {safeParseFloat(order.price).toFixed(2)}
-                                                </TableCell>
-                                                <TableCell className="font-medium">
-                                                  KSh {order.total_price ? safeParseFloat(order.total_price).toFixed(2) : (safeParseFloat(order.price) * order.quantity).toFixed(2)}
-                                                </TableCell>
-                                                <TableCell>
-                                                  {formatDate(order.created_at)}
-                                                </TableCell>
-                                                <TableCell>
-                                                  <div className="text-xs">
-                                                    <p className="font-medium">
-                                                      {order.created_by?.email || order.food_item?.created_by?.email || 'Unknown'}
-                                                    </p>
-                                                    <p className="text-gray-500">
-                                                      ID: {order.created_by?.id || order.food_item?.created_by?.id || 'N/A'}
-                                                    </p>
-                                                  </div>
-                                                </TableCell>
-                                              </TableRow>
-                                            ))}
-                                          </TableBody>
-                                        </Table>
-                                      </div>
-                                    ) : (
-                                      <div className="text-center py-8 text-gray-500">
-                                        No hotel orders found
-                                      </div>
-                                    )}
-                                  </TabsContent>
-                                </Tabs>
-                              </div>
-                            )}
-
-                            <div className="mt-4 flex gap-2">
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="w-full"
-                                onClick={() => window.open(`/orders?created_by=${user.id}`, '_blank')}
-                              >
-                                <ExternalLink className="h-4 w-4 mr-2" />
-                                View All Orders
-                              </Button>
-                            </div>
-                          </div>
-                        )}
                       </div>
-                    );
-                  })}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
+
+                      <div className="flex items-center gap-3">
+                        <div className="text-right">
+                          <div className="mb-1">
+                            {user.is_active ? (
+                              <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-green-50 text-green-700 border border-green-200">
+                                <CheckCircle className="h-3 w-3" />
+                                Active
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-red-50 text-red-700 border border-red-200">
+                                <XCircle className="h-3 w-3" />
+                                Inactive
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-xs text-gray-500">
+                            Joined {formatDate(user.date_joined)}
+                          </p>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => toggleUserExpansion(user.id)}
+                            className="border-gray-300 hover:bg-gray-100"
+                          >
+                            {isExpanded ? (
+                              <ChevronUp className="h-4 w-4" />
+                            ) : (
+                              <ChevronDown className="h-4 w-4" />
+                            )}
+                          </Button>
+
+                          {isSuperUser && (
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button variant="ghost" size="sm" className="h-9 w-9 p-0">
+                                  <MoreVertical className="h-4 w-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end" className="w-48">
+                                <DropdownMenuItem onClick={() => openEditDialog(user)}>
+                                  <Edit className="mr-2 h-4 w-4" />
+                                  Edit User
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => {
+                                  updateUserMutation.mutate({
+                                    userId: user.id,
+                                    data: { is_active: !user.is_active }
+                                  });
+                                }}>
+                                  {user.is_active ? (
+                                    <>
+                                      <XCircle className="mr-2 h-4 w-4" />
+                                      Deactivate
+                                    </>
+                                  ) : (
+                                    <>
+                                      <CheckCircle className="mr-2 h-4 w-4" />
+                                      Activate
+                                    </>
+                                  )}
+                                </DropdownMenuItem>
+                                {!user.is_superuser && (
+                                  <>
+                                    <DropdownMenuSeparator />
+                                    <DropdownMenuItem
+                                      onClick={() => openDeleteConfirm(user.id)}
+                                      className="text-red-600 focus:text-red-600"
+                                    >
+                                      <Trash2 className="mr-2 h-4 w-4" />
+                                      Delete User
+                                    </DropdownMenuItem>
+                                  </>
+                                )}
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Expanded Details - Compact Cards */}
+                    {isExpanded && (
+                      <div className="border-t border-gray-200 bg-gray-50/50 p-6">
+                        {/* Compact Performance Summary */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                          <Card className="border-blue-200">
+                            <CardHeader className="pb-2">
+                              <div className="flex items-center justify-between">
+                                <CardTitle className="text-sm font-medium text-blue-700">Laundry Performance</CardTitle>
+                                <div className="flex items-center gap-2">
+                                  <Badge variant="outline" className="bg-white text-blue-700 border-blue-300">
+                                    {performanceData.laundryOrders.length} orders
+                                  </Badge>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => openLaundryOrdersDialog(user.id, user.first_name || user.email)}
+                                    className="h-8 w-8 p-0"
+                                    disabled={performanceData.laundryOrders.length === 0}
+                                  >
+                                    <Eye className="h-4 w-4" />
+                                  </Button>
+                                </div>
+                              </div>
+                            </CardHeader>
+                            <CardContent>
+                              <div className="flex items-center justify-between">
+                                <span className="text-sm text-gray-600">Revenue:</span>
+                                <span className="text-sm font-bold text-blue-700">
+                                  {formatCurrency(performanceData.laundryRevenue)}
+                                </span>
+                              </div>
+                              {performanceData.laundryOrders.length === 0 && (
+                                <p className="text-sm text-gray-500 mt-2 italic">No laundry orders</p>
+                              )}
+                            </CardContent>
+                          </Card>
+
+                          <Card className="border-orange-200">
+                            <CardHeader className="pb-2">
+                              <div className="flex items-center justify-between">
+                                <CardTitle className="text-sm font-medium text-orange-700">Hotel Performance</CardTitle>
+                                <div className="flex items-center gap-2">
+                                  <Badge variant="outline" className="bg-white text-orange-700 border-orange-300">
+                                    {performanceData.hotelOrders.length} orders
+                                  </Badge>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => openHotelOrdersDialog(user.id, user.first_name || user.email)}
+                                    className="h-8 w-8 p-0"
+                                    disabled={performanceData.hotelOrders.length === 0}
+                                  >
+                                    <Eye className="h-4 w-4" />
+                                  </Button>
+                                </div>
+                              </div>
+                            </CardHeader>
+                            <CardContent>
+                              <div className="flex items-center justify-between">
+                                <span className="text-sm text-gray-600">Revenue:</span>
+                                <span className="text-sm font-bold text-orange-700">
+                                  {formatCurrency(performanceData.hotelRevenue)}
+                                </span>
+                              </div>
+                              {performanceData.hotelOrders.length === 0 && (
+                                <p className="text-sm text-gray-500 mt-2 italic">No hotel orders</p>
+                              )}
+                            </CardContent>
+                          </Card>
+                        </div>
+
+                        {/* Quick Action Buttons */}
+                        <div className="flex flex-wrap gap-3 mb-6">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => openLaundryOrdersDialog(user.id, user.first_name || user.email)}
+                            disabled={performanceData.laundryOrders.length === 0}
+                            className="border-blue-300 text-blue-700 hover:bg-blue-50 hover:text-blue-800"
+                          >
+                            <ShoppingBag className="h-4 w-4 mr-2" />
+                            View Laundry Orders ({performanceData.laundryOrders.length})
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => openHotelOrdersDialog(user.id, user.first_name || user.email)}
+                            disabled={performanceData.hotelOrders.length === 0}
+                            className="border-orange-300 text-orange-700 hover:bg-orange-50 hover:text-orange-800"
+                          >
+                            <Store className="h-4 w-4 mr-2" />
+                            View Hotel Orders ({performanceData.hotelOrders.length})
+                          </Button>
+                        </div>
+
+                        
+
+                        
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Orders Dialogs */}
+      {laundryOrdersDialog.userId && (
+        <OrdersDialog
+          isOpen={laundryOrdersDialog.isOpen}
+          onOpenChange={(open) => setLaundryOrdersDialog(prev => ({ ...prev, isOpen: open }))}
+          title={`Laundry Orders - ${laundryOrdersDialog.userName}`}
+          orders={userPerformanceData[laundryOrdersDialog.userId]?.laundryOrders || []}
+          type="laundry"
+        />
+      )}
+
+      {hotelOrdersDialog.userId && (
+        <OrdersDialog
+          isOpen={hotelOrdersDialog.isOpen}
+          onOpenChange={(open) => setHotelOrdersDialog(prev => ({ ...prev, isOpen: open }))}
+          title={`Hotel Orders - ${hotelOrdersDialog.userName}`}
+          orders={userPerformanceData[hotelOrdersDialog.userId]?.hotelOrders || []}
+          type="hotel"
+        />
+      )}
 
       {/* CREATE User Dialog */}
       <Dialog open={isCreateUserOpen} onOpenChange={setIsCreateUserOpen}>
@@ -1429,7 +1501,7 @@ export default function SiteManagement() {
           <DialogHeader>
             <DialogTitle>Create New User</DialogTitle>
             <DialogDescription>
-              Create a new user account with the required permissions. The password will be securely hashed by the server.
+              Create a new user account with the required permissions.
             </DialogDescription>
           </DialogHeader>
 
@@ -1444,6 +1516,7 @@ export default function SiteManagement() {
                     setNewUser({ ...newUser, first_name: e.target.value });
                   }}
                   placeholder="John"
+                  className="border-gray-300"
                 />
               </div>
               <div className="space-y-2">
@@ -1455,6 +1528,7 @@ export default function SiteManagement() {
                     setNewUser({ ...newUser, last_name: e.target.value });
                   }}
                   placeholder="Doe"
+                  className="border-gray-300"
                 />
               </div>
             </div>
@@ -1475,7 +1549,7 @@ export default function SiteManagement() {
                   }
                 }}
                 placeholder="john.doe@example.com"
-                className={formErrors.create?.email ? "border-red-500" : ""}
+                className={cn("border-gray-300", formErrors.create?.email && "border-red-500")}
               />
               {formErrors.create?.email && (
                 <p className="text-sm text-red-500">{formErrors.create.email}</p>
@@ -1499,14 +1573,11 @@ export default function SiteManagement() {
                     }
                   }}
                   placeholder="••••••••"
-                  className={formErrors.create?.password ? "border-red-500" : ""}
+                  className={cn("border-gray-300", formErrors.create?.password && "border-red-500")}
                 />
                 {formErrors.create?.password && (
                   <p className="text-sm text-red-500">{formErrors.create.password}</p>
                 )}
-                <p className="text-xs text-gray-500">
-                  Must be at least 8 characters with uppercase, lowercase, and numbers
-                </p>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="confirm_password">Confirm Password *</Label>
@@ -1524,12 +1595,16 @@ export default function SiteManagement() {
                     }
                   }}
                   placeholder="••••••••"
-                  className={formErrors.create?.confirm_password ? "border-red-500" : ""}
+                  className={cn("border-gray-300", formErrors.create?.confirm_password && "border-red-500")}
                 />
                 {formErrors.create?.confirm_password && (
                   <p className="text-sm text-red-500">{formErrors.create.confirm_password}</p>
                 )}
               </div>
+            </div>
+
+            <div className="text-xs text-gray-500 bg-gray-50 p-3 rounded-lg">
+              Password must be at least 8 characters with uppercase, lowercase, and numbers
             </div>
 
             <div className="space-y-2">
@@ -1538,7 +1613,7 @@ export default function SiteManagement() {
                 value={newUser.user_type}
                 onValueChange={(value) => setNewUser({ ...newUser, user_type: value })}
               >
-                <SelectTrigger>
+                <SelectTrigger className="border-gray-300">
                   <SelectValue placeholder="Select user type" />
                 </SelectTrigger>
                 <SelectContent>
@@ -1548,12 +1623,13 @@ export default function SiteManagement() {
               </Select>
             </div>
 
-            <div className="flex items-center space-x-4">
+            <div className="flex items-center space-x-6">
               <div className="flex items-center space-x-2">
                 <Switch
                   id="is_staff"
                   checked={newUser.is_staff}
                   onCheckedChange={(checked) => setNewUser({ ...newUser, is_staff: checked })}
+                  className="data-[state=checked]:bg-blue-600"
                 />
                 <Label htmlFor="is_staff">Staff Member</Label>
               </div>
@@ -1563,6 +1639,7 @@ export default function SiteManagement() {
                   id="is_active"
                   checked={newUser.is_active}
                   onCheckedChange={(checked) => setNewUser({ ...newUser, is_active: checked })}
+                  className="data-[state=checked]:bg-green-600"
                 />
                 <Label htmlFor="is_active">Active Account</Label>
               </div>
@@ -1577,12 +1654,14 @@ export default function SiteManagement() {
                 setFormErrors(prev => ({ ...prev, create: {} }));
               }}
               disabled={createUserMutation.isPending}
+              className="border-gray-300"
             >
               Cancel
             </Button>
             <Button
               onClick={handleCreateUser}
               disabled={createUserMutation.isPending}
+              className="bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800"
             >
               {createUserMutation.isPending ? (
                 <>
@@ -1618,6 +1697,7 @@ export default function SiteManagement() {
                     setEditUser({ ...editUser, first_name: e.target.value });
                   }}
                   placeholder="John"
+                  className="border-gray-300"
                 />
               </div>
               <div className="space-y-2">
@@ -1629,6 +1709,7 @@ export default function SiteManagement() {
                     setEditUser({ ...editUser, last_name: e.target.value });
                   }}
                   placeholder="Doe"
+                  className="border-gray-300"
                 />
               </div>
             </div>
@@ -1649,7 +1730,7 @@ export default function SiteManagement() {
                   }
                 }}
                 placeholder="john.doe@example.com"
-                className={formErrors.edit?.email ? "border-red-500" : ""}
+                className={cn("border-gray-300", formErrors.edit?.email && "border-red-500")}
               />
               {formErrors.edit?.email && (
                 <p className="text-sm text-red-500">{formErrors.edit.email}</p>
@@ -1672,14 +1753,15 @@ export default function SiteManagement() {
                   }
                 }}
                 placeholder="Leave empty to keep current password"
-                className={formErrors.edit?.password ? "border-red-500" : ""}
+                className={cn("border-gray-300", formErrors.edit?.password && "border-red-500")}
               />
               {formErrors.edit?.password && (
                 <p className="text-sm text-red-500">{formErrors.edit.password}</p>
               )}
-              <p className="text-xs text-gray-500">
-                If provided, must be at least 8 characters with uppercase, lowercase, and numbers
-              </p>
+            </div>
+
+            <div className="text-xs text-gray-500 bg-gray-50 p-3 rounded-lg">
+              If provided, must be at least 8 characters with uppercase, lowercase, and numbers
             </div>
 
             <div className="space-y-2">
@@ -1688,7 +1770,7 @@ export default function SiteManagement() {
                 value={editUser.user_type || 'staff'}
                 onValueChange={(value) => setEditUser({ ...editUser, user_type: value })}
               >
-                <SelectTrigger>
+                <SelectTrigger className="border-gray-300">
                   <SelectValue placeholder="Select user type" />
                 </SelectTrigger>
                 <SelectContent>
@@ -1698,12 +1780,13 @@ export default function SiteManagement() {
               </Select>
             </div>
 
-            <div className="flex items-center space-x-4">
+            <div className="flex items-center space-x-6">
               <div className="flex items-center space-x-2">
                 <Switch
                   id="edit_is_staff"
                   checked={editUser.is_staff || false}
                   onCheckedChange={(checked) => setEditUser({ ...editUser, is_staff: checked })}
+                  className="data-[state=checked]:bg-blue-600"
                 />
                 <Label htmlFor="edit_is_staff">Staff Member</Label>
               </div>
@@ -1713,6 +1796,7 @@ export default function SiteManagement() {
                   id="edit_is_active"
                   checked={editUser.is_active || true}
                   onCheckedChange={(checked) => setEditUser({ ...editUser, is_active: checked })}
+                  className="data-[state=checked]:bg-green-600"
                 />
                 <Label htmlFor="edit_is_active">Active Account</Label>
               </div>
@@ -1727,12 +1811,14 @@ export default function SiteManagement() {
                 setFormErrors(prev => ({ ...prev, edit: {} }));
               }}
               disabled={updateUserMutation.isPending}
+              className="border-gray-300"
             >
               Cancel
             </Button>
             <Button
               onClick={handleEditUser}
               disabled={updateUserMutation.isPending}
+              className="bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800"
             >
               {updateUserMutation.isPending ? (
                 <>
@@ -1774,6 +1860,7 @@ export default function SiteManagement() {
               variant="outline"
               onClick={() => setIsDeleteConfirmOpen(false)}
               disabled={deleteUserMutation.isPending}
+              className="border-gray-300"
             >
               Cancel
             </Button>
@@ -1781,6 +1868,7 @@ export default function SiteManagement() {
               variant="destructive"
               onClick={handleDeleteUser}
               disabled={deleteUserMutation.isPending}
+              className="bg-gradient-to-r from-red-600 to-red-700 hover:from-red-700 hover:to-red-800"
             >
               {deleteUserMutation.isPending ? (
                 <>

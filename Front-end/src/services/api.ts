@@ -17,17 +17,28 @@ const tokenStore = {
     accessToken = access;
     refreshToken = refresh;
 
-    if (access) localStorage.setItem("accessToken", access);
-    else localStorage.removeItem("accessToken");
+    if (access) {
+      localStorage.setItem("accessToken", access);
+      // Store token expiry timestamp (assuming 1 hour expiry)
+      const expiryTime = Date.now() + 60 * 60 * 1000; // 1 hour from now
+      localStorage.setItem("tokenExpiry", expiryTime.toString());
+    } else {
+      localStorage.removeItem("accessToken");
+      localStorage.removeItem("tokenExpiry");
+    }
 
-    if (refresh) localStorage.setItem("refreshToken", refresh);
-    else localStorage.removeItem("refreshToken");
+    if (refresh) {
+      localStorage.setItem("refreshToken", refresh);
+    } else {
+      localStorage.removeItem("refreshToken");
+    }
   },
   clear: (): void => {
     accessToken = null;
     refreshToken = null;
     localStorage.removeItem("accessToken");
     localStorage.removeItem("refreshToken");
+    localStorage.removeItem("tokenExpiry");
   }
 };
 
@@ -35,6 +46,93 @@ const tokenStore = {
 export const getAccessToken = tokenStore.getAccess;
 export const getRefreshToken = tokenStore.getRefresh;
 export const setAuthTokens = tokenStore.set;
+
+/* =====================================================
+   AUTO-LOGOUT FUNCTIONALITY
+===================================================== */
+
+let autoLogoutTimer: NodeJS.Timeout | null = null;
+
+// Session timeout configuration (15 minutes of inactivity)
+const SESSION_TIMEOUT = 15 * 60 * 1000; // 15 minutes in milliseconds
+
+// Initialize auto-logout on module load
+const initializeAutoLogout = () => {
+  if (typeof window === 'undefined') return;
+  
+  // Clear any existing timer
+  if (autoLogoutTimer) {
+    clearTimeout(autoLogoutTimer);
+    autoLogoutTimer = null;
+  }
+
+  // Set up activity listeners
+  const events = ['mousedown', 'keydown', 'scroll', 'touchstart'];
+  
+  const resetAutoLogoutTimer = () => {
+    if (autoLogoutTimer) {
+      clearTimeout(autoLogoutTimer);
+    }
+    
+    autoLogoutTimer = setTimeout(() => {
+      // Check if user is still authenticated
+      const token = tokenStore.getAccess();
+      const user = localStorage.getItem("current_user");
+      
+      if (token && user) {
+        console.log('Auto-logout due to inactivity');
+        performAutoLogout();
+      }
+    }, SESSION_TIMEOUT);
+  };
+
+  // Attach event listeners
+  events.forEach(event => {
+    document.addEventListener(event, resetAutoLogoutTimer, { passive: true });
+  });
+
+  // Initial setup
+  resetAutoLogoutTimer();
+};
+
+// Clean up auto-logout
+const cleanupAutoLogout = () => {
+  if (autoLogoutTimer) {
+    clearTimeout(autoLogoutTimer);
+    autoLogoutTimer = null;
+  }
+  
+  // Remove event listeners
+  const events = ['mousedown', 'keydown', 'scroll', 'touchstart'];
+  events.forEach(event => {
+    document.removeEventListener(event, () => {});
+  });
+};
+
+// Perform auto logout
+const performAutoLogout = () => {
+  cleanupAutoLogout();
+  tokenStore.clear();
+  localStorage.removeItem("current_user");
+  
+  // Only redirect if not already on login page
+  if (window.location.pathname !== '/login') {
+    window.location.href = '/login';
+  }
+};
+
+// Check token expiry
+const checkTokenExpiry = (): boolean => {
+  const expiry = localStorage.getItem("tokenExpiry");
+  if (!expiry) return true;
+  
+  const isExpired = Date.now() > parseInt(expiry);
+  if (isExpired) {
+    console.log('Token has expired');
+    return true;
+  }
+  return false;
+};
 
 /* =====================================================
    CONSTANTS
@@ -102,6 +200,16 @@ export async function fetchApi<T>(
   options?: RequestInit,
   app: "laundry" | "hotel" | "auth" = "laundry"
 ): Promise<T> {
+  // Check token expiry before making request
+  if (checkTokenExpiry()) {
+    try {
+      await authApi.refreshToken();
+    } catch (error) {
+      performAutoLogout();
+      throw new Error('Session expired. Please login again.');
+    }
+  }
+
   const url = createUrl(endpoint, app);
   const token = tokenStore.getAccess();
 
@@ -172,12 +280,20 @@ const authApi = {
     localStorage.setItem("current_user", JSON.stringify(user));
     handleLoginSuccess({ access: tokenData.access, refresh: tokenData.refresh, user });
 
+    // Initialize auto-logout after successful login
+    if (typeof window !== 'undefined') {
+      initializeAutoLogout();
+    }
+
     return { access: tokenData.access, refresh: tokenData.refresh, user };
   },
 
   refreshToken: async () => {
     const refresh = tokenStore.getRefresh();
-    if (!refresh) throw new Error("No refresh token available");
+    if (!refresh) {
+      performAutoLogout();
+      throw new Error("No refresh token available");
+    }
 
     const response = await fetch(ENDPOINTS.REFRESH, {
       method: "POST",
@@ -187,6 +303,7 @@ const authApi = {
 
     if (!response.ok) {
       const errorText = await response.text();
+      performAutoLogout();
       throw new Error(errorText || "Token refresh failed");
     }
 
@@ -196,12 +313,23 @@ const authApi = {
   },
 
   logout: () => {
+    cleanupAutoLogout();
     tokenStore.clear();
     localStorage.removeItem("current_user");
     localStorage.removeItem("selected_shop");
   },
 
   me: async () => {
+    // Check token expiry before fetching user data
+    if (checkTokenExpiry()) {
+      try {
+        await authApi.refreshToken();
+      } catch (error) {
+        performAutoLogout();
+        throw new Error('Session expired. Please login again.');
+      }
+    }
+
     const token = tokenStore.getAccess();
     if (!token) throw new Error("No authentication token available");
 
@@ -277,8 +405,13 @@ export const expenseRecordsApi = createCrudApi<ExpenseRecord>("expense-records/"
    AUTH UTILITIES (Maintaining same interface)
 ===================================================== */
 
-export const isAuthenticated = () =>
-  !!tokenStore.getAccess() && !!localStorage.getItem("current_user");
+export const isAuthenticated = () => {
+  const hasToken = !!tokenStore.getAccess() && !!localStorage.getItem("current_user");
+  if (!hasToken) return false;
+  
+  // Check token expiry
+  return !checkTokenExpiry();
+};
 
 export const getSelectedShop = (): "laundry" | "hotel" | null => {
   const shop = localStorage.getItem("selected_shop");
@@ -289,7 +422,17 @@ export const setSelectedShop = (shop: "laundry" | "hotel") =>
   localStorage.setItem("selected_shop", shop);
 
 export const clearUserData = () => {
+  cleanupAutoLogout();
   tokenStore.clear();
   localStorage.removeItem("current_user");
   localStorage.removeItem("selected_shop");
 };
+
+// Initialize auto-logout if user is already logged in when module loads
+if (typeof window !== 'undefined') {
+  const token = tokenStore.getAccess();
+  const user = localStorage.getItem("current_user");
+  if (token && user && !checkTokenExpiry()) {
+    initializeAutoLogout();
+  }
+}

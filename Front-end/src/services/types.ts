@@ -75,7 +75,7 @@ export interface FoodItem {
   category_id: number;
   created_by: User;
   quantity: number;
-  price: number;
+  total_order_price: number;
 }
 
 export interface HotelOrderItem {

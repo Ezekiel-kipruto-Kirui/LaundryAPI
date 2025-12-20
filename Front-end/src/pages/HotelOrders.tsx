@@ -421,15 +421,7 @@ export default function HotelOrderItems() {
       }
 
       // Check for full user object
-      if (order.created_by && typeof order.created_by === 'object') {
-        const user = order.created_by as User;
-        if (user.first_name && user.first_name.trim() !== "") {
-          return user.first_name;
-        }
-        if (user.email) {
-          return extractNameFromEmail(user.email);
-        }
-      }
+     
 
       // Check for created_by_username as fallback
       if ((order as any).created_by_username) {
@@ -544,12 +536,10 @@ export default function HotelOrderItems() {
 
     if (name === 'food_item') {
       const foodItemId = parseInt(value);
-      const selectedFoodItem = foodItems.find(item => item.id === foodItemId);
-
       updatedItems[index] = {
         ...updatedItems[index],
         food_item: foodItemId,
-        price: selectedFoodItem?.price?.toString() || "0.00"
+        price: "0.00" // Reset price since food items don't have price anymore
       };
     } else if (name === 'quantity') {
       updatedItems[index] = {
@@ -1428,7 +1418,7 @@ export default function HotelOrderItems() {
                         <option value={0}>Select a food item...</option>
                         {foodItems.map((foodItem) => (
                           <option key={foodItem.id} value={foodItem.id}>
-                            {foodItem.name} - Ksh {foodItem.price}
+                            {foodItem.name}
                             {foodItem.quantity && ` (Stock: ${foodItem.quantity})`}
                           </option>
                         ))}

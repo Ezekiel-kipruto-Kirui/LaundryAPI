@@ -2,6 +2,7 @@ import os
 from django.db import models
 from django.conf import settings
 from django.utils import timezone
+from django.db.models import Sum
 
 class FoodCategory(models.Model):
     name = models.CharField(max_length=100, unique=True, db_index=True)
@@ -14,9 +15,7 @@ class FoodCategory(models.Model):
 class FoodItem(models.Model):
     category = models.ForeignKey(FoodCategory, on_delete=models.CASCADE, related_name="items")
     name = models.CharField(max_length=100, db_index=True)
-   
-   
-
+    total_order_price = models.DecimalField(max_digits=10, decimal_places=2,null=True,blank=True)
     # seller who uploaded this food
     created_by =  models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -57,7 +56,7 @@ class HotelOrderItem(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)  # Add this field
     
     def save(self, *args, **kwargs):
-        # Remove duplicate super().save() calls
+        
         super().save(*args, **kwargs)
     
     def get_total_price(self):

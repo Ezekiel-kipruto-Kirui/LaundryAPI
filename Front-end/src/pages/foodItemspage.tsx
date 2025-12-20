@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
-import { FoodItem, FoodCategory } from "@/services/types";
-import { fetchApi } from "@/services/api"; // Import only fetchApi
+import { FoodItem, FoodCategory, User } from "@/services/types";
+import { fetchApi } from "@/services/api";
 
 const FOOD_URL = "food-items/";
 const CATEGORIES_URL = "food-categories/";
@@ -25,7 +25,7 @@ export default function FoodItems() {
   const [foodFormData, setFoodFormData] = useState({
     name: "",
     category_id: "",
-    price: "",
+    total_order_price: "",
     quantity: ""
   });
   
@@ -95,7 +95,7 @@ export default function FoodItems() {
     setFoodFormData({
       name: "",
       category_id: categories.length > 0 ? categories[0].id.toString() : "",
-      price: "",
+      total_order_price: "",
       quantity: ""
     });
     setIsFoodModalOpen(true);
@@ -103,11 +103,20 @@ export default function FoodItems() {
 
   const openEditFoodModal = (item: FoodItem) => {
     setCurrentFoodItem(item);
+    
+    // Extract category ID from item
+    const categoryId = item.category?.id?.toString() || item.category_id?.toString() || "";
+    
+    // Handle total_order_price safely
+    const totalOrderPrice = typeof item.total_order_price === 'string' 
+      ? item.total_order_price 
+      : (item.total_order_price || 0).toString();
+    
     setFoodFormData({
       name: item.name,
-      category_id: item.category?.id?.toString() || "",
-      price: item.price?.toString() || "",
-      quantity: item.quantity?.toString() || ""
+      category_id: categoryId,
+      total_order_price: totalOrderPrice,
+      quantity: item.quantity?.toString() || "0"
     });
     setIsFoodModalOpen(true);
   };
@@ -122,7 +131,7 @@ export default function FoodItems() {
 
   const handleFoodSave = async () => {
     // Basic validation
-    if (!foodFormData.name.trim() || !foodFormData.category_id || !foodFormData.price) {
+    if (!foodFormData.name.trim() || !foodFormData.category_id || !foodFormData.total_order_price) {
       setError("Please fill in all required fields");
       return;
     }
@@ -130,11 +139,20 @@ export default function FoodItems() {
     try {
       setLoading(true);
       
+      // Parse values safely
+      const totalOrderPrice = parseFloat(foodFormData.total_order_price);
+      const quantity = parseInt(foodFormData.quantity) || 0;
+      
+      if (isNaN(totalOrderPrice) || totalOrderPrice < 0) {
+        setError("Please enter a valid total revenue");
+        return;
+      }
+
       const foodData = {
         name: foodFormData.name,
         category_id: parseInt(foodFormData.category_id),
-        price: parseFloat(foodFormData.price),
-        quantity: parseInt(foodFormData.quantity) || 0
+        total_order_price: totalOrderPrice.toFixed(2), // Ensure 2 decimal places
+        quantity: quantity
       };
 
       if (currentFoodItem) {
@@ -143,6 +161,9 @@ export default function FoodItems() {
           `${FOOD_URL}${currentFoodItem.id}/`,
           {
             method: 'PUT',
+            headers: {
+              'Content-Type': 'application/json',
+            },
             body: JSON.stringify(foodData)
           },
           'hotel'
@@ -153,6 +174,9 @@ export default function FoodItems() {
           FOOD_URL,
           {
             method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
             body: JSON.stringify(foodData)
           },
           'hotel'
@@ -167,7 +191,7 @@ export default function FoodItems() {
       if (err.message === "Unauthorized") {
         setError("Session expired. Please login again.");
       } else {
-        setError(err.message);
+        setError(err.message || "Failed to save food item");
       }
     } finally {
       setLoading(false);
@@ -183,7 +207,12 @@ export default function FoodItems() {
       setLoading(true);
       await fetchApi<void>(
         `${FOOD_URL}${itemId}/`,
-        { method: 'DELETE' },
+        { 
+          method: 'DELETE',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        },
         'hotel'
       );
 
@@ -194,7 +223,7 @@ export default function FoodItems() {
       if (err.message === "Unauthorized") {
         setError("Session expired. Please login again.");
       } else {
-        setError(err.message);
+        setError(err.message || "Failed to delete food item");
       }
     } finally {
       setLoading(false);
@@ -238,6 +267,9 @@ export default function FoodItems() {
           `${CATEGORIES_URL}${currentCategory.id}/`,
           {
             method: 'PUT',
+            headers: {
+              'Content-Type': 'application/json',
+            },
             body: JSON.stringify({ name: categoryFormData.name })
           },
           'hotel'
@@ -248,6 +280,9 @@ export default function FoodItems() {
           CATEGORIES_URL,
           {
             method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
             body: JSON.stringify({ name: categoryFormData.name })
           },
           'hotel'
@@ -263,7 +298,7 @@ export default function FoodItems() {
       if (err.message === "Unauthorized") {
         setError("Session expired. Please login again.");
       } else {
-        setError(err.message);
+        setError(err.message || "Failed to save category");
       }
     } finally {
       setLoading(false);
@@ -272,7 +307,12 @@ export default function FoodItems() {
 
   const handleCategoryDelete = async (categoryId: number) => {
     // Check if any food items use this category
-    const itemsUsingCategory = foodItems.filter(item => item.category?.id === categoryId);
+    // Fixed: Compare with category.id (object) not the whole category object
+    const itemsUsingCategory = foodItems.filter(item => 
+      (item.category && item.category.id === categoryId) || 
+      item.category_id === categoryId
+    );
+    
     if (itemsUsingCategory.length > 0) {
       setError(`Cannot delete category. ${itemsUsingCategory.length} food item(s) are using it.`);
       return;
@@ -286,7 +326,12 @@ export default function FoodItems() {
       setLoading(true);
       await fetchApi<void>(
         `${CATEGORIES_URL}${categoryId}/`,
-        { method: 'DELETE' },
+        { 
+          method: 'DELETE',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        },
         'hotel'
       );
 
@@ -297,18 +342,30 @@ export default function FoodItems() {
       if (err.message === "Unauthorized") {
         setError("Session expired. Please login again.");
       } else {
-        setError(err.message);
+        setError(err.message || "Failed to delete category");
       }
     } finally {
       setLoading(false);
     }
   };
 
-  // =========================================================================
-  // 4. RENDER (Display)
-  // =========================================================================
+  // Helper function to get creator name safely
+  const getCreatorName = (createdBy: User | undefined): string => {
+    if (!createdBy) return 'Unknown';
+    if (createdBy.first_name || createdBy.last_name) {
+      return `${createdBy.first_name || ''} ${createdBy.last_name || ''}`.trim();
+    }
+    return createdBy.email || 'Unknown';
+  };
 
-  // ... rest of the render code remains exactly the same ...
+  // Helper function to parse price safely
+  const parsePrice = (price: string | number | undefined): number => {
+    if (!price) return 0;
+    if (typeof price === 'number') return price;
+    const parsed = parseFloat(price);
+    return isNaN(parsed) ? 0 : parsed;
+  };
+
   return (
     <div className="min-h-screen bg-gray-50 p-6">
       <div className="max-w-7xl mx-auto">
@@ -392,40 +449,42 @@ export default function FoodItems() {
               <thead className="bg-indigo-600 text-white">
                 <tr>
                   <th className="px-6 py-3 text-left text-sm font-semibold">Name</th>
-                  <th className="px-6 py-3 text-left text-sm font-semibold">Category</th>
-                  <th className="px-6 py-3 text-left text-sm font-semibold">Creator</th>
-                  <th className="px-6 py-3 text-right text-sm font-semibold">Price</th>
-                  <th className="px-6 py-3 text-center text-sm font-semibold">Quantity</th>
+                  
+                  <th className="px-6 py-3 text-right text-sm font-semibold">Total Revenue</th>
+                  <th className="px-6 py-3 text-center text-sm font-semibold">Quantity Sold</th>
                   <th className="px-6 py-3 text-center text-sm font-semibold">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
                 {foodItems.length > 0 ? (
-                  foodItems.map((item) => (
-                    <tr key={item.id} className="hover:bg-gray-50 transition">
-                      <td className="px-6 py-4 font-semibold text-gray-900">{item.name}</td>
-                      <td className="px-6 py-4 text-gray-600">{item.category?.name || 'N/A'}</td>
-                      <td className="px-6 py-4 text-gray-600">{item.created_by?.email || 'Unknown'}</td>
-                      <td className="px-6 py-4 text-gray-600 text-right">
-                        ${item.price ? item.price.toFixed(2) : '0.00'}
-                      </td>
-                      <td className="px-6 py-4 text-gray-600 text-center">{item.quantity}</td>
-                      <td className="px-6 py-4 flex justify-center space-x-2">
-                        <button
-                          onClick={() => openEditFoodModal(item)}
-                          className="px-3 py-2 text-xs font-medium text-indigo-600 border border-indigo-600 rounded-lg hover:bg-indigo-600 hover:text-white transition"
-                        >
-                          Edit
+                  foodItems.map((item) => {
+                    const price = parsePrice(item.total_order_price);
+                    return (
+                      <tr key={item.id} className="hover:bg-gray-50 transition">
+                        <td className="px-6 py-4 font-semibold text-gray-900">{item.name}</td>
+                       
+                        
+                        <td className="px-6 py-4 text-gray-600 text-right font-medium">
+                          Ksh {price.toFixed(2)}
+                        </td>
+                        <td className="px-6 py-4 text-gray-600 text-center">{item.quantity || 0}</td>
+                        <td className="px-6 py-4 flex justify-center space-x-2">
+                          <button
+                            onClick={() => openEditFoodModal(item)}
+                            className="px-3 py-2 text-xs font-medium text-indigo-600 border border-indigo-600 rounded-lg hover:bg-indigo-600 hover:text-white transition"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            onClick={() => handleFoodDelete(item.id)}
+                            className="px-3 py-2 text-xs font-medium text-red-600 border border-red-600 rounded-lg hover:bg-red-600 hover:text-white transition"
+                          >
+                            Delete
                         </button>
-                        <button
-                          onClick={() => handleFoodDelete(item.id)}
-                          className="px-3 py-2 text-xs font-medium text-red-600 border border-red-600 rounded-lg hover:bg-red-600 hover:text-white transition"
-                        >
-                          Delete
-                        </button>
-                      </td>
-                    </tr>
-                  ))
+                        </td>
+                      </tr>
+                    );
+                  })
                 ) : (
                   <tr>
                     <td colSpan={6} className="px-6 py-6 text-center text-yellow-700 bg-yellow-50 rounded-lg">
@@ -489,23 +548,24 @@ export default function FoodItems() {
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Price *
+                      Total Revenue *
                     </label>
                     <input
                       type="number"
-                      name="price"
-                      value={foodFormData.price}
+                      name="total_order_price"
+                      value={foodFormData.total_order_price}
                       onChange={handleFoodInputChange}
                       min="0"
                       step="0.01"
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
                       placeholder="0.00"
                     />
+                    <p className="text-xs text-gray-500 mt-1">Total money generated by this item</p>
                   </div>
 
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Quantity
+                      Quantity Sold
                     </label>
                     <input
                       type="number"
@@ -516,6 +576,7 @@ export default function FoodItems() {
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
                       placeholder="0"
                     />
+                    <p className="text-xs text-gray-500 mt-1">Total units sold</p>
                   </div>
                 </div>
               </div>

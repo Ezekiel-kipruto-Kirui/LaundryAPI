@@ -27,7 +27,39 @@ from LaundryApp.pagination import CustomPageNumberPagination
 
 User = get_user_model()
 
+from django.db.models import Sum
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+from .models import HotelOrderItem, FoodItem
+from rest_framework.decorators import api_view, permission_classes
 
+# @api_view(['GET']) # This tells Django to treat this as a REST API endpoint
+# @permission_classes([AllowAny])
+# def update_food_revenue(request):
+#     # 1. Calculate totals for all food items
+#     totals = HotelOrderItem.objects.values('food_item').annotate(total_cash=Sum('price'))
+    
+#     # 2. Update the FoodItem records
+#     for item in totals:
+#         try:
+#             food = FoodItem.objects.get(id=item['food_item'])
+#             food.total_amount_cash = item['total_cash']
+#             food.save()
+#         except FoodItem.DoesNotExist:
+#             continue
+            
+#     return Response({"message": "Total revenue per food item updated successfully!"})
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def update_food_revenue(request):
+    # ... (your update logic here) ...
+    
+    # After updating, fetch the new data
+    updated_food = FoodItem.objects.all()
+    serializer = FoodItemSerializer(updated_food, many=True)
+    
+    # Return the actual data so you can see the changes
+    return Response(serializer.data)
 # ---------------------------
 #   FOOD CATEGORY VIEWSET
 # ---------------------------
@@ -56,7 +88,7 @@ class FoodItemViewSet(viewsets.ModelViewSet):
 class HotelOrderItemViewSet(viewsets.ModelViewSet):
     queryset = HotelOrderItem.objects.all().select_related("food_item", "order", "order__created_by")
     serializer_class = HotelOrderItemSerializer
-    permission_classes = [AllowAny]
+    permission_classes = [permissions.IsAuthenticated]
     pagination_class = CustomPageNumberPagination
     
     def get_queryset(self):
@@ -84,7 +116,7 @@ class HotelOrderItemViewSet(viewsets.ModelViewSet):
 
 class HotelOrderViewSet(viewsets.ModelViewSet):
     queryset = HotelOrder.objects.all().order_by('-created_at')
-    permission_classes = [AllowAny]
+    permission_classes = [permissions.IsAuthenticated]
     pagination_class = CustomPageNumberPagination
     
     def get_serializer_class(self):
