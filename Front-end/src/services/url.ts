@@ -1,10 +1,36 @@
+// services/url.ts
 
-let DEFAULT_URL="http://127.0.0.1:8080/api"
-let BASE_URL = "";
-if (window.location.hostname === "cleanpage.shop") {
-    BASE_URL = "https://cleanpage.shop/api";
+// Determine the base URL based on the current hostname
+let API_BASE_URL: string;
+
+const currentHostname = window.location.hostname;
+
+// Local development environments
+const isLocalhost = currentHostname === "localhost" || 
+                    currentHostname === "127.0.0.1";
+
+// Production domain
+const isProduction = currentHostname === "cleanpage.shop" || 
+                     currentHostname === "www.cleanpage.shop" ||
+                     currentHostname.includes("cleanpage.shop");
+
+// Set API URL based on environment
+if (isLocalhost) {
+    // Local development
+    API_BASE_URL = "http://127.0.0.1:8080/api";
+} else if (isProduction) {
+    // Production
+    API_BASE_URL = "https://cleanpage.shop/api";
 } else {
-    BASE_URL = 'https://clean-page-laundry';
+    // Staging/Testing (if you have other domains)
+    // You can add specific staging domains here
+    if (currentHostname.includes("staging")) {
+        API_BASE_URL = `https://${currentHostname}/api`;
+    } else {
+        // Fallback - try to infer from current location
+        API_BASE_URL = `${window.location.protocol}//${currentHostname}/api`;
+    }
 }
 
-export let API_BASE_URL =  BASE_URL || DEFAULT_URL;
+
+export { API_BASE_URL };

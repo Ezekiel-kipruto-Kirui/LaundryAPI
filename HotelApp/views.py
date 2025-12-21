@@ -50,7 +50,7 @@ from rest_framework.decorators import api_view, permission_classes
             
 #     return Response({"message": "Total revenue per food item updated successfully!"})
 @api_view(['GET'])
-@permission_classes([AllowAny])
+@permission_classes([permissions.IsAuthenticated])
 def update_food_revenue(request):
     # ... (your update logic here) ...
     
