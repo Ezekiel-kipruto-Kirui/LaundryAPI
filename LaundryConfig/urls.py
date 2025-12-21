@@ -46,13 +46,11 @@ urlpatterns = [
     path('api/send-sms/', sendsms_view),
     path('api/users/me/', CurrentUserView.as_view(), name='current_user'),
     path('assets/<path:path>', serve, {'document_root': os.path.join(settings.BASE_DIR, 'Front-end', 'dist', 'assets')}),
-    # Serve public images from dist root
     path('bg.png', lambda request: serve(request, 'bg.png', document_root=FRONTEND_BUILD_DIR)),
     path('Clean-page-logo.png', lambda request: serve(request, 'Clean-page-logo.png', document_root=FRONTEND_BUILD_DIR)),
     path('favicon.ico', lambda request: serve(request, 'favicon.ico', document_root=FRONTEND_BUILD_DIR)),
     path('placeholder.svg', lambda request: serve(request, 'placeholder.svg', document_root=FRONTEND_BUILD_DIR)),
     path('robots.txt', lambda request: serve(request, 'robots.txt', document_root=FRONTEND_BUILD_DIR)),
-    #re_path(r'^(?!api/|admin/|static/|assets/).*$', serve_react_app),  # Catch-all for React routes
     re_path('', TemplateView.as_view(template_name="index.html")),
     path('api/update-food-revenue/', update_food_revenue),
 
