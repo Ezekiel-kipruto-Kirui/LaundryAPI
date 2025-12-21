@@ -31,6 +31,4 @@ if (isLocalhost) {
         API_BASE_URL = `${window.location.protocol}//${currentHostname}/api`;
     }
 }
-
-
 export { API_BASE_URL };

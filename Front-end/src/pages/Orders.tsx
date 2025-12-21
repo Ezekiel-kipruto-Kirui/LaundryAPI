@@ -14,7 +14,7 @@ import { Order, OrderItem } from "@/services/types";
 import { ROUTES } from "@/services/Routes";
 
 export const ORDERS_URL = `${API_BASE_URL}/Laundry/orders/`;
-export const SEND_SMS_URL = `${API_BASE_URL}/api/Laundry/send_sms/`;
+export const SEND_SMS_URL = `${API_BASE_URL}/Laundry/send_sms/`;
 
 // Helper function to get auth token
 const getAuthToken = (): string | null => {
@@ -132,7 +132,7 @@ const SMSDialogModal = ({
           )}
 
           {/* Load All Orders Option */}
-          {loadAllOrders && allOrders.length === 0 && (
+          {/* {loadAllOrders && allOrders.length === 0 && (
             <div className="mb-6 p-4 bg-blue-50 rounded-lg border border-blue-200">
               <div className="flex items-center justify-between">
                 <div>
@@ -162,7 +162,7 @@ const SMSDialogModal = ({
                 </button>
               </div>
             </div>
-          )}
+          )} */}
 
           {/* All Orders Toggle */}
           {allOrders.length > 0 && (
@@ -189,21 +189,7 @@ const SMSDialogModal = ({
             </div>
           )}
 
-          {/* Preview */}
-          <div className="mb-6 p-4 bg-blue-50 rounded-lg border border-blue-200">
-            <p className="text-sm text-blue-800 font-medium mb-2">SMS Preview:</p>
-            <p className="text-sm text-blue-700">{previewMessage}</p>
-            <p className="text-xs text-blue-600 mt-2">
-              Total recipients: {ordersToUse.length}
-            </p>
-            {useAllOrders && (
-              <div className="flex items-center mt-2 text-xs text-green-600">
-                <AlertCircle className="w-4 h-4 mr-1" />
-                <span>Using all filtered orders</span>
-              </div>
-            )}
-          </div>
-
+         
           {/* Message Input */}
           <div className="mb-4">
             <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -231,13 +217,13 @@ const SMSDialogModal = ({
           </div>
 
           {/* Character Count Warning */}
-          {message.length > 160 && (
+          {/* {message.length > 160 && (
             <div className="mb-4 p-3 bg-red-50 rounded-lg border border-red-200">
               <p className="text-sm text-red-700">
                 Message exceeds 160 characters. SMS messages are typically limited to 160 characters.
               </p>
             </div>
-          )}
+          )} */}
 
           {/* Selected Orders List */}
           <div className="mb-6">
@@ -269,15 +255,7 @@ const SMSDialogModal = ({
             </div>
           </div>
 
-          {/* SMS Cost Estimate */}
-          <div className="mb-6 p-3 bg-gray-50 rounded-lg">
-            <p className="text-xs text-gray-600">
-              <span className="font-medium">Estimated Cost:</span> 1 SMS per customer × {ordersToUse.length} customers = {ordersToUse.length} SMS
-            </p>
-            <p className="text-xs text-gray-500 mt-1">
-              Total estimated cost: KES {ordersToUse.length * 1.00} (assuming KES 1 per SMS)
-            </p>
-          </div>
+         
 
           {/* Action Buttons */}
           <div className="flex justify-end space-x-3 pt-4 border-t border-gray-200">
@@ -1614,7 +1592,7 @@ export default function Orders() {
         )}
 
         {/* Stats Overview */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-5 mb-6">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mb-6">
           <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
             <div className="flex items-center">
               <div className="p-3 bg-blue-100 rounded-xl m-2">
@@ -1654,17 +1632,7 @@ export default function Orders() {
             </div>
           </div>
 
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
-            <div className="flex items-center">
-              <div className="p-3 bg-purple-100 rounded-xl m-2">
-                <Truck className="text-purple-600 w-6 h-6" />
-              </div>
-              <div>
-                <h3 className="text-3xl font-bold text-gray-800 mt-1">{stats.delivered_orders}</h3>
-                <p className="text-sm text-gray-500 font-medium">Delivered Orders</p>
-              </div>
-            </div>
-          </div>
+         
         </div>
 
        
