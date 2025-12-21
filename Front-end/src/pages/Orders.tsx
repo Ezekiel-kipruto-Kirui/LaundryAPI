@@ -34,7 +34,7 @@ const PAYMENT_STATUS_COLORS: { [key: string]: { bg: string; text: string; icon: 
   'pending': { bg: 'bg-red-100', text: 'text-red-800', icon: Clock },
 };
 
-// SMS Dialog Modal Component
+// SMS Dialog Modal Component (unchanged)
 const SMSDialogModal = ({
   selectedOrders,
   allOrders = [],
@@ -313,14 +313,49 @@ const SMSDialogModal = ({
   );
 };
 
-// Pagination interface
-interface PaginationInfo {
+// --- Types for Pagination ---
+interface PaginatedResponse<T> {
   count: number;
   next: string | null;
   previous: string | null;
-  current_page: number;
-  total_pages: number;
+  results: T[];
+  current_page?: number;
+  total_pages?: number;
+  page_size?: number;
 }
+
+interface PaginatedOrdersResponse extends PaginatedResponse<Order> {
+  results: Order[];
+}
+
+// Helper function for API calls
+const apiFetch = async <T,>(url: string, options: RequestInit = {}): Promise<T> => {
+  const token = localStorage.getItem('accessToken');
+  
+  const defaultHeaders = {
+    'Content-Type': 'application/json',
+    ...(token && { 'Authorization': `Bearer ${token}` }),
+  };
+
+  const response = await fetch(url, {
+    ...options,
+    headers: {
+      ...defaultHeaders,
+      ...options.headers,
+    },
+  });
+
+  if (!response.ok) {
+    if (response.status === 401) {
+      throw new Error('Unauthorized');
+    }
+    const errorText = await response.text();
+    console.error(`API Error ${response.status}:`, errorText);
+    throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+  }
+
+  return response.json();
+};
 
 export default function Orders() {
   const [orders, setOrders] = useState<Order[]>([]);
@@ -377,15 +412,15 @@ export default function Orders() {
   const exportDropdownRef = useRef<HTMLDivElement>(null);
   const dropdownRefs = useRef<{ [key: number]: HTMLDivElement | null }>({});
 
-  // Pagination State
-  const [pagination, setPagination] = useState<PaginationInfo>({
-    count: 0,
-    next: null,
-    previous: null,
-    current_page: 1,
-    total_pages: 1
+  // Enhanced Pagination State
+  const [pagination, setPagination] = useState({
+    currentPage: 1,
+    totalPages: 1,
+    totalItems: 0,
+    pageSize: 20,
+    next: null as string | null,
+    previous: null as string | null
   });
-  const pageSize = 20;
 
   // Stats state
   const [stats, setStats] = useState({
@@ -407,59 +442,87 @@ export default function Orders() {
     return diffDays;
   };
 
+  // Helper function to fetch ALL orders with pagination (for SMS sending)
+  const fetchAllOrdersWithPagination = async (): Promise<Order[]> => {
+    let allOrders: Order[] = [];
+    let nextUrl: string | null = `${ORDERS_URL}?page_size=100`;
+    let pageCount = 0;
+    const MAX_PAGES = 20;
+
+    console.log('Starting to fetch all orders...');
+
+    while (nextUrl && pageCount < MAX_PAGES) {
+      try {
+        console.log(`Fetching orders page ${pageCount + 1}: ${nextUrl}`);
+        const response = await apiFetch<PaginatedOrdersResponse>(nextUrl);
+        
+        if (response.results && Array.isArray(response.results)) {
+          console.log(`Page ${pageCount + 1}: Found ${response.results.length} orders`);
+          allOrders = [...allOrders, ...response.results];
+          nextUrl = response.next;
+          pageCount++;
+          
+          console.log(`Total orders so far: ${allOrders.length}`);
+          
+          if (!nextUrl) {
+            console.log('No more pages to fetch');
+          }
+        } else {
+          console.error('Invalid response format - missing results array:', response);
+          break;
+        }
+      } catch (error) {
+        console.error('Error fetching orders page:', error);
+        break;
+      }
+    }
+
+    console.log(`Finished fetching orders. Total: ${allOrders.length} orders`);
+    return allOrders;
+  };
+
   // Fetch all orders with current filters (for SMS sending)
   const fetchAllOrders = useCallback(async () => {
     setLoadingAll(true);
     try {
-      const token = getAuthToken();
-      const headers: HeadersInit = {
-        'Content-Type': 'application/json',
-      };
-
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
+      const allOrdersData = await fetchAllOrdersWithPagination();
+      
+      // Apply client-side filtering if needed
+      let filteredOrders = allOrdersData;
+      
+      if (searchQuery) {
+        filteredOrders = filteredOrders.filter(order =>
+          order.customer.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          order.customer.phone.includes(searchQuery) ||
+          order.uniquecode.toLowerCase().includes(searchQuery.toLowerCase())
+        );
       }
-
-      const params = new URLSearchParams();
-      params.append('page_size', '1000');
-
-      if (searchQuery) params.append('search', searchQuery);
-      if (paymentFilter) params.append('payment_status', paymentFilter);
-      if (shopFilter) params.append('shop', shopFilter);
-
+      
+      if (paymentFilter) {
+        filteredOrders = filteredOrders.filter(order => order.payment_status === paymentFilter);
+      }
+      
+      if (shopFilter) {
+        filteredOrders = filteredOrders.filter(order => order.shop === shopFilter);
+      }
+      
       if (orderStatusFilter) {
-        params.append('order_status', orderStatusFilter);
+        filteredOrders = filteredOrders.filter(order => order.order_status === orderStatusFilter);
       }
-
+      
       if (dateFilter.startDate) {
-        params.append('created_at__gte', dateFilter.startDate);
+        filteredOrders = filteredOrders.filter(order => 
+          new Date(order.created_at) >= new Date(dateFilter.startDate)
+        );
       }
+      
       if (dateFilter.endDate) {
-        params.append('created_at__lte', dateFilter.endDate);
+        filteredOrders = filteredOrders.filter(order => 
+          new Date(order.created_at) <= new Date(dateFilter.endDate)
+        );
       }
 
-      console.log('Fetching ALL orders with params:', params.toString());
-
-      const response = await fetch(`${ORDERS_URL}?${params}`, {
-        headers,
-      });
-
-      if (!response.ok) {
-        if (response.status === 401) {
-          console.error("Unauthorized access - redirecting to login");
-          window.location.href = "/login";
-          return;
-        }
-        throw new Error(`Failed to fetch all orders: ${response.statusText}`);
-      }
-
-      const data = await response.json();
-
-      if (data.results && Array.isArray(data.results)) {
-        setAllOrders(data.results);
-      } else if (Array.isArray(data)) {
-        setAllOrders(data);
-      }
+      setAllOrders(filteredOrders);
 
     } catch (err: any) {
       console.error("Error fetching all orders:", err);
@@ -469,33 +532,30 @@ export default function Orders() {
     }
   }, [searchQuery, paymentFilter, shopFilter, orderStatusFilter, dateFilter]);
 
-  // Fetch data with filters and pagination
-  const fetchOrders = useCallback(async (page = 1) => {
+  // Fetch data with filters and pagination - UPDATED
+  const fetchOrders = useCallback(async (page = 1, search = '') => {
     setLoading(true);
     setError(null);
 
     try {
-      const token = getAuthToken();
-      const headers: HeadersInit = {
-        'Content-Type': 'application/json',
-      };
+      // Build query parameters
+      const params = new URLSearchParams({
+        page: page.toString(),
+        page_size: pagination.pageSize.toString()
+      });
 
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
+      if (search.trim()) {
+        params.append('search', search);
       }
-
-      const params = new URLSearchParams();
-      params.append('page', page.toString());
-      params.append('page_size', pageSize.toString());
-
-      if (searchQuery) params.append('search', searchQuery);
-      if (paymentFilter) params.append('payment_status', paymentFilter);
-      if (shopFilter) params.append('shop', shopFilter);
-
+      if (paymentFilter) {
+        params.append('payment_status', paymentFilter);
+      }
+      if (shopFilter) {
+        params.append('shop', shopFilter);
+      }
       if (orderStatusFilter) {
         params.append('order_status', orderStatusFilter);
       }
-
       if (dateFilter.startDate) {
         params.append('created_at__gte', dateFilter.startDate);
       }
@@ -503,97 +563,93 @@ export default function Orders() {
         params.append('created_at__lte', dateFilter.endDate);
       }
 
-      console.log('Fetching orders with params:', params.toString());
+      const url = `${ORDERS_URL}?${params}`;
+      console.log(`Fetching orders from: ${url}`);
+      
+      const response = await apiFetch<PaginatedOrdersResponse>(url);
 
-      const response = await fetch(`${ORDERS_URL}?${params}`, {
-        headers,
-      });
-
-      if (!response.ok) {
-        if (response.status === 401) {
-          console.error("Unauthorized access - redirecting to login");
-          window.location.href = "/login";
-          return;
-        }
-        throw new Error(`Failed to fetch orders: ${response.statusText}`);
+      if (!response.results || !Array.isArray(response.results)) {
+        throw new Error('Invalid response format');
       }
 
-      const data = await response.json();
+      setOrders(response.results);
 
-      // Handle both response formats
-      let ordersData = data.results || data;
-      if (!Array.isArray(ordersData)) ordersData = [];
+      // Handle both response formats (count vs total_items)
+      const totalItems = response.count || 0;
+      const totalPages = response.total_pages || Math.ceil(totalItems / pagination.pageSize) || 1;
+      const currentPage = response.current_page || page;
+      const pageSize = response.page_size || pagination.pageSize;
 
-      // Calculate stats from ALL orders (not just current page)
-      // We'll fetch stats separately
-      const statsResponse = await fetch(`${ORDERS_URL}stats/?${params.toString().replace(`page=${page}&`, '').replace(`page_size=${pageSize}&`, '')}`, {
-        headers,
+      setPagination({
+        currentPage,
+        totalPages,
+        totalItems,
+        pageSize,
+        next: response.next,
+        previous: response.previous
       });
 
-      if (statsResponse.ok) {
-        const statsData = await statsResponse.json();
+      // Fetch stats separately
+      const statsParams = new URLSearchParams(params);
+      statsParams.delete('page');
+      statsParams.delete('page_size');
+      
+      try {
+        const statsResponse = await apiFetch<any>(`${ORDERS_URL}stats/?${statsParams}`);
         setStats({
-          total_orders: statsData.total_count || 0,
-          pending_orders: statsData.pending_count || 0,
-          completed_orders: statsData.completed_count || 0,
-          delivered_orders: statsData.delivered_count || 0,
-          total_revenue: statsData.total_revenue || 0,
-          pending_revenue: statsData.pending_revenue || 0,
-          completed_revenue: statsData.completed_revenue || 0,
+          total_orders: statsResponse.total_count || 0,
+          pending_orders: statsResponse.pending_count || 0,
+          completed_orders: statsResponse.completed_count || 0,
+          delivered_orders: statsResponse.delivered_count || 0,
+          total_revenue: statsResponse.total_revenue || 0,
+          pending_revenue: statsResponse.pending_revenue || 0,
+          completed_revenue: statsResponse.completed_revenue || 0,
         });
-      } else {
+      } catch (statsErr) {
         // Fallback calculation if stats endpoint doesn't exist
-        const totalRevenue = ordersData.reduce((sum: number, order: Order) => {
+        const totalRevenue = response.results.reduce((sum: number, order: Order) => {
           return sum + parseFloat(order.total_price || '0');
         }, 0);
 
-        const pendingRevenue = ordersData
+        const pendingRevenue = response.results
           .filter((order: Order) => order.order_status === 'pending')
           .reduce((sum: number, order: Order) => {
             return sum + parseFloat(order.total_price || '0');
           }, 0);
 
-        const completedRevenue = ordersData
+        const completedRevenue = response.results
           .filter((order: Order) => order.order_status === 'Completed')
           .reduce((sum: number, order: Order) => {
             return sum + parseFloat(order.total_price || '0');
           }, 0);
 
         setStats({
-          total_orders: data.count || ordersData.length,
-          pending_orders: ordersData.filter((order: Order) => order.order_status === 'pending').length,
-          completed_orders: ordersData.filter((order: Order) => order.order_status === 'Completed').length,
-          delivered_orders: ordersData.filter((order: Order) => order.order_status === 'Delivered_picked').length,
+          total_orders: totalItems,
+          pending_orders: response.results.filter((order: Order) => order.order_status === 'pending').length,
+          completed_orders: response.results.filter((order: Order) => order.order_status === 'Completed').length,
+          delivered_orders: response.results.filter((order: Order) => order.order_status === 'Delivered_picked').length,
           total_revenue: totalRevenue,
           pending_revenue: pendingRevenue,
           completed_revenue: completedRevenue,
         });
       }
 
-      setOrders(ordersData);
-
-      // Update pagination from API response
-      const totalCount = data.count || ordersData.length;
-      const totalPages = Math.ceil(totalCount / pageSize);
-
-      setPagination({
-        count: totalCount,
-        next: data.next || null,
-        previous: data.previous || null,
-        current_page: page,
-        total_pages: totalPages
-      });
-
     } catch (err: any) {
       console.error("Error fetching orders:", err);
-      setError(`Could not load orders: ${err.message}`);
+      if (err.message === "Unauthorized") {
+        setError("Session expired. Please login again.");
+        window.location.href = "/login";
+      } else {
+        setError(`Could not load orders: ${err.message}`);
+      }
       setOrders([]);
       setPagination({
-        count: 0,
+        currentPage: 1,
+        totalPages: 1,
+        totalItems: 0,
+        pageSize: 20,
         next: null,
-        previous: null,
-        current_page: 1,
-        total_pages: 1
+        previous: null
       });
       setStats({
         total_orders: 0,
@@ -607,13 +663,13 @@ export default function Orders() {
     } finally {
       setLoading(false);
     }
-  }, [searchQuery, paymentFilter, shopFilter, orderStatusFilter, dateFilter]);
+  }, [paymentFilter, shopFilter, orderStatusFilter, dateFilter, pagination.pageSize]);
 
   // Initial fetch and refetch when filters change
   useEffect(() => {
-    fetchOrders(1);
+    fetchOrders(1, searchQuery);
     setAllOrders([]);
-  }, [fetchOrders]);
+  }, [fetchOrders, searchQuery]);
 
   // Close dropdowns when clicking outside
   useEffect(() => {
@@ -634,12 +690,12 @@ export default function Orders() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Handle search with debounce
+  // Handle search with debounce - UPDATED
   const handleSearch = (query: string) => {
     setSearchQuery(query);
     if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
     searchTimeoutRef.current = setTimeout(() => {
-      fetchOrders(1);
+      fetchOrders(1, query);
       setAllOrders([]);
     }, 500);
   };
@@ -745,23 +801,25 @@ export default function Orders() {
     }
   };
 
-  // Pagination handlers
-  const goToPage = (page: number) => {
+  // Enhanced Pagination handlers
+  const handlePageChange = (page: number) => {
     console.log('Going to page:', page);
-    if (page >= 1 && page <= pagination.total_pages) {
-      fetchOrders(page);
+    if (page >= 1 && page <= pagination.totalPages) {
+      fetchOrders(page, searchQuery);
     }
   };
 
-  const goToNextPage = () => {
+  const handleNextPage = () => {
     if (pagination.next) {
-      goToPage(pagination.current_page + 1);
+      setPagination(prev => ({ ...prev, currentPage: prev.currentPage + 1 }));
+      fetchOrders(pagination.currentPage + 1, searchQuery);
     }
   };
 
-  const goToPreviousPage = () => {
+  const handlePrevPage = () => {
     if (pagination.previous) {
-      goToPage(pagination.current_page - 1);
+      setPagination(prev => ({ ...prev, currentPage: prev.currentPage - 1 }));
+      fetchOrders(pagination.currentPage - 1, searchQuery);
     }
   };
 
@@ -901,7 +959,7 @@ export default function Orders() {
       }
 
       clearSelection();
-      fetchOrders(pagination.current_page);
+      fetchOrders(pagination.currentPage, searchQuery);
     } catch (err) {
       console.error('Error in bulk update:', err);
       alert('Failed to update orders');
@@ -918,7 +976,7 @@ export default function Orders() {
       const success = await updateOrderStatus(orderId, status);
       if (success) {
         alert('Order status updated successfully');
-        fetchOrders(pagination.current_page);
+        fetchOrders(pagination.currentPage, searchQuery);
       } else {
         alert('Failed to update order status');
       }
@@ -987,7 +1045,7 @@ export default function Orders() {
         setSelectedOrders(newSelected);
       }
 
-      fetchOrders(pagination.current_page);
+      fetchOrders(pagination.currentPage, searchQuery);
     } catch (err) {
       console.error('Error deleting order:', err);
       alert('Failed to delete order');
@@ -1067,7 +1125,7 @@ export default function Orders() {
         );
         alert('Order updated successfully');
         setShowEditModal(false);
-        fetchOrders(pagination.current_page);
+        fetchOrders(pagination.currentPage, searchQuery);
       }
     } catch (err) {
       console.error('Error updating order:', err);
@@ -1249,7 +1307,7 @@ export default function Orders() {
         );
         alert('Payment marked as complete successfully');
         setShowPaymentModal(false);
-        fetchOrders(pagination.current_page);
+        fetchOrders(pagination.currentPage, searchQuery);
       }
     } catch (err) {
       console.error('Error completing payment:', err);
@@ -1292,7 +1350,7 @@ export default function Orders() {
     setOpenDropdownId(openDropdownId === orderId ? null : orderId);
   };
 
-  // Apply date filter
+  // Apply date filter - UPDATED
   const applyDateFilter = () => {
     if (dateFilter.startDate && dateFilter.endDate) {
       const start = new Date(dateFilter.startDate);
@@ -1303,25 +1361,25 @@ export default function Orders() {
         return;
       }
     }
-    fetchOrders(1);
+    fetchOrders(1, searchQuery);
     setAllOrders([]);
   };
 
-  // Clear date filter
+  // Clear date filter - UPDATED
   const clearDateFilter = () => {
     setDateFilter({ startDate: '', endDate: '' });
-    fetchOrders(1);
+    fetchOrders(1, searchQuery);
     setAllOrders([]);
   };
 
-  // Clear all filters
+  // Clear all filters - UPDATED
   const clearAllFilters = () => {
     setSearchQuery('');
     setPaymentFilter('');
     setShopFilter('');
     setOrderStatusFilter('');
     setDateFilter({ startDate: '', endDate: '' });
-    fetchOrders(1);
+    fetchOrders(1, '');
     setAllOrders([]);
   };
 
@@ -1340,6 +1398,70 @@ export default function Orders() {
     paymentFilter,
     orderStatusFilter,
     dateFilter
+  };
+
+  // Enhanced pagination display
+  const renderPageNumbers = () => {
+    const totalPages = pagination.totalPages;
+    const currentPage = pagination.currentPage;
+    
+    if (totalPages <= 1) return null;
+
+    const pageNumbers = [];
+    const maxVisiblePages = 5;
+
+    if (totalPages <= maxVisiblePages) {
+      // Show all pages
+      for (let i = 1; i <= totalPages; i++) {
+        pageNumbers.push(i);
+      }
+    } else {
+      // Show limited pages with ellipsis
+      if (currentPage <= 3) {
+        // Show first 4 pages and last page
+        for (let i = 1; i <= 4; i++) {
+          pageNumbers.push(i);
+        }
+        pageNumbers.push('...');
+        pageNumbers.push(totalPages);
+      } else if (currentPage >= totalPages - 2) {
+        // Show first page and last 4 pages
+        pageNumbers.push(1);
+        pageNumbers.push('...');
+        for (let i = totalPages - 3; i <= totalPages; i++) {
+          pageNumbers.push(i);
+        }
+      } else {
+        // Show first page, current-1, current, current+1, and last page
+        pageNumbers.push(1);
+        pageNumbers.push('...');
+        pageNumbers.push(currentPage - 1);
+        pageNumbers.push(currentPage);
+        pageNumbers.push(currentPage + 1);
+        pageNumbers.push('...');
+        pageNumbers.push(totalPages);
+      }
+    }
+
+    return pageNumbers.map((pageNum, index) => {
+      if (pageNum === '...') {
+        return (
+          <span key={`ellipsis-${index}`} className="px-3 py-1 text-gray-500">
+            ...
+          </span>
+        );
+      }
+
+      return (
+        <button
+          key={pageNum}
+          onClick={() => handlePageChange(pageNum as number)}
+          className={`px-3 py-1 text-sm font-medium rounded-md ${pagination.currentPage === pageNum ? 'bg-blue-600 text-white' : 'text-gray-700 bg-white border border-gray-300 hover:bg-gray-50'}`}
+        >
+          {pageNum}
+        </button>
+      );
+    });
   };
 
   return (
@@ -1560,7 +1682,7 @@ export default function Orders() {
               value={shopFilter}
               onChange={(e) => {
                 setShopFilter(e.target.value);
-                fetchOrders(1);
+                fetchOrders(1, searchQuery);
                 setAllOrders([]);
               }}
               className="border border-gray-300 rounded-md p-2 text-sm"
@@ -1578,7 +1700,7 @@ export default function Orders() {
                   key={status}
                   onClick={() => {
                     setOrderStatusFilter(orderStatusFilter === status ? '' : status);
-                    fetchOrders(1);
+                    fetchOrders(1, searchQuery);
                     setAllOrders([]);
                   }}
                   className={`px-3 py-1.5 ${orderStatusFilter === status ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700'} rounded-full text-sm font-medium`}
@@ -1596,7 +1718,7 @@ export default function Orders() {
                   key={status}
                   onClick={() => {
                     setPaymentFilter(paymentFilter === status ? '' : status);
-                    fetchOrders(1);
+                    fetchOrders(1, searchQuery);
                     setAllOrders([]);
                   }}
                   className={`px-3 py-1.5 ${paymentFilter === status ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700'} rounded-full text-sm font-medium`}
@@ -1606,10 +1728,10 @@ export default function Orders() {
               ))}
             </div>
 
-            {/* Showing information */}
+            {/* Showing information - UPDATED */}
             <div className="flex items-center gap-2 ml-auto">
               <span className="text-sm text-gray-600">
-                Showing {orders.length} of {pagination.count} orders (Page {pagination.current_page} of {pagination.total_pages})
+                Showing {orders.length} of {pagination.totalItems} orders (Page {pagination.currentPage} of {pagination.totalPages})
               </span>
             </div>
           </div>
@@ -1896,23 +2018,23 @@ export default function Orders() {
                 </table>
               </div>
 
-              {/* Pagination Controls */}
-              {pagination.total_pages > 1 && (
+              {/* Enhanced Pagination Controls */}
+              {pagination.totalPages > 1 && (
                 <div className="flex flex-col md:flex-row items-center justify-between px-6 py-4 border-t border-gray-200 bg-gray-50">
                   <div className="text-sm text-gray-700 mb-4 md:mb-0">
-                    Showing <span className="font-medium">{((pagination.current_page - 1) * pageSize) + 1}</span> to{' '}
+                    Showing <span className="font-medium">{((pagination.currentPage - 1) * pagination.pageSize) + 1}</span> to{' '}
                     <span className="font-medium">
-                      {Math.min(pagination.current_page * pageSize, pagination.count)}
+                      {Math.min(pagination.currentPage * pagination.pageSize, pagination.totalItems)}
                     </span> of{' '}
-                    <span className="font-medium">{pagination.count}</span> orders
+                    <span className="font-medium">{pagination.totalItems}</span> orders
                     <span className="ml-2 text-gray-500">
-                      (Page {pagination.current_page} of {pagination.total_pages})
+                      (Page {pagination.currentPage} of {pagination.totalPages})
                     </span>
                   </div>
 
                   <div className="flex items-center space-x-2">
                     <button
-                      onClick={goToPreviousPage}
+                      onClick={handlePrevPage}
                       disabled={!pagination.previous}
                       className={`inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md ${pagination.previous ? 'text-gray-700 bg-white hover:bg-gray-50' : 'text-gray-300 bg-gray-50 cursor-not-allowed'}`}
                     >
@@ -1920,49 +2042,14 @@ export default function Orders() {
                       Previous
                     </button>
 
-                    {/* Page numbers */}
+                    {/* Enhanced Page numbers */}
                     <div className="flex items-center space-x-1">
-                      {Array.from({ length: Math.min(5, pagination.total_pages) }, (_, i) => {
-                        let pageNum;
-                        if (pagination.total_pages <= 5) {
-                          pageNum = i + 1;
-                        } else if (pagination.current_page <= 3) {
-                          pageNum = i + 1;
-                        } else if (pagination.current_page >= pagination.total_pages - 2) {
-                          pageNum = pagination.total_pages - 4 + i;
-                        } else {
-                          pageNum = pagination.current_page - 2 + i;
-                        }
-
-                        if (pageNum < 1 || pageNum > pagination.total_pages) return null;
-
-                        return (
-                          <button
-                            key={pageNum}
-                            onClick={() => goToPage(pageNum)}
-                            className={`px-3 py-1 text-sm font-medium rounded-md ${pagination.current_page === pageNum ? 'bg-blue-600 text-white' : 'text-gray-700 bg-white border border-gray-300 hover:bg-gray-50'}`}
-                          >
-                            {pageNum}
-                          </button>
-                        );
-                      })}
-                      
-                      {pagination.total_pages > 5 && pagination.current_page < pagination.total_pages - 2 && (
-                        <>
-                          <span className="px-2 text-gray-500">...</span>
-                          <button
-                            onClick={() => goToPage(pagination.total_pages)}
-                            className={`px-3 py-1 text-sm font-medium rounded-md ${pagination.current_page === pagination.total_pages ? 'bg-blue-600 text-white' : 'text-gray-700 bg-white border border-gray-300 hover:bg-gray-50'}`}
-                          >
-                            {pagination.total_pages}
-                          </button>
-                        </>
-                      )}
+                      {renderPageNumbers()}
                     </div>
 
                     {/* NEXT BUTTON */}
                     <button
-                      onClick={goToNextPage}
+                      onClick={handleNextPage}
                       disabled={!pagination.next}
                       className={`inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md ${pagination.next ? 'text-gray-700 bg-white hover:bg-gray-50' : 'text-gray-300 bg-gray-50 cursor-not-allowed'}`}
                     >
@@ -1992,7 +2079,7 @@ export default function Orders() {
           />
         )}
 
-        {/* Edit Order Modal */}
+        {/* Edit Order Modal - unchanged */}
         {showEditModal && currentOrder && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
             <div className="bg-white rounded-xl shadow-xl w-full max-w-4xl max-h-[90vh] overflow-y-auto">
@@ -2154,7 +2241,7 @@ export default function Orders() {
           </div>
         )}
 
-        {/* Receipt Modal */}
+        {/* Receipt Modal - unchanged */}
         {showReceiptModal && currentOrder && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
             <div className="bg-white rounded-lg shadow-lg w-full max-w-sm">
@@ -2254,7 +2341,7 @@ export default function Orders() {
           </div>
         )}
 
-        {/* Payment Complete Modal */}
+        {/* Payment Complete Modal - unchanged */}
         {showPaymentModal && currentOrder && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
             <div className="bg-white rounded-xl shadow-xl w-full max-w-md">

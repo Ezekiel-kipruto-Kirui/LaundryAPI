@@ -172,7 +172,7 @@ export function Sidebar() {
         {/* Logo */}
         <div className="flex h-16 items-center gap-3 border-b border-sidebar-border px-6">
           <div className="flex h-10 w-10 items-center justify-center rounded-full bg-sidebar-primary">
-            <img src="/logos/Clean-page-logo.png" className="h-10 w-10 rounded-full" alt="Clean Page Laundry Logo" />
+            <img src="/Clean-page-logo.png" className="h-10 w-10 rounded-full" alt="Clean Page Laundry Logo" />
           </div>
           <div>
             <h1 className="text-md font-bold">Clean Page Laundry</h1>

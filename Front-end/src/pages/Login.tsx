@@ -184,7 +184,7 @@ export default function Login() {
       <div
         className="min-h-screen w-full flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8 bg-cover bg-center relative"
         style={{
-          backgroundImage: `url('/background/bg.png')`,
+          backgroundImage: `url('/bg.png')`,
         }}
       >
         {/* Dark overlay */}
@@ -197,7 +197,7 @@ export default function Login() {
               <div className="flex items-center justify-center relative z-10">
                 <div className="bg-blue-500 rounded-full shadow-xl flex items-center justify-center w-20 h-20">
                   <img
-                    src="/logos/Clean-page-logo.png"
+                    src="/Clean-page-logo.png"
                     alt="Clean Page Laundry Logo"
                     className="w-full rounded-full object-contain"
                   />
@@ -309,18 +309,6 @@ export default function Login() {
                   </button>
                 </div>
               </form>
-
-              <div className="mt-6 text-center">
-                <p className="text-sm text-gray-600">
-                  Forgot your password?{" "}
-                  <button
-                    onClick={() => toast.info("Password reset functionality coming soon!")}
-                    className="font-medium text-blue-600 hover:text-blue-500"
-                  >
-                    Reset it here
-                  </button>
-                </p>
-              </div>
             </div>
           </div>
         </div>

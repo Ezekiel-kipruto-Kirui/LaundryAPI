@@ -24,14 +24,17 @@ from rest_framework_simplejwt.views import TokenRefreshView
 from django.views.generic import TemplateView
 from .authentication import EmailTokenObtainPairView
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
-from LaundryApp.views import CurrentUserView,sendsms_view 
+from LaundryApp.views import CurrentUserView,sendsms_view
+from django.conf.urls.static import static
 import os
 from HotelApp.views import update_food_revenue
 
+FRONTEND_BUILD_DIR = os.path.join(settings.BASE_DIR, 'Front-end', 'dist')
 
-def serve_react_app(request):
-    with open(os.path.join(settings.BASE_DIR, 'Front-end', 'dist', 'index.html'), 'r') as f:
-        return HttpResponse(f.read(), content_type='text/html')
+
+# def serve_react_app(request):
+#     with open(os.path.join(settings.BASE_DIR, 'Front-end', 'dist', 'index.html'), 'r') as f:
+#         return HttpResponse(f.read(), content_type='text/html')
 
 urlpatterns = [
     path('admin/', admin.site.urls),
@@ -43,10 +46,21 @@ urlpatterns = [
     path('api/send-sms/', sendsms_view),
     path('api/users/me/', CurrentUserView.as_view(), name='current_user'),
     path('assets/<path:path>', serve, {'document_root': os.path.join(settings.BASE_DIR, 'Front-end', 'dist', 'assets')}),
-    re_path(r'^(?!api/|admin/|static/|assets/).*$', serve_react_app),  # Catch-all for React routes
-    #re_path(r'^.*$', TemplateView.as_view(template_name="index.html"))
+    # Serve public images from dist root
+    path('bg.png', lambda request: serve(request, 'bg.png', document_root=FRONTEND_BUILD_DIR)),
+    path('Clean-page-logo.png', lambda request: serve(request, 'Clean-page-logo.png', document_root=FRONTEND_BUILD_DIR)),
+    path('favicon.ico', lambda request: serve(request, 'favicon.ico', document_root=FRONTEND_BUILD_DIR)),
+    path('placeholder.svg', lambda request: serve(request, 'placeholder.svg', document_root=FRONTEND_BUILD_DIR)),
+    path('robots.txt', lambda request: serve(request, 'robots.txt', document_root=FRONTEND_BUILD_DIR)),
+    #re_path(r'^(?!api/|admin/|static/|assets/).*$', serve_react_app),  # Catch-all for React routes
+    re_path('', TemplateView.as_view(template_name="index.html")),
     path('api/update-food-revenue/', update_food_revenue),
 
 
 
 ]
+
+# Serve media files during development
+if settings.DEBUG:
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+    urlpatterns += static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)

@@ -187,7 +187,7 @@ USE_TZ = True
 
 
 MEDIA_URL = '/media/'
-MEDIA_ROOT = os.path.join(BASE_DIR, '')
+MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 # Configure static files for production
 
 STATIC_URL = '/static/'
@@ -196,9 +196,8 @@ STATIC_URL = '/static/'
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles') 
 
 STATICFILES_DIRS = [
-   os.path.abspath(
-    os.path.join(BASE_DIR, 'Front-end/dist/assets/')
-)
+    os.path.join(FRONTEND_BUILD_DIR, "assets"),
+    FRONTEND_BUILD_DIR,  # Include root files like images from public folder
 ]
 
 # Tell Whitenoise to compress your static files
