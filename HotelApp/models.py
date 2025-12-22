@@ -56,15 +56,25 @@ class HotelOrderItem(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)  # Add this field
     
     def save(self, *args, **kwargs):
-        
+        # Save the order item first
         super().save(*args, **kwargs)
+
+        # Recalculate the total revenue for this food item
+        total_revenue = HotelOrderItem.objects.filter(
+            food_item=self.food_item,
+            oncredit=False  # Only cash sales
+        ).aggregate(total=Sum('price'))['total'] or 0
+
+        # Update the related FoodItem
+        self.food_item.total_cash_revenue = total_revenue
+        self.food_item.save()
     
     def get_total_price(self):
         """Calculate total price for this order item"""
-        return self.quantity * self.price
+        return self.price
     
     def __str__(self):
-        return f"{self.food_item.name} x {self.quantity}"
+        return f"{self.food_item.name}"
 
 
 class HotelExpenseField(models.Model):

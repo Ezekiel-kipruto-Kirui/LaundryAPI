@@ -14,7 +14,7 @@ User = get_user_model()
 class UserProfileSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = '__all__'
+        fields = ['email','first_name','last_name']
 
 class FoodCategorySerializer(serializers.ModelSerializer):
     class Meta:
@@ -53,7 +53,7 @@ class HotelOrderCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = HotelOrder
         fields = ['id']  # Only need ID field for creation
-        read_only_fields = ['created_by', 'created_at']
+       
     
     def create(self, validated_data):
         request = self.context.get('request')
@@ -66,8 +66,7 @@ class HotelOrderCreateSerializer(serializers.ModelSerializer):
 class HotelOrderSerializer(serializers.ModelSerializer):
     order_items = HotelOrderItemSerializer(many=True, read_only=True)
     total_amount = serializers.SerializerMethodField()
-    created_by_username = serializers.CharField(source='created_by.username', read_only=True)
-    created_by_email = serializers.CharField(source='created_by.email', read_only=True)
+    created_by = UserProfileSerializer(read_only=True)
     
     class Meta:
         model = HotelOrder
@@ -76,7 +75,7 @@ class HotelOrderSerializer(serializers.ModelSerializer):
     
     def get_total_amount(self, obj):
         return obj.get_total()
-# serializers.py
+
 class HotelOrderCreateSerializer(serializers.ModelSerializer):
     items = HotelOrderItemSerializer(many=True, write_only=True, required=False)
     
@@ -127,21 +126,3 @@ class HotelExpenseRecordSerializer(serializers.ModelSerializer):
 
 
 
-class SimpleFoodItemSerializer(serializers.ModelSerializer):
-    category_name = serializers.CharField(source='category.name', read_only=True)
-
-    class Meta:
-        model = FoodItem
-        fields = ['id', 'name', 'category_name', 'quantity', 'price']
-
-
-class SimpleHotelOrderSerializer(serializers.ModelSerializer):
-    created_by_name = serializers.CharField(source='created_by.username', read_only=True)
-    total_price = serializers.DecimalField(
-        max_digits=10, decimal_places=2,
-        read_only=True, source='get_total'
-    )
-
-    class Meta:
-        model = HotelOrder
-        fields = ['id', 'created_by_name', 'created_at', 'total_price']

@@ -210,20 +210,7 @@ interface ProcessedData {
 
   currentYear: number;
   selectedMonth?: number;
-  isCurrentMonthDefault: boolean;
 }
-
-// Helper function to get current month dates
-const getCurrentMonthDates = () => {
-  const today = new Date();
-  const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
-  const lastDay = new Date(today.getFullYear(), today.getMonth() + 1, 0);
-  
-  return {
-    startDate: firstDay.toISOString().split('T')[0],
-    endDate: lastDay.toISOString().split('T')[0],
-  };
-};
 
 // Helper function to safely extract array from response
 const extractArrayFromResponse = (response: any): any[] => {
@@ -236,6 +223,11 @@ const extractArrayFromResponse = (response: any): any[] => {
 
 // Type guard for paginated response
 const isPaginatedResponse = (response: any): response is { next: string | null; results: any[] } => {
+  return response && typeof response === 'object' && 'results' in response;
+};
+
+// Type guard for HotelOrdersResponse
+const isHotelOrdersResponse = (response: any): response is HotelOrdersResponse => {
   return response && typeof response === 'object' && 'results' in response;
 };
 
@@ -283,7 +275,6 @@ export default function PerformanceReport() {
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
   const [today] = useState(new Date().toISOString().split('T')[0]);
-  const [isCurrentMonthDefault, setIsCurrentMonthDefault] = useState(true);
 
   // Chart refs
   const revenueComparisonChartRef = useRef<HTMLCanvasElement>(null);
@@ -318,31 +309,6 @@ export default function PerformanceReport() {
     teal: '#4BC0C0'
   };
 
-  // Check if user has applied custom date filters
-  const hasCustomDateFilters = useCallback(() => {
-    const currentMonth = getCurrentMonthDates();
-    const hasCustomDates = fromDate || toDate;
-    const isCurrentMonth = !fromDate && !toDate && !filterMonth;
-    
-    if (hasCustomDates) {
-      if (fromDate && toDate) {
-        // Check if custom dates match current month
-        return !(fromDate === currentMonth.startDate && toDate === currentMonth.endDate);
-      }
-      return true;
-    }
-    
-    // Check if month filter is different from current month
-    if (filterMonth) {
-      const [year, month] = filterMonth.split('-').map(Number);
-      const currentYear = new Date().getFullYear();
-      const currentMonthNum = new Date().getMonth() + 1;
-      return !(year === currentYear && month === currentMonthNum);
-    }
-    
-    return false;
-  }, [fromDate, toDate, filterMonth]);
-
   const processData = useCallback((
     hotelOrders: HotelOrder[],
     hotelExpenses: HotelExpense[],
@@ -357,46 +323,21 @@ export default function PerformanceReport() {
     laundryExpenses = laundryExpenses || [];
     customers = customers || [];
 
-    // Check if we're using current month by default
-    const isCurrentMonthDefault = !hasCustomDateFilters();
-
     // Helper function to parse date and check filters
     const isDateInRange = (dateString: string): boolean => {
       try {
         if (!dateString) return false;
         const itemDate = new Date(dateString);
-        
-        // If user hasn't applied any filters and we're in default mode, show current month
-        if (isCurrentMonthDefault) {
-          const currentMonth = getCurrentMonthDates();
-          const startOfMonth = new Date(currentMonth.startDate);
-          const endOfMonth = new Date(currentMonth.endDate);
-          endOfMonth.setHours(23, 59, 59, 999);
-          
-          return itemDate >= startOfMonth && itemDate <= endOfMonth;
-        }
-        
-        // Apply custom filters
-        if (filterMonth) {
-          const [year, month] = filterMonth.split('-').map(Number);
-          const filterFrom = new Date(year, month - 1, 1);
-          const filterTo = new Date(year, month, 0);
-          filterTo.setHours(23, 59, 59, 999);
-          
-          return itemDate >= filterFrom && itemDate <= filterTo;
-        }
-        
-        // Apply date range filters
         const filterFrom = fromDate ? new Date(fromDate) : null;
         const filterTo = toDate ? new Date(toDate) : null;
-        
-        if (filterFrom) filterFrom.setHours(0, 0, 0, 0);
-        if (filterTo) filterTo.setHours(23, 59, 59, 999);
-        
+
         if (filterFrom && itemDate < filterFrom) return false;
         if (filterTo && itemDate > filterTo) return false;
         if (filterYear && itemDate.getFullYear() !== filterYear) return false;
-        
+        if (filterMonth) {
+          const [year, month] = filterMonth.split('-').map(Number);
+          if (itemDate.getFullYear() !== year || (itemDate.getMonth() + 1) !== month) return false;
+        }
         return true;
       } catch (e) {
         return false;
@@ -657,32 +598,29 @@ export default function PerformanceReport() {
       .sort((a, b) => b[1] - a[1])
       .slice(0, 10);
 
-    // Generate monthly revenue data - only if we're looking at a full year
+    // Generate monthly revenue data
     const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     const monthlyHotelRevenue = Array(12).fill(0);
     const monthlyLaundryRevenue = Array(12).fill(0);
 
-    // Only calculate monthly data if we're viewing a full year (no month filter)
-    if (!filterMonth) {
-      filteredHotelOrders.forEach(order => {
-        try {
-          const month = new Date(order.created_at).getMonth();
-          const orderTotal = order.order_items.reduce((sum, item) => sum + (item.total_price || 0), 0);
-          monthlyHotelRevenue[month] += (order.total_amount || orderTotal);
-        } catch (e) {
-          // Silently handle errors
-        }
-      });
+    filteredHotelOrders.forEach(order => {
+      try {
+        const month = new Date(order.created_at).getMonth();
+        const orderTotal = order.order_items.reduce((sum, item) => sum + (item.total_price || 0), 0);
+        monthlyHotelRevenue[month] += (order.total_amount || orderTotal);
+      } catch (e) {
+        // Silently handle errors
+      }
+    });
 
-      filteredLaundryOrders.forEach(order => {
-        try {
-          const month = new Date(order.created_at).getMonth();
-          monthlyLaundryRevenue[month] += (parseFloat(order.total_price) || 0);
-        } catch (e) {
-          // Silently handle errors
-        }
-      });
-    }
+    filteredLaundryOrders.forEach(order => {
+      try {
+        const month = new Date(order.created_at).getMonth();
+        monthlyLaundryRevenue[month] += (parseFloat(order.total_price) || 0);
+      } catch (e) {
+        // Silently handle errors
+      }
+    });
 
     // Calculate total balance amount
     const totalBalanceAmount = filteredLaundryOrders.reduce((sum, order) => {
@@ -709,8 +647,8 @@ export default function PerformanceReport() {
       // Hotel Stats
       hotelRevenue,
       hotelTotalOrders,
-      hotelInProgressOrders: 0,
-      hotelServedOrders: 0,
+      hotelInProgressOrders: 0, // This field doesn't exist in the API response
+      hotelServedOrders: 0,     // This field doesn't exist in the API response
       hotelNetProfit,
       hotelTotalExpenses: hotelExpensesTotal,
 
@@ -790,10 +728,9 @@ export default function PerformanceReport() {
       commonCustomers: topCustomers,
 
       currentYear: filterYear,
-      selectedMonth: filterMonth ? parseInt(filterMonth.split('-')[1]) : undefined,
-      isCurrentMonthDefault
+      selectedMonth: filterMonth ? parseInt(filterMonth.split('-')[1]) : undefined
     };
-  }, [filterYear, filterMonth, fromDate, toDate, hasCustomDateFilters]);
+  }, [filterYear, filterMonth, fromDate, toDate]);
 
   const fetchDashboardData = useCallback(async () => {
     setLoading(true);
@@ -933,8 +870,7 @@ export default function PerformanceReport() {
         commonCustomers: [],
 
         currentYear: filterYear,
-        selectedMonth: filterMonth ? parseInt(filterMonth.split('-')[1]) : undefined,
-        isCurrentMonthDefault: true
+        selectedMonth: filterMonth ? parseInt(filterMonth.split('-')[1]) : undefined
       });
     } finally {
       setLoading(false);
@@ -1384,8 +1320,6 @@ export default function PerformanceReport() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    // Update the current month default flag
-    setIsCurrentMonthDefault(!hasCustomDateFilters());
     fetchDashboardData();
   };
 
@@ -1394,14 +1328,7 @@ export default function PerformanceReport() {
     setFilterMonth("");
     setFromDate("");
     setToDate("");
-    setIsCurrentMonthDefault(true);
-    // Reset will trigger fetchDashboardData through useEffect
   };
-
-  // Update isCurrentMonthDefault when filters change
-  useEffect(() => {
-    setIsCurrentMonthDefault(!hasCustomDateFilters());
-  }, [fromDate, toDate, filterMonth, hasCustomDateFilters]);
 
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('en-KE', {
@@ -1439,12 +1366,6 @@ export default function PerformanceReport() {
           <div>
             <h1 className="text-2xl md:text-3xl font-bold text-gray-900">Business Dashboard</h1>
             <p className="text-gray-500 text-sm mt-1">Monitor your business performance</p>
-            {data?.isCurrentMonthDefault && (
-              <div className="inline-flex items-center gap-2 bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-xs font-medium mt-2">
-                <Calendar className="h-3 w-3" />
-                Showing Current Month Data
-              </div>
-            )}
           </div>
         </div>
         <div className="flex items-center gap-3 bg-white rounded-xl px-4 py-3 shadow-sm border border-gray-100">
@@ -1458,14 +1379,7 @@ export default function PerformanceReport() {
 
       {/* Date Range Filter Section */}
       <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100 mb-8">
-        <div className="flex justify-between items-center mb-4">
-          <h2 className="text-lg font-semibold text-gray-900">Filter Data</h2>
-          {data?.isCurrentMonthDefault && (
-            <span className="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-semibold">
-              Current Month Default
-            </span>
-          )}
-        </div>
+        <h2 className="text-lg font-semibold text-gray-900 mb-4">Filter Data</h2>
         <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-5 gap-4 items-end">
           {/* Year Input */}
           <div>
@@ -1503,7 +1417,6 @@ export default function PerformanceReport() {
               onChange={(e) => setFromDate(e.target.value)}
               max={today}
               className="w-full bg-gray-50 border border-gray-200 rounded-lg px-4 py-2.5 text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-              placeholder="Start date"
             />
           </div>
 
@@ -1516,7 +1429,6 @@ export default function PerformanceReport() {
               onChange={(e) => setToDate(e.target.value)}
               max={today}
               className="w-full bg-gray-50 border border-gray-200 rounded-lg px-4 py-2.5 text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-              placeholder="End date"
             />
           </div>
 
@@ -1536,13 +1448,6 @@ export default function PerformanceReport() {
             </button>
           </div>
         </form>
-        <div className="mt-4 text-sm text-gray-500">
-          {data?.isCurrentMonthDefault ? (
-            <p>Currently showing data for the current month. Apply filters to view different time periods.</p>
-          ) : (
-            <p>Showing filtered data. Reset to return to current month view.</p>
-          )}
-        </div>
       </div>
 
       {/* Overall Business Stats */}
@@ -1550,11 +1455,6 @@ export default function PerformanceReport() {
         <div className="flex items-center gap-3 mb-6">
           <div className="w-1 h-6 bg-gradient-to-b from-blue-500 to-purple-600 rounded-full"></div>
           <h2 className="text-xl font-bold text-gray-900">Business Overview</h2>
-          {data?.isCurrentMonthDefault && (
-            <span className="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-semibold">
-              Current Month
-            </span>
-          )}
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-3 gap-5">
@@ -1619,16 +1519,7 @@ export default function PerformanceReport() {
               </div>
               Revenue Comparison
             </h2>
-            <div className="flex items-center gap-2">
-              {data?.isCurrentMonthDefault && (
-                <span className="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-semibold">
-                  Current Month
-                </span>
-              )}
-              <span className="bg-purple-100 text-purple-800 px-3 py-1 rounded-full text-sm font-semibold">
-                {data?.currentYear || new Date().getFullYear()}
-              </span>
-            </div>
+            <span className="bg-purple-100 text-purple-800 px-3 py-1 rounded-full text-sm font-semibold">{data?.currentYear || new Date().getFullYear()}</span>
           </div>
           <div className="h-64">
             <canvas ref={revenueComparisonChartRef} />
@@ -1707,11 +1598,6 @@ export default function PerformanceReport() {
         <div className="flex items-center gap-3 mb-6">
           <div className="w-1 h-6 bg-gradient-to-b from-blue-500 to-cyan-600 rounded-full"></div>
           <h2 className="text-xl font-bold text-gray-900">Laundry Business</h2>
-          {data?.isCurrentMonthDefault && (
-            <span className="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-semibold">
-              Current Month
-            </span>
-          )}
         </div>
 
         {/* Laundry Stats Cards */}
@@ -2022,14 +1908,7 @@ export default function PerformanceReport() {
               </div>
               Revenue Distribution
             </h4>
-            <div className="flex items-center gap-2">
-              {data?.isCurrentMonthDefault && (
-                <span className="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-semibold">
-                  Current Month
-                </span>
-              )}
-              <span className="bg-yellow-100 text-yellow-800 px-3 py-1 rounded-full text-sm font-semibold">Total</span>
-            </div>
+            <span className="bg-yellow-100 text-yellow-800 px-3 py-1 rounded-full text-sm font-semibold">Total</span>
           </div>
           <div className="h-64">
             <canvas ref={revenueChartRef} />
@@ -2045,16 +1924,9 @@ export default function PerformanceReport() {
               </div>
               Revenue Trend
             </h2>
-            <div className="flex items-center gap-2">
-              {data?.isCurrentMonthDefault && (
-                <span className="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-semibold">
-                  Current Month
-                </span>
-              )}
-              <span className="bg-pink-100 text-pink-800 px-3 py-1 rounded-full text-sm font-semibold">
-                {data?.currentYear || new Date().getFullYear()}
-              </span>
-            </div>
+            <span className="bg-pink-100 text-pink-800 px-3 py-1 rounded-full text-sm font-semibold">
+              {data?.currentYear || new Date().getFullYear()}
+            </span>
           </div>
           <div className="h-64">
             {!data?.selectedMonth ? (
@@ -2079,16 +1951,9 @@ export default function PerformanceReport() {
               <Bath className="h-5 w-5 text-green-500" />
               Top Services
             </h2>
-            <div className="flex items-center gap-2">
-              {data?.isCurrentMonthDefault && (
-                <span className="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-semibold">
-                  Current Month
-                </span>
-              )}
-              <span className="bg-green-100 text-green-800 px-3 py-1 rounded-full text-sm font-semibold">
-                {data?.currentYear || new Date().getFullYear()}
-              </span>
-            </div>
+            <span className="bg-green-100 text-green-800 px-3 py-1 rounded-full text-sm font-semibold">
+              {data?.currentYear || new Date().getFullYear()}
+            </span>
           </div>
           <div className="h-72">
             {data?.servicesLabels && data.servicesLabels.length > 0 ? (
@@ -2109,16 +1974,9 @@ export default function PerformanceReport() {
               <Box className="h-5 w-5 text-yellow-500" />
               Common Items
             </h2>
-            <div className="flex items-center gap-2">
-              {data?.isCurrentMonthDefault && (
-                <span className="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-semibold">
-                  Current Month
-                </span>
-              )}
-              <span className="bg-yellow-100 text-yellow-800 px-3 py-1 rounded-full text-sm font-semibold">
-                {data?.currentYear || new Date().getFullYear()}
-              </span>
-            </div>
+            <span className="bg-yellow-100 text-yellow-800 px-3 py-1 rounded-full text-sm font-semibold">
+              {data?.currentYear || new Date().getFullYear()}
+            </span>
           </div>
           <div className="h-72">
             {data?.itemLabels && data.itemLabels.length > 0 ? (
@@ -2139,16 +1997,9 @@ export default function PerformanceReport() {
               <Crown className="h-5 w-5 text-yellow-500" />
               Top Customers
             </h2>
-            <div className="flex items-center gap-2">
-              {data?.isCurrentMonthDefault && (
-                <span className="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-semibold">
-                  Current Month
-                </span>
-              )}
-              <span className="bg-yellow-100 text-yellow-800 px-3 py-1 rounded-full text-sm font-semibold">
-                {data?.currentYear || new Date().getFullYear()}
-              </span>
-            </div>
+            <span className="bg-yellow-100 text-yellow-800 px-3 py-1 rounded-full text-sm font-semibold">
+              {data?.currentYear || new Date().getFullYear()}
+            </span>
           </div>
           <div className="h-72 overflow-y-auto pr-2">
             {data?.commonCustomers && data.commonCustomers.length > 0 ? (

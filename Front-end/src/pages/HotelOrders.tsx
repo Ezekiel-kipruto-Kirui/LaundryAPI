@@ -8,11 +8,8 @@ import { ROUTES } from '@/services/Routes'
 
 // Import Lucide React icons
 import {
-  Utensils,
-  FileText,
   Package,
   DollarSign,
-  Tag,
   Filter,
   RotateCw,
   Download,
@@ -22,15 +19,10 @@ import {
   Trash2,
   X,
   AlertTriangle,
-  Check,
   FileJson,
-  Calendar,
   UserCircle,
   FileSpreadsheet,
   CreditCard,
-  Users,
-  Eye,
-  ShoppingBag,
   ListOrdered,
   Receipt,
   Save,
@@ -62,7 +54,7 @@ interface DateRange {
 interface CreateEditOrderItemData {
   food_item: number;
   quantity: number;
-  price: string;
+  price: string; // This is the TOTAL PRICE, not unit price
   name?: string;
   oncredit: boolean;
 }
@@ -87,11 +79,17 @@ const getFoodItemObject = (item: HotelOrderItem): FoodItem | null => {
   return null;
 };
 
+// Interface for created_by object from server
+interface CreatedByUser {
+  email: string;
+  first_name: string;
+  last_name: string;
+}
+
 // Extended HotelOrderItem type with additional properties from server response
 interface ExtendedHotelOrderItem extends Omit<HotelOrderItem, 'created_at' | 'total_price'> {
   _order?: HotelOrder;
-  _created_by_email?: string;
-  _created_by?: User | number;
+  _created_by?: CreatedByUser; // Updated to use CreatedByUser interface
   _created_at?: string;
   total_price?: any; // From server response
   created_at?: any; // From server response
@@ -172,8 +170,7 @@ const fetchOrders = async (pageNumber: number, dateFilter?: DateRange): Promise<
           ...item,
           // Add order reference and created_by info
           _order: order,
-          _created_by_email: (order as any).created_by_email,
-          _created_by: order.created_by,
+          _created_by: order.created_by as CreatedByUser, // Cast to CreatedByUser interface
           _created_at: order.created_at
         };
         flattenedOrderItems.push(enrichedItem);
@@ -208,12 +205,12 @@ const createOrderItem = async (
   orderId: number,
   data: CreateEditOrderItemData
 ): Promise<HotelOrderItem> => {
-  // Format the data properly for the API
+  // Send total price directly (quantity * price entered by user)
   const formattedData = {
     order: orderId,
     food_item: data.food_item,
     quantity: parseInt(data.quantity.toString()) || 1,
-    price: parseFloat(data.price) || 0,
+    price: parseFloat(data.price) || 0, // This is TOTAL PRICE
     name: data.oncredit ? (data.name || "") : null,
     oncredit: Boolean(data.oncredit)
   };
@@ -246,10 +243,11 @@ const updateOrderItem = async (
   itemId: number,
   data: CreateEditOrderItemData
 ): Promise<HotelOrderItem> => {
+  // Send total price directly (quantity * price entered by user)
   const formattedData = {
     food_item: data.food_item,
     quantity: parseInt(data.quantity.toString()) || 1,
-    price: parseFloat(data.price) || 0,
+    price: parseFloat(data.price) || 0, // This is TOTAL PRICE
     name: data.oncredit ? (data.name || "") : null,
     oncredit: Boolean(data.oncredit)
   };
@@ -332,23 +330,30 @@ const fetchOrderSummary = async (dateFilter?: DateRange) => {
   return response.json();
 };
 
-// Helper function to extract name from email
-const extractNameFromEmail = (email: string): string => {
-  if (!email) return "User";
-
-  const emailParts = email.split('@')[0];
-  if (!emailParts) return "User";
-
-  // Try to split by common separators
-  const nameParts = emailParts.split(/[\._-]/);
-  if (nameParts.length > 0) {
-    // Capitalize first letter
-    const firstName = nameParts[0].charAt(0).toUpperCase() + nameParts[0].slice(1).toLowerCase();
-    return firstName;
+// Helper function to get creator name from order
+const getCreatedByName = (item: ExtendedHotelOrderItem): string => {
+  // Check if we have the created_by object with first_name and last_name
+  if (item._created_by && typeof item._created_by === 'object') {
+    const createdBy = item._created_by as CreatedByUser;
+    if (createdBy.first_name && createdBy.last_name) {
+      return `${createdBy.first_name} ${createdBy.last_name}`;
+    } else if (createdBy.first_name) {
+      return createdBy.first_name;
+    } else if (createdBy.email) {
+      // Fallback to email if no name is provided
+      const emailParts = createdBy.email.split('@')[0];
+      if (emailParts) {
+        const nameParts = emailParts.split(/[\._-]/);
+        if (nameParts.length > 0) {
+          const firstName = nameParts[0].charAt(0).toUpperCase() + nameParts[0].slice(1).toLowerCase();
+          return firstName;
+        }
+        return emailParts.charAt(0).toUpperCase() + emailParts.slice(1);
+      }
+    }
   }
 
-  // Just return the email username if no separators
-  return emailParts.charAt(0).toUpperCase() + emailParts.slice(1);
+  return "Unknown";
 };
 
 export default function HotelOrderItems() {
@@ -363,7 +368,6 @@ export default function HotelOrderItems() {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [showDeleteOrderModal, setShowDeleteOrderModal] = useState(false);
   const [showCreateEditModal, setShowCreateEditModal] = useState(false);
-  const [showCreditModal, setShowCreditModal] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [itemToDelete, setItemToDelete] = useState<number | null>(null);
   const [orderToDelete, setOrderToDelete] = useState<number | null>(null);
@@ -378,7 +382,6 @@ export default function HotelOrderItems() {
     customer_name: "",
     oncredit: false
   });
-  const [currentOrder, setCurrentOrder] = useState<HotelOrder | null>(null);
   const [dateRange, setDateRange] = useState<DateRange>({
     start_date: "",
     end_date: "",
@@ -404,35 +407,7 @@ export default function HotelOrderItems() {
     }
   }, []);
 
-  // Get created by info for an order item
-  const getCreatedByInfo = useCallback((item: ExtendedHotelOrderItem): string => {
-    // Check if we have the extended properties
-    if (item._created_by_email) {
-      return extractNameFromEmail(item._created_by_email);
-    }
-
-    // Check if we have the order object
-    if (item._order) {
-      const order = item._order;
-
-      // Check for email in order object (from your backend response)
-      if ((order as any).created_by_email) {
-        return extractNameFromEmail((order as any).created_by_email);
-      }
-
-      // Check for full user object
-     
-
-      // Check for created_by_username as fallback
-      if ((order as any).created_by_username) {
-        return (order as any).created_by_username;
-      }
-    }
-
-    return "Unknown";
-  }, []);
-
-  // Fetch data function - UPDATED to use orders endpoint
+  // Fetch data function
   const fetchData = useCallback(async () => {
     const token = getAccessToken();
     if (!token) {
@@ -468,8 +443,8 @@ export default function HotelOrderItems() {
       // Update summary with API data and calculate credit orders
       const creditOrders = ordersData.flattenedOrderItems.filter(item => item.oncredit);
       const creditValue = creditOrders.reduce((sum, item) => {
-        // Use total_price directly from API (it should already include quantity calculation)
-        const price = item.total_price ? parseFloat(item.total_price.toString()) : 0;
+        // Use price directly from API (this is the total price entered by user)
+        const price = item.price ? parseFloat(item.price.toString()) : 0;
         return sum + price;
       }, 0);
 
@@ -650,7 +625,6 @@ export default function HotelOrderItems() {
       oncredit: false
     });
     setCurrentItem(null);
-    setCurrentOrder(null);
     setIsEditing(false);
     setFormErrors({});
     setShowCreateEditModal(true);
@@ -666,7 +640,7 @@ export default function HotelOrderItems() {
       items: [{
         food_item: foodItemId,
         quantity: item.quantity || 1,
-        price: item.price?.toString() || "0.00",
+        price: item.price?.toString() || "0.00", // This is TOTAL PRICE from the item
         name: item.name || "",
         oncredit: item.oncredit || false
       }],
@@ -694,19 +668,21 @@ export default function HotelOrderItems() {
 
     try {
       if (isEditing && currentItem) {
-        // Update existing item
+        // Update existing item - send total price directly
         const result = await updateOrderItem(currentItem.id, formData.items[0]);
         console.log('Update successful, result:', result);
         toast.success('Order item updated successfully!');
       } else {
         // Create new order first
         const newOrder = await createOrder();
-        setCurrentOrder(newOrder);
 
         // Then add all items to the order
+        // Send total price directly (user enters total price)
         const promises = formData.items.map(item =>
           createOrderItem(newOrder.id, {
             ...item,
+            price: item.price, // This is TOTAL PRICE (user entered)
+            quantity: item.quantity, // This is quantity
             name: formData.oncredit ? formData.customer_name : ""
           })
         );
@@ -718,7 +694,6 @@ export default function HotelOrderItems() {
 
       fetchData();
       setShowCreateEditModal(false);
-      setCurrentOrder(null);
       setCurrentItem(null);
     } catch (err: any) {
       console.error('Save error:', err);
@@ -790,11 +765,11 @@ export default function HotelOrderItems() {
     return numPrice.toFixed(2);
   };
 
-  // Get total price for an item - FIXED: Don't multiply price * quantity, use total_price from API
+  // Get total price for an item - Use price directly from API
   const getTotalPrice = (item: ExtendedHotelOrderItem): string => {
-    // Use the total_price provided by API (it should already be calculated)
-    if (item.total_price !== undefined && item.total_price !== null) {
-      return formatPrice(item.total_price);
+    // Use the price provided by API (this is the total price entered by user)
+    if (item.price !== undefined && item.price !== null) {
+      return formatPrice(item.price);
     }
     return "0.00";
   };
@@ -838,9 +813,9 @@ export default function HotelOrderItems() {
     return "N/A";
   };
 
-  // Get food item name - FIXED: Use food_item_name from API response
+  // Get food item name - Use food_item_name from API response
   const getFoodItemName = (item: ExtendedHotelOrderItem): string => {
-    // Use food_item_name from API response (from your example: "food_item_name": "Chips")
+    // Use food_item_name from API response
     if (item.food_item_name) {
       return item.food_item_name;
     }
@@ -869,27 +844,16 @@ export default function HotelOrderItems() {
     return "Uncategorized";
   };
 
-  // Calculate total for current form
-  const calculateFormTotal = (): string => {
-    const total = formData.items.reduce((sum, item) => {
-      const price = parseFloat(item.price) || 0;
-      const quantity = item.quantity || 0;
-      return sum + (price * quantity);
-    }, 0);
-    return formatPrice(total);
-  };
-
   // Export functions
   const handleExportCSV = () => {
     const exportData = orderItems.map(item => ({
       'Order ID': typeof item.order === 'object' ? (item.order as any)?.id || 'N/A' : item.order || 'N/A',
       'Date/Time': formatDateTime(item),
-      'Created By': getCreatedByInfo(item),
+      'Created By': getCreatedByName(item),
       'Food Item': getFoodItemName(item),
       'Category': getFoodItemCategory(item),
       'Quantity': item.quantity || 0,
-      'Unit Price': `Ksh ${formatPrice(item.price)}`,
-      'Total': `Ksh ${getTotalPrice(item)}`,
+      'Total Price': `Ksh ${formatPrice(item.price)}`,
       'On Credit': item.oncredit ? 'Yes' : 'No',
       'Customer Name': item.name || 'N/A',
     }));
@@ -939,7 +903,7 @@ export default function HotelOrderItems() {
 
   return (
     <div className="w-full px-4 sm:px-6 lg:px-8 py-8">
-      {/* Header Section - Made more responsive */}
+      {/* Header Section */}
       <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center mb-8 gap-4">
         <div>
           <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 flex items-center">
@@ -951,7 +915,7 @@ export default function HotelOrderItems() {
           <p className="text-gray-600 mt-1 sm:mt-2 text-sm sm:text-base">Manage and track all customer orders</p>
         </div>
 
-        {/* Export and Filter Controls - Made responsive */}
+        {/* Export and Filter Controls */}
         <div className="flex flex-col sm:flex-row gap-2 sm:gap-3 w-full lg:w-auto">
           {/* Date Filter Form */}
           <div className="bg-white p-2 sm:p-3 rounded-lg border border-gray-200 shadow-sm">
@@ -1018,7 +982,7 @@ export default function HotelOrderItems() {
               <button
                 type="button"
                 onClick={() => setExportDropdownOpen(!exportDropdownOpen)}
-                className="bg-green-600 hover:bg-green-700 text-white px-3 sm:px-4 py-1 sm:py-2 rounded-lg text-xs sm:text-sm font-medium transition duration-200 flex items-center"
+                className="bg-green-600 hover:bg-green-700 text-white px-3 sm:px-4 py-1 sm:py-2 rounded-lg text-xs sm:text-sm font-medium transition duration-200 flex items-center h-9 sm:h-10"
               >
                 <Download className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
                 Export
@@ -1051,7 +1015,7 @@ export default function HotelOrderItems() {
             {/* Create Order Button */}
             <button
               onClick={handleCreateOrder}
-              className="inline-flex items-center px-3 sm:px-4 py-1 sm:py-2 border border-transparent rounded-lg shadow-sm text-xs sm:text-sm font-medium text-white bg-blue-500 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+              className="inline-flex items-center px-3 sm:px-4 py-1 sm:py-2 border border-transparent rounded-lg shadow-sm text-xs sm:text-sm font-medium text-white bg-blue-500 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 h-9 sm:h-10"
             >
               <ShoppingCart className="-ml-0.5 mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
               Create Order
@@ -1060,7 +1024,7 @@ export default function HotelOrderItems() {
         </div>
       </div>
 
-      {/* Summary Cards - Only for admins - Made responsive and removed Average Order Value */}
+      {/* Summary Cards - Only for admins */}
       {isUserAdmin && (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6 mb-8">
           {/* Total Orders Card */}
@@ -1132,7 +1096,7 @@ export default function HotelOrderItems() {
           </button>
         </div>
       ) : orderItems.length > 0 ? (
-        /* Order Items Table - Made responsive */
+        /* Order Items Table */
         <div className="bg-white rounded-xl sm:rounded-2xl shadow-lg border border-gray-100 overflow-hidden p-2 sm:p-4">
           <div className="overflow-x-auto">
             <table className="w-full min-w-[640px]">
@@ -1170,14 +1134,14 @@ export default function HotelOrderItems() {
                       </div>
                     </td>
 
-                    {/* Created By - Now shows the user who created the order */}
+                    {/* Created By - Shows first name and last name from backend */}
                     <td className="px-2 sm:px-4 py-3 sm:py-4 whitespace-nowrap">
                       <div className="text-sm text-gray-900">
-                        {getCreatedByInfo(item)}
+                        {getCreatedByName(item)}
                       </div>
                     </td>
 
-                    {/* Items - Food item name will now display correctly from food_item_name */}
+                    {/* Items */}
                     <td className="px-2 sm:px-4 py-3 sm:py-4">
                       <div className="text-sm text-gray-900 font-medium">
                         {getFoodItemName(item)}
@@ -1190,9 +1154,6 @@ export default function HotelOrderItems() {
                           Credit: {item.name}
                         </div>
                       )}
-                      <div className="text-xs text-gray-500 mt-0.5 sm:mt-1">
-                        Unit: Ksh {formatPrice(item.price)}
-                      </div>
                     </td>
 
                     {/* Quantity */}
@@ -1202,7 +1163,7 @@ export default function HotelOrderItems() {
                       </div>
                     </td>
 
-                    {/* Total - Now uses total_price directly from API */}
+                    {/* Total - This is the price entered by user (not calculated) */}
                     <td className="px-2 sm:px-4 py-3 sm:py-4 whitespace-nowrap">
                       <div className="text-sm font-bold text-blue-600">
                         Ksh {getTotalPrice(item)}
@@ -1242,7 +1203,7 @@ export default function HotelOrderItems() {
             </table>
           </div>
 
-          {/* Pagination - Made responsive */}
+          {/* Pagination */}
           {totalPages > 1 && (
             <div className="border-t border-gray-200 px-4 sm:px-6 py-3 sm:py-4">
               <div className="flex flex-col sm:flex-row items-center justify-between gap-2 sm:gap-4">
@@ -1337,7 +1298,7 @@ export default function HotelOrderItems() {
         </div>
       )}
 
-      {/* Create/Edit Order Modal - Made responsive */}
+      {/* Create/Edit Order Modal */}
       {showCreateEditModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-2 sm:p-4 overflow-y-auto">
           <div className="bg-white rounded-xl sm:rounded-2xl p-4 sm:p-6 max-w-2xl w-full shadow-2xl transform transition-all duration-300 scale-100 my-4 sm:my-8">
@@ -1356,29 +1317,12 @@ export default function HotelOrderItems() {
                 onClick={() => {
                   setShowCreateEditModal(false);
                   setCurrentItem(null);
-                  setCurrentOrder(null);
                   setIsEditing(false);
                 }}
                 className="text-gray-400 hover:text-gray-600 transition p-1 sm:p-2 hover:bg-gray-100 rounded-lg"
               >
                 <X className="h-4 w-4 sm:h-5 sm:w-5" />
               </button>
-            </div>
-
-            {/* Order Summary */}
-            <div className="mb-4 sm:mb-6 p-3 sm:p-4 bg-blue-50 rounded-lg sm:rounded-xl border border-blue-200">
-              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 sm:gap-0">
-                <div>
-                  <h4 className="font-semibold text-blue-900 text-sm sm:text-base">Order Summary</h4>
-                  <p className="text-xs sm:text-sm text-blue-700">
-                    {formData.items.length} item{formData.items.length !== 1 ? 's' : ''} selected
-                  </p>
-                </div>
-                <div className="text-right">
-                  <p className="text-xs sm:text-sm text-blue-700">Total Amount</p>
-                  <p className="text-lg sm:text-2xl font-bold text-blue-900">Ksh {calculateFormTotal()}</p>
-                </div>
-              </div>
             </div>
 
             {/* Order Items List */}
@@ -1454,10 +1398,14 @@ export default function HotelOrderItems() {
                       )}
                     </div>
 
-                    {/* Price */}
-                    <div>
+                    {/* Price - This is TOTAL PRICE, not unit price */}
+                    <div className="md:col-span-2">
                       <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1 sm:mb-2">
-                        Unit Price (Ksh) *
+                        <span className="flex items-center">
+                          <DollarSign className="h-3 w-3 sm:h-4 sm:w-4 mr-0.5 sm:mr-1 text-green-600" />
+                          Total Price (Ksh) *
+                        </span>
+                        <span className="text-gray-500 text-xs">Enter the total price for this item</span>
                       </label>
                       <input
                         type="number"
@@ -1466,7 +1414,7 @@ export default function HotelOrderItems() {
                         onChange={(e) => handleItemInputChange(index, e)}
                         className={`w-full px-3 sm:px-4 py-2 sm:py-3 border rounded-lg sm:rounded-xl text-xs sm:text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition ${formErrors[`item_${index}_price`] ? 'border-red-300 bg-red-50' : 'border-gray-300'
                           }`}
-                        placeholder="Enter unit price"
+                        placeholder="Enter total price"
                         min="0"
                         step="0.01"
                       />
@@ -1476,16 +1424,6 @@ export default function HotelOrderItems() {
                           {formErrors[`item_${index}_price`]}
                         </p>
                       )}
-                    </div>
-
-                    {/* Item Total */}
-                    <div>
-                      <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1 sm:mb-2">
-                        Item Total
-                      </label>
-                      <div className="w-full px-3 sm:px-4 py-2 sm:py-3 border border-gray-300 rounded-lg sm:rounded-xl text-xs sm:text-sm bg-gray-100">
-                        Ksh {formatPrice((parseFloat(item.price) || 0) * (item.quantity || 0))}
-                      </div>
                     </div>
                   </div>
                 </div>
@@ -1552,12 +1490,23 @@ export default function HotelOrderItems() {
               </div>
             )}
 
+            {/* Order Total - Display sum of all item prices */}
+            <div className="bg-blue-50 border border-blue-200 rounded-lg sm:rounded-xl p-3 sm:p-4 mb-4 sm:mb-6">
+              <div className="flex justify-between items-center">
+                <span className="text-sm sm:text-base font-medium text-blue-900">
+                  Order Total:
+                </span>
+                <span className="text-lg sm:text-xl font-bold text-blue-700">
+                  Ksh {formatPrice(formData.items.reduce((sum, item) => sum + (parseFloat(item.price) || 0), 0))}
+                </span>
+              </div>
+            </div>
+
             <div className="flex justify-center space-x-2 sm:space-x-4 mt-6 sm:mt-8 pt-4 sm:pt-6 border-t border-gray-200">
               <button
                 onClick={() => {
                   setShowCreateEditModal(false);
                   setCurrentItem(null);
-                  setCurrentOrder(null);
                   setIsEditing(false);
                 }}
                 className="px-4 sm:px-6 py-2 sm:py-3 bg-gray-300 hover:bg-gray-400 text-gray-800 font-semibold rounded-lg sm:rounded-xl transition-all duration-200 flex items-center text-sm sm:text-base"

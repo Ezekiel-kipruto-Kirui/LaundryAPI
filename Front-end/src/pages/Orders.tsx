@@ -2225,7 +2225,7 @@ export default function Orders() {
                 <div id="receiptContent" className="bg-white">
                   <div className="header text-center mb-4">
                     <h3 className="text-lg font-bold">CLEAN PAGE LAUNDRY</h3>
-                    <p className="text-sm text-gray-600 mt-1">Be sportless Be bright</p>
+                    <p className="text-sm text-gray-600 mt-1">Be spotless, Be bright</p>
                   </div>
 
                   <div className="section">

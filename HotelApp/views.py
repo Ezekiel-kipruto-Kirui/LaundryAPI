@@ -20,7 +20,7 @@ from .serializers import (
     FoodCategorySerializer, FoodItemSerializer,
     HotelOrderSerializer, HotelOrderItemSerializer,
     HotelExpenseFieldSerializer, HotelExpenseRecordSerializer,
-    SimpleFoodItemSerializer, SimpleHotelOrderSerializer,HotelOrderCreateSerializer
+    HotelOrderCreateSerializer
 )
 from LaundryApp.pagination import CustomPageNumberPagination
 
@@ -116,7 +116,7 @@ class HotelOrderItemViewSet(viewsets.ModelViewSet):
 
 class HotelOrderViewSet(viewsets.ModelViewSet):
     queryset = HotelOrder.objects.all().order_by('-created_at')
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [AllowAny]
     pagination_class = CustomPageNumberPagination
     
     def get_serializer_class(self):
