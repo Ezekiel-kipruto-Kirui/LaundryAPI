@@ -47,7 +47,7 @@ class CustomerViewSet(viewsets.ModelViewSet):
     """
     queryset = Customer.objects.all().order_by("-id")
     serializer_class = CustomerSerializer
-    permission_classes = [IsAuthenticated]  # change to IsAuthenticated for production
+    permission_classes = [AllowAny]  # change to IsAuthenticated for production
     pagination_class=CustomPageNumberPagination
 
 
@@ -59,7 +59,7 @@ class OrderViewSet(viewsets.ModelViewSet):
     """
     queryset = Order.objects.all().order_by("-id")
     serializer_class = OrderSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
     pagination_class=CustomPageNumberPagination
 
     @transaction.atomic

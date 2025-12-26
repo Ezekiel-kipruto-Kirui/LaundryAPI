@@ -251,15 +251,15 @@ REST_FRAMEWORK = {
 APPEND_SLASH = False
 
 # CSRF settings
-CSRF_TRUSTED_ORIGINS = [
-    'http://localhost:8080',
-    'http://127.0.0.1:8080',
-    "http://localhost:5173"
-]
-CORS_ALLOWED_ORIGINS = [
-    "https://cleanpage.shop",
-    "https://clean-page-laundry:10000",  # Vite local dev (optional)
-    "http://localhost:5173",
-]
+# CSRF_TRUSTED_ORIGINS = [
+#     'http://localhost:8080',
+#     'http://127.0.0.1:8080',
+#     "http://localhost:5173"
+# ]
+# CORS_ALLOWED_ORIGINS = [
+#     "https://cleanpage.shop",
+#     "https://clean-page-laundry:10000",  # Vite local dev (optional)
+#     "http://localhost:5173",
+# ]
 
 

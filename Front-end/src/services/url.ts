@@ -1,7 +1,7 @@
 // services/url.ts
 
 // Determine the base URL based on the current hostname
-let API_BASE_URL: string;
+let API_BASE_URL ='http://127.0.0.1:8080/api';
 
 const currentHostname = window.location.hostname;
 
@@ -28,7 +28,7 @@ if (isLocalhost) {
         API_BASE_URL = `https://${currentHostname}/api`;
     } else {
         // Fallback - try to infer from current location
-        API_BASE_URL = `${window.location.protocol}//${currentHostname}/api`;
+        API_BASE_URL = `${window.location.protocol}//${currentHostname}/api`||'http://127.0.0.1:8080';
     }
 }
 export { API_BASE_URL };

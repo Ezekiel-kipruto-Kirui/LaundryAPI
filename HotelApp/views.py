@@ -74,16 +74,26 @@ class FoodCategoryViewSet(viewsets.ModelViewSet):
 # ---------------------------
 #   FOOD ITEM VIEWSET
 # ---------------------------
+# views.py
 class FoodItemViewSet(viewsets.ModelViewSet):
     queryset = FoodItem.objects.all().select_related("category", "created_by")
-    #permission_classes = [AllowAny]
-    permission_classes = [permissions.IsAuthenticated]
-    ""  "permissions.IsAuthenticated"""
+    serializer_class = FoodItemSerializer
+    permission_classes = [AllowAny]  # Or your preferred permissions
+    
     def get_serializer_class(self):
-        if self.action in ["list", "retrieve"]:
-            return FoodItemSerializer
         return FoodItemSerializer
-
+    
+    def perform_create(self, serializer):
+        # Automatically set created_by to current user
+        if self.request.user.is_authenticated:
+            serializer.save(created_by=self.request.user)
+        else:
+            # Handle unauthenticated users - either allow null or raise error
+            serializer.save()  # created_by will be null if field allows
+    
+    def perform_update(self, serializer):
+        # Keep the original created_by when updating
+        serializer.save()
 
 class HotelOrderItemViewSet(viewsets.ModelViewSet):
     queryset = HotelOrderItem.objects.all().select_related("food_item", "order", "order__created_by")

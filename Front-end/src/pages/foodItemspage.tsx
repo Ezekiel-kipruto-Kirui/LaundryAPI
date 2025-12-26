@@ -1,11 +1,15 @@
 import { useState, useEffect, useCallback } from "react";
 import { FoodItem, FoodCategory, User } from "@/services/types";
 import { fetchApi } from "@/services/api";
+import { getUserData } from "@/utils/auth";
 
 const FOOD_URL = "food-items/";
 const CATEGORIES_URL = "food-categories/";
 
 export default function FoodItems() {
+  // Get user from auth utilities instead of AuthContext
+  const [user, setUser] = useState<User | null>(null);
+  
   // Food Items State
   const [foodItems, setFoodItems] = useState<FoodItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -24,7 +28,7 @@ export default function FoodItems() {
   // Form States
   const [foodFormData, setFoodFormData] = useState({
     name: "",
-    category_id: "",
+    category: "", // Changed from category_id to category to match serializer
     total_order_price: "",
     quantity: ""
   });
@@ -32,6 +36,12 @@ export default function FoodItems() {
   const [categoryFormData, setCategoryFormData] = useState({
     name: ""
   });
+
+  // Get user data on component mount
+  useEffect(() => {
+    const userData = getUserData();
+    setUser(userData);
+  }, []);
 
   // =========================================================================
   // 1. READ (Fetch Data)
@@ -94,7 +104,7 @@ export default function FoodItems() {
     setCurrentFoodItem(null);
     setFoodFormData({
       name: "",
-      category_id: categories.length > 0 ? categories[0].id.toString() : "",
+      category: categories.length > 0 ? String(categories[0].id) : "", // FIXED: Use String() instead of toString()
       total_order_price: "",
       quantity: ""
     });
@@ -104,8 +114,25 @@ export default function FoodItems() {
   const openEditFoodModal = (item: FoodItem) => {
     setCurrentFoodItem(item);
     
-    // Extract category ID from item
-    const categoryId = item.category?.id?.toString() || item.category_id?.toString() || "";
+    // Extract category ID from item - use 'category' field
+    let categoryId = "";
+    
+    if (item.category) {
+      if (typeof item.category === 'object' && item.category !== null && 'id' in item.category) {
+        // Safely get id from category object
+        const categoryObj = item.category as any;
+        categoryId = categoryObj.id !== undefined && categoryObj.id !== null ? String(categoryObj.id) : "";
+      } else if (typeof item.category === 'number') {
+        categoryId = String(item.category);
+      } else if (typeof item.category === 'string') {
+        categoryId = item.category;
+      }
+    }
+    
+    // Check category_id safely - FIXED ERROR #1
+    if (!categoryId && item.category_id !== undefined && item.category_id !== null) {
+      categoryId = String(item.category_id);
+    }
     
     // Handle total_order_price safely
     const totalOrderPrice = typeof item.total_order_price === 'string' 
@@ -114,7 +141,7 @@ export default function FoodItems() {
     
     setFoodFormData({
       name: item.name,
-      category_id: categoryId,
+      category: categoryId,
       total_order_price: totalOrderPrice,
       quantity: item.quantity?.toString() || "0"
     });
@@ -131,8 +158,14 @@ export default function FoodItems() {
 
   const handleFoodSave = async () => {
     // Basic validation
-    if (!foodFormData.name.trim() || !foodFormData.category_id || !foodFormData.total_order_price) {
-      setError("Please fill in all required fields");
+    if (!foodFormData.name.trim() || !foodFormData.category || !foodFormData.total_order_price) {
+      setError("Please fill in all required fields (Name, Category, and Total Revenue)");
+      return;
+    }
+
+    // Check if user is authenticated for create operations
+    if (!currentFoodItem && !user?.id) {
+      setError("You must be logged in to create food items");
       return;
     }
 
@@ -148,12 +181,27 @@ export default function FoodItems() {
         return;
       }
 
-      const foodData = {
+      // Prepare data with correct field names matching serializer
+      const foodData: any = {
         name: foodFormData.name,
-        category_id: parseInt(foodFormData.category_id),
+        category: parseInt(foodFormData.category), // Use 'category' not 'category_id'
         total_order_price: totalOrderPrice.toFixed(2), // Ensure 2 decimal places
         quantity: quantity
       };
+
+      // Add created_by for new items or if required for updates
+      if (!currentFoodItem && user?.id) {
+        // For create operations
+        foodData.created_by = user.id;
+      } else if (currentFoodItem) {
+        // For update operations, include created_by if it was set before
+        // Or let the backend handle it
+        if (currentFoodItem.created_by?.id) {
+          foodData.created_by = currentFoodItem.created_by.id;
+        }
+      }
+
+      console.log("Sending food data:", foodData); // Debug log
 
       if (currentFoodItem) {
         // Update existing food item
@@ -307,11 +355,33 @@ export default function FoodItems() {
 
   const handleCategoryDelete = async (categoryId: number) => {
     // Check if any food items use this category
-    // Fixed: Compare with category.id (object) not the whole category object
-    const itemsUsingCategory = foodItems.filter(item => 
-      (item.category && item.category.id === categoryId) || 
-      item.category_id === categoryId
-    );
+    const itemsUsingCategory = foodItems.filter(item => {
+      // Check category field (could be object, number, or string)
+      if (item.category) {
+        if (typeof item.category === 'object' && item.category !== null && 'id' in item.category) {
+          const categoryObj = item.category as any;
+          return categoryObj.id === categoryId;
+        }
+        if (typeof item.category === 'number') {
+          return item.category === categoryId;
+        }
+        if (typeof item.category === 'string') {
+          return parseInt(item.category) === categoryId;
+        }
+      }
+      
+      // Check category_id field - FIXED ERROR #2
+      if (item.category_id !== undefined && item.category_id !== null) {
+        if (typeof item.category_id === 'number') {
+          return item.category_id === categoryId;
+        }
+        if (typeof item.category_id === 'string') {
+          return parseInt(item.category_id) === categoryId;
+        }
+      }
+      
+      return false;
+    });
     
     if (itemsUsingCategory.length > 0) {
       setError(`Cannot delete category. ${itemsUsingCategory.length} food item(s) are using it.`);
@@ -364,6 +434,36 @@ export default function FoodItems() {
     if (typeof price === 'number') return price;
     const parsed = parseFloat(price);
     return isNaN(parsed) ? 0 : parsed;
+  };
+
+  // Helper function to get category name
+  const getCategoryName = (item: FoodItem): string => {
+    if (item.category) {
+      if (typeof item.category === 'object' && item.category !== null && 'name' in item.category) {
+        return (item.category as any).name;
+      }
+      // If category is just an ID, find the category object
+      // if (typeof item.category === 'number') {
+      //   const category = categories.find(cat => cat.id === item.category);
+      //   return category?.name || `Category ${item.category}`;
+      // }
+      if (typeof item.category === 'string') {
+        const categoryId = parseInt(item.category);
+        if (!isNaN(categoryId)) {
+          const category = categories.find(cat => cat.id === categoryId);
+          return category?.name || `Category ${item.category}`;
+        }
+        return item.category;
+      }
+    }
+    if (item.category_id !== undefined && item.category_id !== null) {
+      const categoryId = typeof item.category_id === 'number' ? item.category_id : parseInt(item.category_id);
+      if (!isNaN(categoryId)) {
+        const category = categories.find(cat => cat.id === categoryId);
+        return category?.name || `Category ${item.category_id}`;
+      }
+    }
+    return 'Uncategorized';
   };
 
   return (
@@ -449,7 +549,7 @@ export default function FoodItems() {
               <thead className="bg-indigo-600 text-white">
                 <tr>
                   <th className="px-6 py-3 text-left text-sm font-semibold">Name</th>
-                  
+                  <th className="px-6 py-3 text-left text-sm font-semibold">Category</th>
                   <th className="px-6 py-3 text-right text-sm font-semibold">Total Revenue</th>
                   <th className="px-6 py-3 text-center text-sm font-semibold">Quantity Sold</th>
                   <th className="px-6 py-3 text-center text-sm font-semibold">Actions</th>
@@ -462,8 +562,9 @@ export default function FoodItems() {
                     return (
                       <tr key={item.id} className="hover:bg-gray-50 transition">
                         <td className="px-6 py-4 font-semibold text-gray-900">{item.name}</td>
-                       
-                        
+                        <td className="px-6 py-4 text-gray-600">
+                          {getCategoryName(item)}
+                        </td>
                         <td className="px-6 py-4 text-gray-600 text-right font-medium">
                           Ksh {price.toFixed(2)}
                         </td>
@@ -480,14 +581,14 @@ export default function FoodItems() {
                             className="px-3 py-2 text-xs font-medium text-red-600 border border-red-600 rounded-lg hover:bg-red-600 hover:text-white transition"
                           >
                             Delete
-                        </button>
+                          </button>
                         </td>
                       </tr>
                     );
                   })
                 ) : (
                   <tr>
-                    <td colSpan={6} className="px-6 py-6 text-center text-yellow-700 bg-yellow-50 rounded-lg">
+                    <td colSpan={5} className="px-6 py-6 text-center text-yellow-700 bg-yellow-50 rounded-lg">
                       No food items found.
                       <button
                         onClick={openCreateFoodModal}
@@ -531,8 +632,8 @@ export default function FoodItems() {
                     Category *
                   </label>
                   <select
-                    name="category_id"
-                    value={foodFormData.category_id}
+                    name="category"
+                    value={foodFormData.category}
                     onChange={handleFoodInputChange}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
                   >
@@ -579,6 +680,15 @@ export default function FoodItems() {
                     <p className="text-xs text-gray-500 mt-1">Total units sold</p>
                   </div>
                 </div>
+
+                {!user?.id && !currentFoodItem && (
+                  <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+                    <p className="text-sm text-yellow-700">
+                      <i className="fas fa-exclamation-triangle mr-2"></i>
+                      Note: You need to be logged in to create food items.
+                    </p>
+                  </div>
+                )}
               </div>
 
               <div className="mt-6 flex justify-end space-x-3">
@@ -590,7 +700,7 @@ export default function FoodItems() {
                 </button>
                 <button
                   onClick={handleFoodSave}
-                  disabled={loading}
+                  disabled={loading || (!currentFoodItem && !user?.id)}
                   className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition disabled:opacity-50"
                 >
                   {loading ? 'Saving...' : 'Save'}

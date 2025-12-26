@@ -21,7 +21,7 @@ class FoodItem(models.Model):
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE)
     # stock management
-    quantity = models.PositiveIntegerField(default=0)  # how many portions are available
+    quantity = models.PositiveIntegerField(default=0,null=True,blank=True)  # how many portions are available
    
 
     def __str__(self):
@@ -67,6 +67,7 @@ class HotelOrderItem(models.Model):
 
         # Update the related FoodItem
         self.food_item.total_cash_revenue = total_revenue
+        
         self.food_item.save()
     
     def get_total_price(self):

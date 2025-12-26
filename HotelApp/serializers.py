@@ -21,22 +21,14 @@ class FoodCategorySerializer(serializers.ModelSerializer):
         model = FoodCategory
         fields = ['id', 'name']
 
+# serializers.py
 class FoodItemSerializer(serializers.ModelSerializer):
-    category_name = serializers.CharField(source='category.name', read_only=True)
-    created_by_name = serializers.CharField(source='created_by.username', read_only=True)
+    category = FoodCategorySerializer
+    created_by = UserProfileSerializer
     
     class Meta:
         model = FoodItem
         fields = '__all__'
-        read_only_fields = ['created_by']
-    def get_queryset(self):
-        # This calculates the total price and quantity for every food item 
-        # exactly when the user requests the list. No manual update needed!
-        return FoodItem.objects.annotate(
-            total_order_price=Sum('hotelorderitem__price'),
-            quantity=Count('hotelorderitem')
-        )
-
 class HotelOrderItemSerializer(serializers.ModelSerializer):
     food_item_name = serializers.CharField(source='food_item.name', read_only=True)
     total_price = serializers.SerializerMethodField()

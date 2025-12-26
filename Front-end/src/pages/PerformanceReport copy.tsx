@@ -47,7 +47,6 @@ interface HotelOrder {
     last_name: string;
   };
   created_at: string;
-  status?: 'in_progress' | 'served' | 'pending';
 }
 
 interface HotelExpense {
@@ -121,9 +120,9 @@ interface Customer {
 }
 
 interface TopCustomer {
-  customer__name: string;
-  order_count: number;
-  total_spent: number;
+  customerName: string;
+  orderCount: number;
+  totalSpent: number;
 }
 
 interface ProcessedData {
@@ -135,8 +134,6 @@ interface ProcessedData {
   // Hotel Stats
   hotelRevenue: number;
   hotelTotalOrders: number;
-  hotelInProgressOrders: number;
-  hotelServedOrders: number;
   hotelNetProfit: number;
   hotelTotalExpenses: number;
 
@@ -215,16 +212,21 @@ interface ProcessedData {
     netProfit: number;
   }>;
 
+  // Payment Methods
+  paymentMethods: Array<{
+    name: string;
+    amount: number;
+    count: number;
+  }>;
+
   currentYear: number;
   selectedMonth?: number;
 }
-
 const LAUNDRY_BASE_URL = `${API_BASE_URL}/Laundry/orders`
 const LAUNDRY_CUSTOMERS_URL = `${API_BASE_URL}/Laundry/customers`
 const LAUNDRY_EXPENSES_URL = `${API_BASE_URL}/Laundry/expense-records`
 const HOTEL_BASE_URL = `${API_BASE_URL}/Hotel/orders`
 const HOTEL_EXPENSES_URL = `${API_BASE_URL}/Hotel/Hotelexpense-records`
-
 // Helper function to safely extract array from response
 const extractArrayFromResponse = (response: any): any[] => {
   if (!response) return [];
@@ -292,63 +294,41 @@ export default function PerformanceReport() {
     customers = customers || [];
 
     // Helper function to parse date and check filters
-    const isDateInRange = (dateString: string, useDeliveryDate = false): boolean => {
+    const isDateInRange = (dateString: string): boolean => {
       try {
         if (!dateString) return false;
         const itemDate = new Date(dateString);
-        
-        // If month filter is active, show all months up to and including selected month
-        if (filterMonth) {
-          const [year, month] = filterMonth.split('-').map(Number);
-          const itemYear = itemDate.getFullYear();
-          const itemMonth = itemDate.getMonth() + 1;
-          
-          // Show data for all months up to selected month in selected year
-          if (itemYear < year) return true; // Previous years included
-          if (itemYear === year && itemMonth <= month) return true; // Months up to selected month
-          return false;
-        }
-
-        // For year-only filter
-        if (filterYear && itemDate.getFullYear() !== filterYear) return false;
-        
-        // Date range filters
         const filterFrom = fromDate ? new Date(fromDate) : null;
         const filterTo = toDate ? new Date(toDate) : null;
 
         if (filterFrom && itemDate < filterFrom) return false;
         if (filterTo && itemDate > filterTo) return false;
-        
+        if (filterYear && itemDate.getFullYear() !== filterYear) return false;
+        if (filterMonth) {
+          const [year, month] = filterMonth.split('-').map(Number);
+          if (itemDate.getFullYear() !== year || (itemDate.getMonth() + 1) !== month) return false;
+        }
         return true;
       } catch (e) {
         return false;
       }
     };
 
-    // Filter orders - use delivery_date for laundry, created_at for hotel
+    // Filter hotel orders by date range
     const filteredHotelOrders = hotelOrders.filter(order => {
       return isDateInRange(order.created_at);
     });
 
+    // Filter laundry orders by date range
     const filteredLaundryOrders = laundryOrders.filter(order => {
-      // Use delivery_date for laundry orders (matching Django backend)
-      return isDateInRange(order.delivery_date || order.created_at, true);
+      return isDateInRange(order.created_at);
     });
 
-    // Calculate hotel revenue from order items (matching Django calculation)
+    // Calculate hotel revenue from order items
     const hotelRevenue = filteredHotelOrders.reduce((sum, order) => {
       try {
-        if (order.order_items && order.order_items.length > 0) {
-          // Calculate from order items: quantity * price
-          const orderTotal = order.order_items.reduce((orderSum, item) => {
-            const quantity = item.quantity || 1;
-            const price = parseFloat(item.price || '0') || 0;
-            return orderSum + (quantity * price);
-          }, 0);
-          return sum + orderTotal;
-        }
-        // Fallback to total_amount if no order items
-        return sum + (parseFloat(order.total_amount?.toString() || '0') || 0);
+        // Use total_amount from the order
+        return sum + (order.total_amount || 0);
       } catch (e) {
         return sum;
       }
@@ -357,23 +337,11 @@ export default function PerformanceReport() {
     // Calculate total hotel orders count
     const hotelTotalOrders = filteredHotelOrders.length;
 
-    // Hotel orders don't have status in current structure
-    const hotelInProgressOrders = 0;
-    const hotelServedOrders = hotelTotalOrders;
-
-    // Calculate laundry revenue from order items (matching Django calculation)
+    // Calculate laundry revenue
     const laundryRevenue = filteredLaundryOrders.reduce((sum, order) => {
       try {
-        if (order.items && order.items.length > 0) {
-          // Calculate from order items
-          const orderTotal = order.items.reduce((orderSum, item) => {
-            const itemTotal = parseFloat(item.total_item_price || '0') || 0;
-            return orderSum + itemTotal;
-          }, 0);
-          return sum + orderTotal;
-        }
-        // Fallback to total_price
-        return sum + (parseFloat(order.total_price || '0') || 0);
+        const price = parseFloat(order.total_price) || 0;
+        return sum + price;
       } catch (e) {
         return sum;
       }
@@ -416,10 +384,6 @@ export default function PerformanceReport() {
 
     const shopARevenue = shopAOrders.reduce((sum, order) => {
       try {
-        if (order.items && order.items.length > 0) {
-          return sum + order.items.reduce((itemSum, item) => 
-            itemSum + (parseFloat(item.total_item_price) || 0), 0);
-        }
         return sum + (parseFloat(order.total_price) || 0);
       } catch (e) {
         return sum;
@@ -428,61 +392,47 @@ export default function PerformanceReport() {
 
     const shopBRevenue = shopBOrders.reduce((sum, order) => {
       try {
-        if (order.items && order.items.length > 0) {
-          return sum + order.items.reduce((itemSum, item) => 
-            itemSum + (parseFloat(item.total_item_price) || 0), 0);
-        }
         return sum + (parseFloat(order.total_price) || 0);
       } catch (e) {
         return sum;
       }
     }, 0);
 
-    // Calculate payment method amounts (matching Django payment types)
-    const paymentMethodsData: Record<string, { amount: number; count: number; collected: number }> = {};
+    // Calculate payment method amounts
+    const paymentMethodsData: Record<string, { amount: number; count: number }> = {};
 
     filteredLaundryOrders.forEach(order => {
       const paymentType = order.payment_type?.toLowerCase() || 'none';
       const amount = parseFloat(order.total_price) || 0;
-      const collected = parseFloat(order.amount_paid) || 0;
       
       if (!paymentMethodsData[paymentType]) {
-        paymentMethodsData[paymentType] = { amount: 0, count: 0, collected: 0 };
+        paymentMethodsData[paymentType] = { amount: 0, count: 0 };
       }
       paymentMethodsData[paymentType].amount += amount;
-      paymentMethodsData[paymentType].collected += collected;
       paymentMethodsData[paymentType].count += 1;
     });
 
-    // Get specific payment method amounts (matching Django constants)
+    // Convert to array and calculate totals
+    const paymentMethods = Object.entries(paymentMethodsData).map(([name, data]) => ({
+      name: name.charAt(0).toUpperCase() + name.slice(1),
+      amount: data.amount,
+      count: data.count
+    }));
+
+    // Get specific payment method amounts
     const cashPaymentsAmount = paymentMethodsData['cash']?.amount || 0;
     const mpesaPaymentsAmount = paymentMethodsData['mpesa']?.amount || 0;
     const cardPaymentsAmount = paymentMethodsData['card']?.amount || 0;
-    const bankTransferPaymentsAmount = paymentMethodsData['bank_transfer']?.amount || 
-                                     paymentMethodsData['bank']?.amount || 0;
+    const bankTransferPaymentsAmount = paymentMethodsData['bank']?.amount || 0;
     const otherPaymentsAmount = Object.entries(paymentMethodsData)
-      .filter(([key]) => !['cash', 'mpesa', 'card', 'bank_transfer', 'bank', 'none'].includes(key))
+      .filter(([key]) => !['cash', 'mpesa', 'card', 'bank', 'none'].includes(key))
       .reduce((sum, [, data]) => sum + data.amount, 0);
     const nonePaymentsAmount = paymentMethodsData['none']?.amount || 0;
 
-    // Calculate payment status (matching Django logic)
-    const pendingPayments = filteredLaundryOrders.filter(order => 
-      parseFloat(order.amount_paid || '0') === 0 || !order.amount_paid
-    );
-    
-    const partialPayments = filteredLaundryOrders.filter(order => {
-      const amountPaid = parseFloat(order.amount_paid || '0');
-      const totalPrice = parseFloat(order.total_price || '0');
-      const balance = parseFloat(order.balance || '0');
-      return (amountPaid > 0 && amountPaid < totalPrice) || balance > 0;
-    });
-    
-    const completePayments = filteredLaundryOrders.filter(order => {
-      const amountPaid = parseFloat(order.amount_paid || '0');
-      const totalPrice = parseFloat(order.total_price || '0');
-      const balance = parseFloat(order.balance || '0');
-      return amountPaid >= totalPrice || balance === 0;
-    });
+    // Calculate payment status
+    const pendingPayments = filteredLaundryOrders.filter(order => order.payment_status === 'pending');
+    const partialPayments = filteredLaundryOrders.filter(order => order.payment_status === 'partial');
+    const completePayments = filteredLaundryOrders.filter(order => order.payment_status === 'complete');
 
     // Calculate total amounts for each payment status
     const totalPendingAmount = pendingPayments.reduce((sum, order) => {
@@ -495,7 +445,7 @@ export default function PerformanceReport() {
 
     const totalPartialAmount = partialPayments.reduce((sum, order) => {
       try {
-        return sum + (parseFloat(order.amount_paid) || 0);
+        return sum + (parseFloat(order.total_price) || 0);
       } catch (e) {
         return sum;
       }
@@ -509,16 +459,7 @@ export default function PerformanceReport() {
       }
     }, 0);
 
-    // Calculate total balance amount
-    const totalBalanceAmount = filteredLaundryOrders.reduce((sum, order) => {
-      try {
-        return sum + (parseFloat(order.balance) || 0);
-      } catch (e) {
-        return sum;
-      }
-    }, 0);
-
-    // Calculate customer spending (matching Django structure)
+    // Calculate customer spending
     const customerSpending: Record<string, { name: string; count: number; total: number }> = {};
     filteredLaundryOrders.forEach(order => {
       try {
@@ -538,24 +479,21 @@ export default function PerformanceReport() {
       .sort((a, b) => b.total - a.total)
       .slice(0, 10)
       .map(customer => ({
-        customer__name: customer.name,
-        order_count: customer.count,
-        total_spent: customer.total
+        customerName: customer.name,
+        orderCount: customer.count,
+        totalSpent: customer.total
       }));
 
-    // Calculate service frequencies from MultiSelectField
+    // Calculate service frequencies
     const serviceCounts: Record<string, number> = {};
     filteredLaundryOrders.forEach(order => {
       try {
         order.items?.forEach(item => {
-          if (item.servicetype && Array.isArray(item.servicetype)) {
-            item.servicetype.forEach(service => {
-              if (service && service.trim()) {
-                const serviceName = service.trim();
-                serviceCounts[serviceName] = (serviceCounts[serviceName] || 0) + 1;
-              }
-            });
-          }
+          item.servicetype?.forEach(service => {
+            if (service) {
+              serviceCounts[service] = (serviceCounts[service] || 0) + 1;
+            }
+          });
         });
       } catch (e) {
         // Silently handle errors
@@ -572,11 +510,7 @@ export default function PerformanceReport() {
       try {
         order.items?.forEach(item => {
           if (item.itemname) {
-            // Handle comma-separated item names
-            const itemNames = item.itemname.split(',').map(name => name.trim()).filter(name => name);
-            itemNames.forEach(name => {
-              itemCounts[name] = (itemCounts[name] || 0) + 1;
-            });
+            itemCounts[item.itemname] = (itemCounts[item.itemname] || 0) + 1;
           }
         });
       } catch (e) {
@@ -588,7 +522,7 @@ export default function PerformanceReport() {
       .sort((a, b) => b[1] - a[1])
       .slice(0, 10);
 
-    // Generate monthly revenue data
+    // Generate monthly revenue data for the selected year
     const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     const monthlyHotelRevenue = Array(12).fill(0);
     const monthlyLaundryRevenue = Array(12).fill(0);
@@ -602,20 +536,8 @@ export default function PerformanceReport() {
         const month = date.getMonth();
         const year = date.getFullYear();
         
-        // If month filter is selected, include all data up to that month
-        if (filterMonth) {
-          const [selectedYear, selectedMonth] = filterMonth.split('-').map(Number);
-          if (year < selectedYear || (year === selectedYear && month < selectedMonth)) {
-            const orderTotal = order.order_items?.reduce((sum, item) => 
-              sum + ((item.quantity || 1) * (parseFloat(item.price || '0') || 0)), 0) || 
-              (parseFloat(order.total_amount?.toString() || '0') || 0);
-            monthlyHotelRevenue[month] += orderTotal;
-          }
-        } else if (year === filterYear) {
-          const orderTotal = order.order_items?.reduce((sum, item) => 
-            sum + ((item.quantity || 1) * (parseFloat(item.price || '0') || 0)), 0) || 
-            (parseFloat(order.total_amount?.toString() || '0') || 0);
-          monthlyHotelRevenue[month] += orderTotal;
+        if (year === filterYear) {
+          monthlyHotelRevenue[month] += (order.total_amount || 0);
         }
       } catch (e) {
         // Silently handle errors
@@ -625,24 +547,12 @@ export default function PerformanceReport() {
     // Process monthly laundry data
     filteredLaundryOrders.forEach(order => {
       try {
-        const date = new Date(order.delivery_date || order.created_at);
+        const date = new Date(order.created_at);
         const month = date.getMonth();
         const year = date.getFullYear();
         
-        // If month filter is selected, include all data up to that month
-        if (filterMonth) {
-          const [selectedYear, selectedMonth] = filterMonth.split('-').map(Number);
-          if (year < selectedYear || (year === selectedYear && month < selectedMonth)) {
-            const orderTotal = order.items?.reduce((sum, item) => 
-              sum + (parseFloat(item.total_item_price) || 0), 0) || 
-              (parseFloat(order.total_price) || 0);
-            monthlyLaundryRevenue[month] += orderTotal;
-          }
-        } else if (year === filterYear) {
-          const orderTotal = order.items?.reduce((sum, item) => 
-            sum + (parseFloat(item.total_item_price) || 0), 0) || 
-            (parseFloat(order.total_price) || 0);
-          monthlyLaundryRevenue[month] += orderTotal;
+        if (year === filterYear) {
+          monthlyLaundryRevenue[month] += (parseFloat(order.total_price) || 0);
         }
       } catch (e) {
         // Silently handle errors
@@ -656,12 +566,7 @@ export default function PerformanceReport() {
         const month = date.getMonth();
         const year = date.getFullYear();
         
-        if (filterMonth) {
-          const [selectedYear, selectedMonth] = filterMonth.split('-').map(Number);
-          if (year < selectedYear || (year === selectedYear && month < selectedMonth)) {
-            monthlyHotelExpenses[month] += (parseFloat(expense.amount) || 0);
-          }
-        } else if (year === filterYear) {
+        if (year === filterYear && isDateInRange(expense.date)) {
           monthlyHotelExpenses[month] += (parseFloat(expense.amount) || 0);
         }
       } catch (e) {
@@ -675,12 +580,7 @@ export default function PerformanceReport() {
         const month = date.getMonth();
         const year = date.getFullYear();
         
-        if (filterMonth) {
-          const [selectedYear, selectedMonth] = filterMonth.split('-').map(Number);
-          if (year < selectedYear || (year === selectedYear && month < selectedMonth)) {
-            monthlyLaundryExpenses[month] += (parseFloat(expense.amount) || 0);
-          }
-        } else if (year === filterYear) {
+        if (year === filterYear && isDateInRange(expense.date)) {
           monthlyLaundryExpenses[month] += (parseFloat(expense.amount) || 0);
         }
       } catch (e) {
@@ -688,14 +588,21 @@ export default function PerformanceReport() {
       }
     });
 
+    // Calculate total balance amount
+    const totalBalanceAmount = filteredLaundryOrders.reduce((sum, order) => {
+      try {
+        return sum + (parseFloat(order.balance) || 0);
+      } catch (e) {
+        return sum;
+      }
+    }, 0);
+
     // Calculate shop-specific expenses
-    const shopAExpenses = laundryExpenses.filter(e => 
-      e.shop === 'Shop A' && isDateInRange(e.date)
-    ).reduce((sum, expense) => sum + (parseFloat(expense.amount) || 0), 0);
+    const shopAExpenses = laundryExpenses.filter(e => e.shop === 'Shop A' && isDateInRange(e.date))
+      .reduce((sum, expense) => sum + (parseFloat(expense.amount) || 0), 0);
     
-    const shopBExpenses = laundryExpenses.filter(e => 
-      e.shop === 'Shop B' && isDateInRange(e.date)
-    ).reduce((sum, expense) => sum + (parseFloat(expense.amount) || 0), 0);
+    const shopBExpenses = laundryExpenses.filter(e => e.shop === 'Shop B' && isDateInRange(e.date))
+      .reduce((sum, expense) => sum + (parseFloat(expense.amount) || 0), 0);
 
     // Create monthly data for detailed analysis
     const monthlyData = months.map((monthName, index) => {
@@ -719,79 +626,6 @@ export default function PerformanceReport() {
       };
     });
 
-    // Calculate shop-specific payment status
-    const shopAPendingPayments = shopAOrders.filter(o => 
-      parseFloat(o.amount_paid || '0') === 0 || !o.amount_paid
-    ).length;
-    
-    const shopAPendingAmount = shopAOrders.filter(o => 
-      parseFloat(o.amount_paid || '0') === 0 || !o.amount_paid
-    ).reduce((sum, order) => sum + (parseFloat(order.total_price) || 0), 0);
-    
-    const shopAPartialPayments = shopAOrders.filter(o => {
-      const amountPaid = parseFloat(o.amount_paid || '0');
-      const totalPrice = parseFloat(o.total_price || '0');
-      const balance = parseFloat(o.balance || '0');
-      return (amountPaid > 0 && amountPaid < totalPrice) || balance > 0;
-    }).length;
-    
-    const shopAPartialAmount = shopAOrders.filter(o => {
-      const amountPaid = parseFloat(o.amount_paid || '0');
-      const totalPrice = parseFloat(o.total_price || '0');
-      const balance = parseFloat(o.balance || '0');
-      return (amountPaid > 0 && amountPaid < totalPrice) || balance > 0;
-    }).reduce((sum, order) => sum + (parseFloat(order.amount_paid) || 0), 0);
-    
-    const shopACompletePayments = shopAOrders.filter(o => {
-      const amountPaid = parseFloat(o.amount_paid || '0');
-      const totalPrice = parseFloat(o.total_price || '0');
-      const balance = parseFloat(o.balance || '0');
-      return amountPaid >= totalPrice || balance === 0;
-    }).length;
-    
-    const shopACompleteAmount = shopAOrders.filter(o => {
-      const amountPaid = parseFloat(o.amount_paid || '0');
-      const totalPrice = parseFloat(o.total_price || '0');
-      const balance = parseFloat(o.balance || '0');
-      return amountPaid >= totalPrice || balance === 0;
-    }).reduce((sum, order) => sum + (parseFloat(order.total_price) || 0), 0);
-
-    const shopBPendingPayments = shopBOrders.filter(o => 
-      parseFloat(o.amount_paid || '0') === 0 || !o.amount_paid
-    ).length;
-    
-    const shopBPendingAmount = shopBOrders.filter(o => 
-      parseFloat(o.amount_paid || '0') === 0 || !o.amount_paid
-    ).reduce((sum, order) => sum + (parseFloat(order.total_price) || 0), 0);
-    
-    const shopBPartialPayments = shopBOrders.filter(o => {
-      const amountPaid = parseFloat(o.amount_paid || '0');
-      const totalPrice = parseFloat(o.total_price || '0');
-      const balance = parseFloat(o.balance || '0');
-      return (amountPaid > 0 && amountPaid < totalPrice) || balance > 0;
-    }).length;
-    
-    const shopBPartialAmount = shopBOrders.filter(o => {
-      const amountPaid = parseFloat(o.amount_paid || '0');
-      const totalPrice = parseFloat(o.total_price || '0');
-      const balance = parseFloat(o.balance || '0');
-      return (amountPaid > 0 && amountPaid < totalPrice) || balance > 0;
-    }).reduce((sum, order) => sum + (parseFloat(order.amount_paid) || 0), 0);
-    
-    const shopBCompletePayments = shopBOrders.filter(o => {
-      const amountPaid = parseFloat(o.amount_paid || '0');
-      const totalPrice = parseFloat(o.total_price || '0');
-      const balance = parseFloat(o.balance || '0');
-      return amountPaid >= totalPrice || balance === 0;
-    }).length;
-    
-    const shopBCompleteAmount = shopBOrders.filter(o => {
-      const amountPaid = parseFloat(o.amount_paid || '0');
-      const totalPrice = parseFloat(o.total_price || '0');
-      const balance = parseFloat(o.balance || '0');
-      return amountPaid >= totalPrice || balance === 0;
-    }).reduce((sum, order) => sum + (parseFloat(order.total_price) || 0), 0);
-
     return {
       // Summary Stats
       totalBusinessRevenue: hotelRevenue + laundryRevenue,
@@ -801,8 +635,6 @@ export default function PerformanceReport() {
       // Hotel Stats
       hotelRevenue,
       hotelTotalOrders,
-      hotelInProgressOrders,
-      hotelServedOrders,
       hotelNetProfit,
       hotelTotalExpenses: hotelExpensesTotal,
 
@@ -826,23 +658,29 @@ export default function PerformanceReport() {
       // Shop Stats
       shopARevenue,
       shopATotalOrders: shopAOrders.length,
-      shopAPendingPayments,
-      shopAPendingAmount,
-      shopAPartialPayments,
-      shopAPartialAmount,
-      shopACompletePayments,
-      shopACompleteAmount,
+      shopAPendingPayments: shopAOrders.filter(o => o.payment_status === 'pending').length,
+      shopAPendingAmount: shopAOrders.filter(o => o.payment_status === 'pending')
+        .reduce((sum, order) => sum + (parseFloat(order.total_price) || 0), 0),
+      shopAPartialPayments: shopAOrders.filter(o => o.payment_status === 'partial').length,
+      shopAPartialAmount: shopAOrders.filter(o => o.payment_status === 'partial')
+        .reduce((sum, order) => sum + (parseFloat(order.total_price) || 0), 0),
+      shopACompletePayments: shopAOrders.filter(o => o.payment_status === 'complete').length,
+      shopACompleteAmount: shopAOrders.filter(o => o.payment_status === 'complete')
+        .reduce((sum, order) => sum + (parseFloat(order.total_price) || 0), 0),
       shopANetProfit: shopARevenue - shopAExpenses,
       shopATotalExpenses: shopAExpenses,
 
       shopBRevenue,
       shopBTotalOrders: shopBOrders.length,
-      shopBPendingPayments,
-      shopBPendingAmount,
-      shopBPartialPayments,
-      shopBPartialAmount,
-      shopBCompletePayments,
-      shopBCompleteAmount,
+      shopBPendingPayments: shopBOrders.filter(o => o.payment_status === 'pending').length,
+      shopBPendingAmount: shopBOrders.filter(o => o.payment_status === 'pending')
+        .reduce((sum, order) => sum + (parseFloat(order.total_price) || 0), 0),
+      shopBPartialPayments: shopBOrders.filter(o => o.payment_status === 'partial').length,
+      shopBPartialAmount: shopBOrders.filter(o => o.payment_status === 'partial')
+        .reduce((sum, order) => sum + (parseFloat(order.total_price) || 0), 0),
+      shopBCompletePayments: shopBOrders.filter(o => o.payment_status === 'complete').length,
+      shopBCompleteAmount: shopBOrders.filter(o => o.payment_status === 'complete')
+        .reduce((sum, order) => sum + (parseFloat(order.total_price) || 0), 0),
       shopBNetProfit: shopBRevenue - shopBExpenses,
       shopBTotalExpenses: shopBExpenses,
 
@@ -857,13 +695,13 @@ export default function PerformanceReport() {
       lineChartData: [
         {
           label: 'Laundry Revenue',
-          months: months.slice(0, filterMonth ? parseInt(filterMonth.split('-')[1]) : 12),
-          data: monthlyLaundryRevenue.slice(0, filterMonth ? parseInt(filterMonth.split('-')[1]) : 12)
+          months,
+          data: monthlyLaundryRevenue
         },
         {
           label: 'Hotel Revenue',
-          months: months.slice(0, filterMonth ? parseInt(filterMonth.split('-')[1]) : 12),
-          data: monthlyHotelRevenue.slice(0, filterMonth ? parseInt(filterMonth.split('-')[1]) : 12)
+          months,
+          data: monthlyHotelRevenue
         }
       ],
 
@@ -878,6 +716,9 @@ export default function PerformanceReport() {
       // Monthly Data
       monthlyData,
 
+      // Payment Methods
+      paymentMethods,
+
       currentYear: filterYear,
       selectedMonth: filterMonth ? parseInt(filterMonth.split('-')[1]) : undefined
     };
@@ -888,13 +729,6 @@ export default function PerformanceReport() {
     setError(null);
 
     try {
-      // Build query parameters
-      const params = new URLSearchParams();
-      if (filterYear) params.append('year', filterYear.toString());
-      if (filterMonth) params.append('month', filterMonth);
-      if (fromDate) params.append('from_date', fromDate);
-      if (toDate) params.append('to_date', toDate);
-
       // Fetch all data in parallel
       const [
         hotelOrdersResponse,
@@ -904,15 +738,16 @@ export default function PerformanceReport() {
         customersResponse
       ] = await Promise.allSettled([
         // Fetch hotel orders
-        fetchApi(`orders/?${params.toString()}`, { method: 'GET' }, 'hotel'),
+        
+        fetchApi('orders/', { method: 'GET' }, 'hotel'),
         // Fetch hotel expenses
-        fetchApi(`Hotelexpense-records/?${params.toString()}`, { method: 'GET' }, 'hotel'),
+        fetchApi('Hotelexpense-records/', { method: 'GET' }, 'hotel'),
         // Fetch laundry orders
-        fetchApi(`orders/?${params.toString()}`, { method: 'GET' }, 'laundry'),
+        fetchApi('orders/', { method: 'GET' }, 'laundry'),
         // Fetch laundry expenses
-        fetchApi(`expense-records/?${params.toString()}`, { method: 'GET' }, 'laundry'),
+        fetchApi('expense-records/', { method: 'GET' }, 'laundry'),
         // Fetch customers
-        fetchApi(`customers/?${params.toString()}`, { method: 'GET' }, 'laundry')
+        fetchApi('customers/', { method: 'GET' }, 'laundry')
       ]);
 
       // Extract data from responses
@@ -961,8 +796,6 @@ export default function PerformanceReport() {
         totalBusinessExpenses: 0,
         hotelRevenue: 0,
         hotelTotalOrders: 0,
-        hotelInProgressOrders: 0,
-        hotelServedOrders: 0,
         hotelNetProfit: 0,
         hotelTotalExpenses: 0,
         laundryRevenue: 0,
@@ -1012,13 +845,14 @@ export default function PerformanceReport() {
         itemCounts: [],
         commonCustomers: [],
         monthlyData: [],
+        paymentMethods: [],
         currentYear: filterYear,
         selectedMonth: filterMonth ? parseInt(filterMonth.split('-')[1]) : undefined
       });
     } finally {
       setLoading(false);
     }
-  }, [processData, filterYear, filterMonth, fromDate, toDate]);
+  }, [processData, filterYear, filterMonth]);
 
   // Initialize real-time updates
   useEffect(() => {
@@ -1134,10 +968,7 @@ export default function PerformanceReport() {
                 COLOR_PALETTE.red
               ],
               borderWidth: 0,
-              cutout: '70%',
-              spacing: 0,
               hoverOffset: 4,
-              borderRadius: 0
             } as ChartDataset<'doughnut', number[]>]
           },
           options: {
@@ -1166,7 +997,8 @@ export default function PerformanceReport() {
                   }
                 }
               }
-            }
+            },
+            cutout: '70%'
           }
         });
       }
@@ -1192,10 +1024,7 @@ export default function PerformanceReport() {
                 COLOR_PALETTE.info
               ],
               borderWidth: 0,
-              cutout: '70%',
-              spacing: 0,
               hoverOffset: 4,
-              borderRadius: 0
             } as ChartDataset<'doughnut', number[]>]
           },
           options: {
@@ -1216,13 +1045,14 @@ export default function PerformanceReport() {
                   }
                 }
               }
-            }
+            },
+            cutout: '70%'
           }
         });
       }
     }
 
-    // Initialize Trend Chart - Show data for selected month (including previous months)
+    // Initialize Trend Chart
     if (trendChartRef.current && data.lineChartData.length > 0) {
       const ctx = trendChartRef.current.getContext('2d');
       if (ctx) {
@@ -1245,7 +1075,6 @@ export default function PerformanceReport() {
           pointHoverRadius: 6,
           pointBackgroundColor: lineColors[index % lineColors.length],
           fill: true,
-          cubicInterpolationMode: 'monotone' as const
         }));
 
         trendChartInstance.current = new Chart(ctx, {
@@ -1334,17 +1163,6 @@ export default function PerformanceReport() {
           COLOR_PALETTE.warning
         ];
 
-        const customTooltip = {
-          callbacks: {
-            title: (context: TooltipItem<'bar'>[]) => {
-              return context[0].label || '';
-            },
-            label: function (context: TooltipItem<'bar'>) {
-              return `${context.parsed.x.toLocaleString('en-US')} orders`;
-            }
-          }
-        };
-
         servicesChartInstance.current = new Chart(ctx, {
           type: 'bar',
           data: {
@@ -1368,8 +1186,7 @@ export default function PerformanceReport() {
                 display: false
               },
               tooltip: {
-                ...getChartOptions().plugins.tooltip,
-                callbacks: customTooltip.callbacks
+                enabled: false
               }
             },
             scales: {
@@ -1524,15 +1341,15 @@ export default function PerformanceReport() {
         <div className="flex items-center gap-3 mb-4 md:mb-0">
           <div className="w-2 h-8 bg-gradient-to-b from-blue-500 to-purple-600 rounded-full"></div>
           <div>
-            <h1 className="text-2xl md:text-3xl font-bold text-gray-900">Business Dashboard</h1>
-            <p className="text-gray-500 text-sm mt-1">Monitor your business performance</p>
+            <h1 className="text-2xl md:text-3xl font-bold text-gray-900">Business Performance Dashboard</h1>
+            <p className="text-gray-500 text-sm mt-1">Monitor your business performance - {data?.currentYear || new Date().getFullYear()}</p>
           </div>
         </div>
         <div className="flex items-center gap-3 bg-white rounded-xl px-4 py-3 shadow-sm border border-gray-100">
-          <i className="fas fa-calendar-alt text-blue-500"></i>
+          <Calendar className="h-5 w-5 text-blue-500" />
           <span className="font-semibold text-gray-700">{data?.currentYear || new Date().getFullYear()}</span>
           {data?.selectedMonth && (
-            <span className="font-semibold text-gray-500">- Up to Month {data.selectedMonth}</span>
+            <span className="font-semibold text-gray-500">- Month {data.selectedMonth}</span>
           )}
         </div>
       </div>
@@ -1557,7 +1374,7 @@ export default function PerformanceReport() {
 
           {/* Month Selector */}
           <div>
-            <label htmlFor="month" className="block text-sm font-medium text-gray-700 mb-2">Month (Cumulative)</label>
+            <label htmlFor="month" className="block text-sm font-medium text-gray-700 mb-2">Month</label>
             <input
               type="month"
               id="month"
@@ -1597,26 +1414,56 @@ export default function PerformanceReport() {
               type="submit"
               className="flex-1 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-lg font-medium transition-all duration-300 flex items-center justify-center gap-2"
             >
-              <i className="fas fa-filter"></i> Apply
+              <Filter className="h-5 w-5" /> Apply
             </button>
             <button
               type="button"
               onClick={handleReset}
               className="flex-1 bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 px-4 py-2.5 rounded-lg font-medium transition-all duration-300 flex items-center justify-center gap-2"
             >
-              <i className="fas fa-redo"></i> Reset
+              <RefreshCw className="h-5 w-5" /> Reset
             </button>
           </div>
         </form>
-        {filterMonth && (
-          <div className="mt-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
-            <p className="text-sm text-blue-700">
-              <i className="fas fa-info-circle mr-2"></i>
-              Showing cumulative data from January up to selected month {filterMonth.split('-')[1]}/{filterMonth.split('-')[0]}
-            </p>
-          </div>
-        )}
       </div>
+
+      {/* Monthly Performance Summary */}
+      {data?.monthlyData && data.monthlyData.length > 0 && (
+        <div className="mb-8">
+          <div className="flex items-center gap-3 mb-6">
+            <div className="w-1 h-6 bg-gradient-to-b from-purple-500 to-pink-600 rounded-full"></div>
+            <h2 className="text-xl font-bold text-gray-900">Monthly Performance - {data.currentYear}</h2>
+          </div>
+          <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="bg-gray-50">
+                    <th className="py-3 px-4 text-left text-sm font-semibold text-gray-700">Month</th>
+                    <th className="py-3 px-4 text-left text-sm font-semibold text-gray-700">Hotel Revenue</th>
+                    <th className="py-3 px-4 text-left text-sm font-semibold text-gray-700">Laundry Revenue</th>
+                    <th className="py-3 px-4 text-left text-sm font-semibold text-gray-700">Total Revenue</th>
+                    <th className="py-3 px-4 text-left text-sm font-semibold text-gray-700">Total Expenses</th>
+                    <th className="py-3 px-4 text-left text-sm font-semibold text-gray-700">Net Profit</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {data.monthlyData.map((month, index) => (
+                    <tr key={index} className="hover:bg-gray-50">
+                      <td className="py-3 px-4 font-medium text-gray-900">{month.month}</td>
+                      <td className="py-3 px-4">Ksh {formatCurrency(month.hotelRevenue)}</td>
+                      <td className="py-3 px-4">Ksh {formatCurrency(month.laundryRevenue)}</td>
+                      <td className="py-3 px-4 font-bold text-blue-600">Ksh {formatCurrency(month.totalRevenue)}</td>
+                      <td className="py-3 px-4 text-red-600">Ksh {formatCurrency(month.totalExpenses)}</td>
+                      <td className="py-3 px-4 font-bold text-green-600">Ksh {formatCurrency(month.netProfit)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Overall Business Stats */}
       <div className="mb-8">
@@ -1630,14 +1477,14 @@ export default function PerformanceReport() {
           <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
             <div className="flex items-center justify-between mb-4">
               <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center">
-                <i className="fas fa-wallet text-blue-600"></i>
+                <Wallet className="h-5 w-5 text-blue-600" />
               </div>
               <span className="bg-blue-100 text-blue-800 text-xs font-semibold px-2 py-1 rounded-full">Total</span>
             </div>
             <h3 className="text-sm font-medium text-gray-500 uppercase tracking-wider mb-1">Total Revenue</h3>
             <div className="text-xl font-bold text-gray-900 mb-1">Ksh {formatCurrencyFull(data?.totalBusinessRevenue || 0)}</div>
             <div className="flex items-center text-xs text-gray-500">
-              <i className="fas fa-trend-up text-green-500 mr-1"></i>
+              <TrendingUp className="h-3 w-3 text-green-500 mr-1" />
               <span>Combined earnings</span>
             </div>
           </div>
@@ -1646,14 +1493,14 @@ export default function PerformanceReport() {
           <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
             <div className="flex items-center justify-between mb-4">
               <div className="w-10 h-10 rounded-lg bg-purple-50 flex items-center justify-center">
-                <i className="fas fa-chart-line text-purple-600"></i>
+                <ChartLine className="h-5 w-5 text-purple-600" />
               </div>
               <span className="bg-purple-100 text-purple-800 text-xs font-semibold px-2 py-1 rounded-full">Profit</span>
             </div>
             <h3 className="text-sm font-medium text-gray-500 uppercase tracking-wider mb-1">Net Profit</h3>
             <div className="text-xl font-bold text-gray-900 mb-1">Ksh {formatCurrencyFull(data?.totalNetProfit || 0)}</div>
             <div className="flex items-center text-xs text-gray-500">
-              <i className="fas fa-dollar-sign text-purple-500 mr-1"></i>
+              <DollarSign className="h-3 w-3 text-purple-500 mr-1" />
               <span>After expenses</span>
             </div>
           </div>
@@ -1662,14 +1509,14 @@ export default function PerformanceReport() {
           <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
             <div className="flex items-center justify-between mb-4">
               <div className="w-10 h-10 rounded-lg bg-red-50 flex items-center justify-center">
-                <i className="fas fa-money-bill-wave text-red-600"></i>
+                <Wallet className="h-5 w-5 text-red-600" />
               </div>
               <span className="bg-red-100 text-red-800 text-xs font-semibold px-2 py-1 rounded-full">Expenses</span>
             </div>
             <h3 className="text-sm font-medium text-gray-500 uppercase tracking-wider mb-1">Total Expenses</h3>
             <div className="text-xl font-bold text-gray-900 mb-1">Ksh {formatCurrencyFull(data?.totalBusinessExpenses || 0)}</div>
             <div className="flex items-center text-xs text-gray-500">
-              <i className="fas fa-chart-line text-red-500 mr-1"></i>
+              <ChartLine className="h-3 w-3 text-red-500 mr-1" />
               <span>Combined expenses</span>
             </div>
           </div>
@@ -1682,12 +1529,12 @@ export default function PerformanceReport() {
         <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100 lg:col-span-2">
           <div className="flex justify-between items-center mb-6">
             <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
-              <i className="fas fa-chart-pie text-purple-500"></i>
+              <div className="w-5 h-5 bg-purple-500 rounded-full flex items-center justify-center">
+                <div className="w-3 h-3 bg-white rounded-full"></div>
+              </div>
               Revenue Comparison
             </h2>
-            <span className="bg-purple-100 text-purple-800 px-3 py-1 rounded-full text-sm font-semibold">
-              {data?.currentYear || new Date().getFullYear()}{data?.selectedMonth ? ` (Up to Month ${data.selectedMonth})` : ''}
-            </span>
+            <span className="bg-purple-100 text-purple-800 px-3 py-1 rounded-full text-sm font-semibold">{data?.currentYear || new Date().getFullYear()}</span>
           </div>
           <div className="h-64">
             <canvas ref={revenueComparisonChartRef} />
@@ -1719,34 +1566,30 @@ export default function PerformanceReport() {
             <div className="bg-gradient-to-br from-red-50 to-orange-50 rounded-lg p-4 border border-red-100">
               <div className="flex items-center gap-3 mb-2">
                 <div className="w-8 h-8 rounded-lg bg-red-100 flex items-center justify-center">
-                  <i className="fas fa-wallet text-red-600"></i>
+                  <Wallet className="h-5 w-5 text-red-600" />
                 </div>
                 <span className="text-sm font-semibold text-gray-700">Revenue</span>
               </div>
               <div className="text-xl font-bold text-gray-900 mb-1">Ksh {formatCurrencyFull(data?.hotelRevenue || 0)}</div>
-              <div className="text-xs text-gray-500">Hotel earnings</div>
+              <div className="text-xs text-gray-500">{data?.hotelTotalOrders || 0} orders</div>
             </div>
 
             {/* Hotel Orders */}
             <div className="bg-gradient-to-br from-orange-50 to-yellow-50 rounded-lg p-4 border border-orange-100">
               <div className="flex items-center gap-3 mb-2">
                 <div className="w-8 h-8 rounded-lg bg-orange-100 flex items-center justify-center">
-                  <i className="fas fa-utensils text-orange-600"></i>
+                  <Utensils className="h-5 w-5 text-orange-600" />
                 </div>
                 <span className="text-sm font-semibold text-gray-700">Orders</span>
               </div>
               <div className="text-xl font-bold text-gray-900 mb-1">{data?.hotelTotalOrders || 0}</div>
-              <div className="flex flex-col gap-1 text-xs">
-                <span className="text-blue-600">{data?.hotelInProgressOrders || 0} in progress</span>
-                <span className="text-green-600">{data?.hotelServedOrders || 0} served</span>
-              </div>
             </div>
 
             {/* Hotel Profit */}
             <div className="bg-gradient-to-br from-green-50 to-emerald-50 rounded-lg p-4 border border-green-100">
               <div className="flex items-center gap-3 mb-2">
                 <div className="w-8 h-8 rounded-lg bg-green-100 flex items-center justify-center">
-                  <i className="fas fa-chart-line text-green-600"></i>
+                  <ChartLine className="h-5 w-5 text-green-600" />
                 </div>
                 <span className="text-sm font-semibold text-gray-700">Profit & Expenses</span>
               </div>
@@ -1778,7 +1621,7 @@ export default function PerformanceReport() {
           <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
             <div className="flex items-center gap-3 mb-4">
               <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center">
-                <i className="fas fa-wallet text-blue-600"></i>
+                <Wallet className="h-5 w-5 text-blue-600" />
               </div>
               <div>
                 <h3 className="text-sm font-medium text-gray-500 uppercase tracking-wider">Revenue</h3>
@@ -1789,48 +1632,20 @@ export default function PerformanceReport() {
             <div className="border-t border-gray-100 pt-4">
               <h4 className="text-sm font-medium text-gray-700 mb-3">Payment Methods</h4>
               <div className="space-y-2">
-                <div className="flex justify-between items-center">
-                  <div className="flex items-center gap-2">
-                    <i className="fas fa-money-bill-wave text-green-600 text-sm"></i>
-                    <span className="text-sm text-gray-700">Cash</span>
-                  </div>
-                  <span className="text-sm font-bold text-gray-900">Ksh {formatCurrency(data?.cashPaymentsAmount || 0)}</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <div className="flex items-center gap-2">
-                    <i className="fas fa-mobile-alt text-blue-600 text-sm"></i>
-                    <span className="text-sm text-gray-700">M-Pesa</span>
-                  </div>
-                  <span className="text-sm font-bold text-gray-900">Ksh {formatCurrency(data?.mpesaPaymentsAmount || 0)}</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <div className="flex items-center gap-2">
-                    <i className="fas fa-credit-card text-purple-600 text-sm"></i>
-                    <span className="text-sm text-gray-700">Card</span>
-                  </div>
-                  <span className="text-sm font-bold text-gray-900">Ksh {formatCurrency(data?.cardPaymentsAmount || 0)}</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <div className="flex items-center gap-2">
-                    <i className="fas fa-university text-indigo-600 text-sm"></i>
-                    <span className="text-sm text-gray-700">Bank</span>
-                  </div>
-                  <span className="text-sm font-bold text-gray-900">Ksh {formatCurrency(data?.bankTransferPaymentsAmount || 0)}</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <div className="flex items-center gap-2">
-                    <i className="fas fa-ellipsis-h text-gray-600 text-sm"></i>
-                    <span className="text-sm text-gray-700">Other</span>
-                  </div>
-                  <span className="text-sm font-bold text-gray-900">Ksh {formatCurrency(data?.otherPaymentsAmount || 0)}</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <div className="flex items-center gap-2">
-                    <i className="fas fa-ellipsis-h text-gray-600 text-sm"></i>
-                    <span className="text-sm text-gray-700">None</span>
-                  </div>
-                  <span className="text-sm font-bold text-gray-900">Ksh {formatCurrency(data?.nonePaymentsAmount || 0)}</span>
-                </div>
+                {data?.paymentMethods && data.paymentMethods.length > 0 ? (
+                  data.paymentMethods.map((method, index) => (
+                    <div key={index} className="flex justify-between items-center">
+                      <div className="flex items-center gap-2">
+                        <Wallet className="h-4 w-4 text-blue-600" />
+                        <span className="text-sm text-gray-700">{method.name}</span>
+                        <span className="text-xs text-gray-500">({method.count})</span>
+                      </div>
+                      <span className="text-sm font-bold text-gray-900">Ksh {formatCurrency(method.amount)}</span>
+                    </div>
+                  ))
+                ) : (
+                  <div className="text-center py-2 text-gray-500">No payment data</div>
+                )}
               </div>
             </div>
           </div>
@@ -1839,11 +1654,11 @@ export default function PerformanceReport() {
           <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
             <div className="flex items-center gap-3 mb-4">
               <div className="w-10 h-10 rounded-lg bg-yellow-50 flex items-center justify-center">
-                <i className="fas fa-credit-card text-yellow-600"></i>
+                <CreditCard className="h-5 w-5 text-yellow-600" />
               </div>
               <div>
                 <h3 className="text-sm font-medium text-gray-500 uppercase tracking-wider">Payments & Balance</h3>
-                <div className="text-xl font-bold text-gray-900">{formatCurrency(data?.totalBalanceAmount || 0)}</div>
+                <div className="text-xl font-bold text-gray-900">Ksh {formatCurrency(data?.totalBalanceAmount || 0)}</div>
               </div>
             </div>
             <div className="space-y-3 mt-4">
@@ -1888,7 +1703,7 @@ export default function PerformanceReport() {
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-lg bg-red-50 flex items-center justify-center">
-                  <i className="fas fa-money-bill-wave text-red-600"></i>
+                  <Wallet className="h-5 w-5 text-red-600" />
                 </div>
                 <div>
                   <h3 className="text-sm font-medium text-gray-500 uppercase tracking-wider">Laundry Expenses</h3>
@@ -1897,7 +1712,7 @@ export default function PerformanceReport() {
               </div>
             </div>
             <div className="flex items-center text-sm text-gray-500 mt-4">
-              <i className="fas fa-chart-line text-red-500 mr-1"></i>
+              <ChartLine className="h-3 w-3 text-red-500 mr-1" />
               <span>Operational costs</span>
             </div>
           </div>
@@ -1920,7 +1735,7 @@ export default function PerformanceReport() {
               <div className="bg-gradient-to-br from-pink-50 to-purple-50 rounded-lg p-4 border border-pink-100">
                 <div className="flex items-center gap-3 mb-2">
                   <div className="w-8 h-8 rounded-lg bg-pink-100 flex items-center justify-center">
-                    <i className="fas fa-wallet text-pink-600"></i>
+                    <Wallet className="h-5 w-5 text-pink-600" />
                   </div>
                   <span className="text-sm font-semibold text-gray-700">Revenue</span>
                 </div>
@@ -1932,7 +1747,7 @@ export default function PerformanceReport() {
               <div className="bg-gradient-to-br from-blue-50 to-cyan-50 rounded-lg p-4 border border-blue-100">
                 <div className="flex items-center gap-3 mb-2">
                   <div className="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center">
-                    <i className="fas fa-shopping-bag text-blue-600"></i>
+                    <ShoppingBag className="h-5 w-5 text-blue-600" />
                   </div>
                   <span className="text-sm font-semibold text-gray-700">Orders</span>
                 </div>
@@ -1943,7 +1758,7 @@ export default function PerformanceReport() {
               <div className="bg-gradient-to-br from-purple-50 to-indigo-50 rounded-lg p-4 border border-purple-100">
                 <div className="flex items-center gap-3 mb-2">
                   <div className="w-8 h-8 rounded-lg bg-purple-100 flex items-center justify-center">
-                    <i className="fas fa-credit-card text-purple-600"></i>
+                    <CreditCard className="h-5 w-5 text-purple-600" />
                   </div>
                   <span className="text-sm font-semibold text-gray-700">Payments</span>
                 </div>
@@ -1968,7 +1783,7 @@ export default function PerformanceReport() {
               <div className="bg-gradient-to-br from-green-50 to-emerald-50 rounded-lg p-4 border border-green-100">
                 <div className="flex items-center gap-3 mb-2">
                   <div className="w-8 h-8 rounded-lg bg-green-100 flex items-center justify-center">
-                    <i className="fas fa-chart-line text-green-600"></i>
+                    <ChartLine className="h-5 w-5 text-green-600" />
                   </div>
                   <span className="text-sm font-semibold text-gray-700">Profit & Expenses</span>
                 </div>
@@ -2001,7 +1816,7 @@ export default function PerformanceReport() {
               <div className="bg-gradient-to-br from-yellow-50 to-amber-50 rounded-lg p-4 border border-yellow-100">
                 <div className="flex items-center gap-3 mb-2">
                   <div className="w-8 h-8 rounded-lg bg-yellow-100 flex items-center justify-center">
-                    <i className="fas fa-wallet text-yellow-600"></i>
+                    <Wallet className="h-5 w-5 text-yellow-600" />
                   </div>
                   <span className="text-sm font-semibold text-gray-700">Revenue</span>
                 </div>
@@ -2013,7 +1828,7 @@ export default function PerformanceReport() {
               <div className="bg-gradient-to-br from-orange-50 to-red-50 rounded-lg p-4 border border-orange-100">
                 <div className="flex items-center gap-3 mb-2">
                   <div className="w-8 h-8 rounded-lg bg-orange-100 flex items-center justify-center">
-                    <i className="fas fa-shopping-bag text-orange-600"></i>
+                    <ShoppingBag className="h-5 w-5 text-orange-600" />
                   </div>
                   <span className="text-sm font-semibold text-gray-700">Orders</span>
                 </div>
@@ -2024,7 +1839,7 @@ export default function PerformanceReport() {
               <div className="bg-gradient-to-br from-red-50 to-pink-50 rounded-lg p-4 border border-red-100">
                 <div className="flex items-center gap-3 mb-2">
                   <div className="w-8 h-8 rounded-lg bg-red-100 flex items-center justify-center">
-                    <i className="fas fa-credit-card text-red-600"></i>
+                    <CreditCard className="h-5 w-5 text-red-600" />
                   </div>
                   <span className="text-sm font-semibold text-gray-700">Payments</span>
                 </div>
@@ -2036,11 +1851,11 @@ export default function PerformanceReport() {
                   </div>
                   <div className="flex flex-row justify-between">
                     <span className="text-blue-600">{data?.shopBPartialPayments || 0} partial</span>
-                    <span className="text-blue-600">Ksh{formatCurrency(data?.shopBPartialAmount || 0)} </span>
+                    <span className="text-blue-600">Ksh{formatCurrency(data?.shopBPartialAmount || 0)}</span>
                   </div>
                   <div className="flex flex-row justify-between">
                     <span className="text-green-600">{data?.shopBCompletePayments || 0} complete</span>
-                    <span className="text-green-600">Ksh{formatCurrency(data?.shopBCompleteAmount || 0)} </span>
+                    <span className="text-green-600">Ksh{formatCurrency(data?.shopBCompleteAmount || 0)}</span>
                   </div>
                 </div>
               </div>
@@ -2049,7 +1864,7 @@ export default function PerformanceReport() {
               <div className="bg-gradient-to-br from-emerald-50 to-teal-50 rounded-lg p-4 border border-emerald-100">
                 <div className="flex items-center gap-3 mb-2">
                   <div className="w-8 h-8 rounded-lg bg-emerald-100 flex items-center justify-center">
-                    <i className="fas fa-chart-line text-emerald-600"></i>
+                    <ChartLine className="h-5 w-5 text-emerald-600" />
                   </div>
                   <span className="text-sm font-semibold text-gray-700">Profit & Expenses</span>
                 </div>
@@ -2075,7 +1890,9 @@ export default function PerformanceReport() {
         <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
           <div className="flex justify-between items-center mb-6">
             <h4 className="text-lg font-bold text-gray-900 flex items-center gap-2">
-              <i className="fas fa-chart-pie text-yellow-500"></i>
+              <div className="w-5 h-5 bg-yellow-500 rounded-full flex items-center justify-center">
+                <div className="w-3 h-3 bg-white rounded-full"></div>
+              </div>
               Revenue Distribution
             </h4>
             <span className="bg-yellow-100 text-yellow-800 px-3 py-1 rounded-full text-sm font-semibold">Total</span>
@@ -2089,11 +1906,13 @@ export default function PerformanceReport() {
         <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
           <div className="flex justify-between items-center mb-6">
             <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
-              <i className="fas fa-chart-line text-pink-500"></i>
-              Revenue Trend
+              <div className="w-5 h-5 bg-pink-500 rounded-full flex items-center justify-center">
+                <div className="w-3 h-3 bg-white rounded-full"></div>
+              </div>
+              Revenue Trend - {data?.currentYear}
             </h2>
             <span className="bg-pink-100 text-pink-800 px-3 py-1 rounded-full text-sm font-semibold">
-              {data?.currentYear || new Date().getFullYear()}{data?.selectedMonth ? ` (Up to Month ${data.selectedMonth})` : ''}
+              Monthly
             </span>
           </div>
           <div className="h-64">
@@ -2108,11 +1927,11 @@ export default function PerformanceReport() {
         <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
           <div className="flex justify-between items-center mb-6">
             <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
-              <i className="fas fa-spa text-green-500"></i>
+              <Bath className="h-5 w-5 text-green-500" />
               Top Services
             </h2>
             <span className="bg-green-100 text-green-800 px-3 py-1 rounded-full text-sm font-semibold">
-              {data?.currentYear || new Date().getFullYear()}{data?.selectedMonth ? ` (Up to Month ${data.selectedMonth})` : ''}
+              {data?.currentYear || new Date().getFullYear()}
             </span>
           </div>
           <div className="h-72">
@@ -2120,7 +1939,7 @@ export default function PerformanceReport() {
               <canvas ref={servicesChartRef} />
             ) : (
               <div className="flex flex-col items-center justify-center h-full text-center">
-                <i className="fas fa-concierge-bell text-4xl text-gray-400 mb-4"></i>
+                <Bath className="h-12 w-12 text-gray-400 mb-4" />
                 <p className="text-gray-500">No service data available</p>
               </div>
             )}
@@ -2131,11 +1950,11 @@ export default function PerformanceReport() {
         <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
           <div className="flex justify-between items-center mb-6">
             <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
-              <i className="fas fa-box-open text-yellow-500"></i>
+              <Box className="h-5 w-5 text-yellow-500" />
               Common Items
             </h2>
             <span className="bg-yellow-100 text-yellow-800 px-3 py-1 rounded-full text-sm font-semibold">
-              {data?.currentYear || new Date().getFullYear()}{data?.selectedMonth ? ` (Up to Month ${data.selectedMonth})` : ''}
+              {data?.currentYear || new Date().getFullYear()}
             </span>
           </div>
           <div className="h-72">
@@ -2143,7 +1962,7 @@ export default function PerformanceReport() {
               <canvas ref={productsChartRef} />
             ) : (
               <div className="flex flex-col items-center justify-center h-full text-center">
-                <i className="fas fa-box text-4xl text-gray-400 mb-4"></i>
+                <Box className="h-12 w-12 text-gray-400 mb-4" />
                 <p className="text-gray-500">No product data available</p>
               </div>
             )}
@@ -2154,11 +1973,11 @@ export default function PerformanceReport() {
         <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
           <div className="flex justify-between items-center mb-6">
             <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
-              <i className="fas fa-crown text-yellow-500"></i>
+              <Crown className="h-5 w-5 text-yellow-500" />
               Top Customers
             </h2>
             <span className="bg-yellow-100 text-yellow-800 px-3 py-1 rounded-full text-sm font-semibold">
-              {data?.currentYear || new Date().getFullYear()}{data?.selectedMonth ? ` (Up to Month ${data.selectedMonth})` : ''}
+              {data?.currentYear || new Date().getFullYear()}
             </span>
           </div>
           <div className="h-72 overflow-y-auto pr-2">
@@ -2169,17 +1988,17 @@ export default function PerformanceReport() {
                     {index + 1}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <div className="font-semibold text-gray-900 truncate">{customer.customer__name}</div>
-                    <div className="text-xs text-gray-500">{customer.order_count} orders</div>
+                    <div className="font-semibold text-gray-900 truncate">{customer.customerName}</div>
+                    <div className="text-xs text-gray-500">{customer.orderCount} orders</div>
                   </div>
                   <div className="font-bold text-pink-600 text-lg">
-                    ksh{formatCurrencyFull(customer.total_spent)}
+                    ksh{formatCurrency(customer.totalSpent)}
                   </div>
                 </div>
               ))
             ) : (
               <div className="flex flex-col items-center justify-center h-full text-center">
-                <i className="fas fa-user-slash text-4xl text-gray-400 mb-4"></i>
+                <Users className="h-12 w-12 text-gray-400 mb-4" />
                 <p className="text-gray-500">No customer data available</p>
               </div>
             )}
