@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback } from "react";
 import { FoodItem, FoodCategory, User } from "@/services/types";
 import { fetchApi } from "@/services/api";
 import { getUserData } from "@/utils/auth";
+import { ROUTES } from "@/services/Routes";
+import { API_BASE_URL } from "@/services/url";
 
 const FOOD_URL = "food-items/";
 const CATEGORIES_URL = "food-categories/";
@@ -43,10 +45,6 @@ export default function FoodItems() {
     setUser(userData);
   }, []);
 
-  // =========================================================================
-  // 1. READ (Fetch Data)
-  // =========================================================================
-
   const fetchFoodItems = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -56,7 +54,13 @@ export default function FoodItems() {
         { method: 'GET' },
         'hotel'
       );
-      setFoodItems(data);
+      // Sort by created_at in descending order (newest first)
+      const sortedData = data.sort((a, b) => {
+        const dateA = new Date(a.created_at);
+        const dateB = new Date(b.created_at);
+        return dateB.getTime() - dateA.getTime();
+      });
+      setFoodItems(sortedData);
     } catch (err: any) {
       console.error("Fetch Error:", err);
       // Handle unauthorized error specifically
@@ -104,7 +108,7 @@ export default function FoodItems() {
     setCurrentFoodItem(null);
     setFoodFormData({
       name: "",
-      category: categories.length > 0 ? String(categories[0].id) : "", // FIXED: Use String() instead of toString()
+      category: categories.length > 0 ? String(categories[0].id) : "",
       total_order_price: "",
       quantity: ""
     });
@@ -129,7 +133,7 @@ export default function FoodItems() {
       }
     }
     
-    // Check category_id safely - FIXED ERROR #1
+    // Check category_id safely
     if (!categoryId && item.category_id !== undefined && item.category_id !== null) {
       categoryId = String(item.category_id);
     }
@@ -143,7 +147,7 @@ export default function FoodItems() {
       name: item.name,
       category: categoryId,
       total_order_price: totalOrderPrice,
-      quantity: item.quantity?.toString() || "0"
+      quantity: item.quantity?.toString() || ""
     });
     setIsFoodModalOpen(true);
   };
@@ -157,9 +161,9 @@ export default function FoodItems() {
   };
 
   const handleFoodSave = async () => {
-    // Basic validation
-    if (!foodFormData.name.trim() || !foodFormData.category || !foodFormData.total_order_price) {
-      setError("Please fill in all required fields (Name, Category, and Total Revenue)");
+    // Basic validation - only name and category are required
+    if (!foodFormData.name.trim() || !foodFormData.category) {
+      setError("Please fill in all required fields (Name and Category)");
       return;
     }
 
@@ -172,11 +176,11 @@ export default function FoodItems() {
     try {
       setLoading(true);
       
-      // Parse values safely
-      const totalOrderPrice = parseFloat(foodFormData.total_order_price);
-      const quantity = parseInt(foodFormData.quantity) || 0;
+      // Parse values safely - these are optional now
+      const totalOrderPrice = foodFormData.total_order_price ? parseFloat(foodFormData.total_order_price) : 0;
+      const quantity = foodFormData.quantity ? parseInt(foodFormData.quantity) : 0;
       
-      if (isNaN(totalOrderPrice) || totalOrderPrice < 0) {
+      if (foodFormData.total_order_price && (isNaN(totalOrderPrice) || totalOrderPrice < 0)) {
         setError("Please enter a valid total revenue");
         return;
       }
@@ -185,20 +189,20 @@ export default function FoodItems() {
       const foodData: any = {
         name: foodFormData.name,
         category: parseInt(foodFormData.category), // Use 'category' not 'category_id'
-        total_order_price: totalOrderPrice.toFixed(2), // Ensure 2 decimal places
-        quantity: quantity
       };
 
-      // Add created_by for new items or if required for updates
+      // Only include these fields if they have values
+      if (foodFormData.total_order_price) {
+        foodData.total_order_price = totalOrderPrice.toFixed(2); // Ensure 2 decimal places
+      }
+      
+      if (foodFormData.quantity) {
+        foodData.quantity = quantity;
+      }
+
+      // Add created_by for new items
       if (!currentFoodItem && user?.id) {
-        // For create operations
         foodData.created_by = user.id;
-      } else if (currentFoodItem) {
-        // For update operations, include created_by if it was set before
-        // Or let the backend handle it
-        if (currentFoodItem.created_by?.id) {
-          foodData.created_by = currentFoodItem.created_by.id;
-        }
       }
 
       console.log("Sending food data:", foodData); // Debug log
@@ -246,6 +250,7 @@ export default function FoodItems() {
     }
   };
 
+  // FIXED: Handle DELETE request properly to avoid JSON parsing error
   const handleFoodDelete = async (itemId: number) => {
     if (!window.confirm(`Are you sure you want to delete this food item?`)) {
       return;
@@ -253,26 +258,35 @@ export default function FoodItems() {
 
     try {
       setLoading(true);
-      await fetchApi<void>(
-        `${FOOD_URL}${itemId}/`,
-        { 
-          method: 'DELETE',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-        },
-        'hotel'
-      );
-
+      
+      // Get auth token
+      const token = localStorage.getItem("accessToken");
+      
+      // Make a direct fetch call for DELETE to handle empty response
+      const fullUrl = `${API_BASE_URL}/Hotel/${FOOD_URL}${itemId}/`;
+      const response = await fetch(fullUrl, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token && { 'Authorization': `Bearer ${token}` })
+        }
+      });
+      
+      if (!response.ok) {
+        if (response.status === 401) {
+          setError("Session expired. Please login again.");
+          window.location.href = '/login';
+          return;
+        }
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      // Remove the item from state if deletion was successful
       setFoodItems(prevItems => prevItems.filter(item => item.id !== itemId));
       setError(null);
     } catch (err: any) {
       console.error("Delete Error:", err);
-      if (err.message === "Unauthorized") {
-        setError("Session expired. Please login again.");
-      } else {
-        setError(err.message || "Failed to delete food item");
-      }
+      setError(err.message || "Failed to delete food item");
     } finally {
       setLoading(false);
     }
@@ -335,6 +349,7 @@ export default function FoodItems() {
           },
           'hotel'
         );
+        
       }
 
       setIsCategoryModalOpen(false);
@@ -353,6 +368,7 @@ export default function FoodItems() {
     }
   };
 
+  // FIXED: Handle DELETE request properly for categories too
   const handleCategoryDelete = async (categoryId: number) => {
     // Check if any food items use this category
     const itemsUsingCategory = foodItems.filter(item => {
@@ -370,7 +386,7 @@ export default function FoodItems() {
         }
       }
       
-      // Check category_id field - FIXED ERROR #2
+      // Check category_id field
       if (item.category_id !== undefined && item.category_id !== null) {
         if (typeof item.category_id === 'number') {
           return item.category_id === categoryId;
@@ -394,26 +410,35 @@ export default function FoodItems() {
 
     try {
       setLoading(true);
-      await fetchApi<void>(
-        `${CATEGORIES_URL}${categoryId}/`,
-        { 
-          method: 'DELETE',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-        },
-        'hotel'
-      );
-
+      
+      // Get auth token
+      const token = localStorage.getItem("accessToken");
+      
+      // Make a direct fetch call for DELETE to handle empty response
+      const fullUrl = `${API_BASE_URL}/Hotel/${CATEGORIES_URL}${categoryId}/`;
+      const response = await fetch(fullUrl, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token && { 'Authorization': `Bearer ${token}` })
+        }
+      });
+      
+      if (!response.ok) {
+        if (response.status === 401) {
+          setError("Session expired. Please login again.");
+          window.location.href = ROUTES.login;
+          return;
+        }
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      // Remove the category from state if deletion was successful
       setCategories(prev => prev.filter(cat => cat.id !== categoryId));
       setError(null);
     } catch (err: any) {
       console.error("Category Delete Error:", err);
-      if (err.message === "Unauthorized") {
-        setError("Session expired. Please login again.");
-      } else {
-        setError(err.message || "Failed to delete category");
-      }
+      setError(err.message || "Failed to delete category");
     } finally {
       setLoading(false);
     }
@@ -436,33 +461,47 @@ export default function FoodItems() {
     return isNaN(parsed) ? 0 : parsed;
   };
 
-  // Helper function to get category name
+  // IMPROVED: Helper function to get category name
   const getCategoryName = (item: FoodItem): string => {
+    // First try to get category from the category object
+    if (item.category && typeof item.category === 'object' && item.category !== null && 'name' in item.category) {
+      return (item.category as any).name;
+    }
+    
+    // If category is just an ID, find the category object
+    let categoryId = null;
+    
     if (item.category) {
-      if (typeof item.category === 'object' && item.category !== null && 'name' in item.category) {
-        return (item.category as any).name;
-      }
-      // If category is just an ID, find the category object
-      // if (typeof item.category === 'number') {
-      //   const category = categories.find(cat => cat.id === item.category);
-      //   return category?.name || `Category ${item.category}`;
-      // }
-      if (typeof item.category === 'string') {
-        const categoryId = parseInt(item.category);
-        if (!isNaN(categoryId)) {
-          const category = categories.find(cat => cat.id === categoryId);
-          return category?.name || `Category ${item.category}`;
+      if (typeof item.category === 'number') {
+        categoryId = item.category;
+      } else if (typeof item.category === 'string') {
+        const parsedId = parseInt(item.category);
+        if (!isNaN(parsedId)) {
+          categoryId = parsedId;
         }
-        return item.category;
       }
     }
-    if (item.category_id !== undefined && item.category_id !== null) {
-      const categoryId = typeof item.category_id === 'number' ? item.category_id : parseInt(item.category_id);
-      if (!isNaN(categoryId)) {
-        const category = categories.find(cat => cat.id === categoryId);
-        return category?.name || `Category ${item.category_id}`;
+    
+    // Check category_id field if category doesn't work
+    if (!categoryId && item.category_id !== undefined && item.category_id !== null) {
+      if (typeof item.category_id === 'number') {
+        categoryId = item.category_id;
+      } else if (typeof item.category_id === 'string') {
+        const parsedId = parseInt(item.category_id);
+        if (!isNaN(parsedId)) {
+          categoryId = parsedId;
+        }
       }
     }
+    
+    // If we have a valid ID, find the category name
+    if (categoryId !== null) {
+      const category = categories.find(cat => cat.id === categoryId);
+      if (category) {
+        return category.name;
+      }
+    }
+    
     return 'Uncategorized';
   };
 
@@ -566,7 +605,7 @@ export default function FoodItems() {
                           {getCategoryName(item)}
                         </td>
                         <td className="px-6 py-4 text-gray-600 text-right font-medium">
-                          Ksh {price.toFixed(2)}
+                          {price > 0 ? `Ksh ${price.toFixed(2)}` : 'Not set'}
                         </td>
                         <td className="px-6 py-4 text-gray-600 text-center">{item.quantity || 0}</td>
                         <td className="px-6 py-4 flex justify-center space-x-2">
@@ -649,7 +688,7 @@ export default function FoodItems() {
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Total Revenue *
+                      Total Revenue
                     </label>
                     <input
                       type="number"
@@ -661,7 +700,7 @@ export default function FoodItems() {
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
                       placeholder="0.00"
                     />
-                    <p className="text-xs text-gray-500 mt-1">Total money generated by this item</p>
+                    <p className="text-xs text-gray-500 mt-1">Optional: Total money generated by this item</p>
                   </div>
 
                   <div>
@@ -677,7 +716,7 @@ export default function FoodItems() {
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
                       placeholder="0"
                     />
-                    <p className="text-xs text-gray-500 mt-1">Total units sold</p>
+                    <p className="text-xs text-gray-500 mt-1">Optional: Total units sold</p>
                   </div>
                 </div>
 

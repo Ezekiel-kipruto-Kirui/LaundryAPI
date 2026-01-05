@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { expenseFieldsApi, expenseRecordsApi } from "@/services/api";
+import { fetchApi } from "@/services/api"; // Using fetchApi to target 'laundry' app
 import { ExpenseField, ExpenseRecord } from "@/services/types"
 import { Button } from "@/components/ui/button";
 import {
@@ -34,7 +34,7 @@ import { Loader2, Plus, Trash2, Receipt, Store, DollarSign, Calendar, Filter, Ro
 
 export default function Expenses() {
   const queryClient = useQueryClient();
-  const [shopFilter, setShopFilter] = useState<string>("all");
+  const [shopFilter, setShopFilter] = useState<string>("Shop A");
   const [startDate, setStartDate] = useState<string>("");
   const [endDate, setEndDate] = useState<string>("");
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
@@ -59,20 +59,24 @@ export default function Expenses() {
     setStartDate(firstDay);
   }, []);
 
+  // Fetching from Laundry App explicitly
   const { data: expenseFields = [], isLoading: fieldsLoading } = useQuery({
-    queryKey: ['expense-fields'],
-    queryFn: expenseFieldsApi.getAll,
+    queryKey: ['expense-fields', 'laundry'],
+    queryFn: () => fetchApi<ExpenseField[]>("expense-fields/", undefined, "laundry"),
   });
 
   const { data: expenseRecords = [], isLoading: recordsLoading } = useQuery({
-    queryKey: ['expense-records'],
-    queryFn: expenseRecordsApi.getAll,
+    queryKey: ['expense-records', 'laundry'],
+    queryFn: () => fetchApi<ExpenseRecord[]>("expense-records/", undefined, "laundry"),
   });
 
   const createExpenseMutation = useMutation({
-    mutationFn: expenseRecordsApi.create,
+    mutationFn: (data: any) => fetchApi<ExpenseRecord>("expense-records/", {
+      method: "POST",
+      body: JSON.stringify(data)
+    }, "laundry"),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['expense-records'] });
+      queryClient.invalidateQueries({ queryKey: ['expense-records', 'laundry'] });
       toast.success('Expense added successfully!');
       setIsAddDialogOpen(false);
       setNewExpense({
@@ -89,9 +93,12 @@ export default function Expenses() {
   });
 
   const createFieldMutation = useMutation({
-    mutationFn: expenseFieldsApi.create,
+    mutationFn: (data: any) => fetchApi<ExpenseField>("expense-fields/", {
+      method: "POST",
+      body: JSON.stringify(data)
+    }, "laundry"),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['expense-fields'] });
+      queryClient.invalidateQueries({ queryKey: ['expense-fields', 'laundry'] });
       toast.success('Expense category added!');
       setIsFieldDialogOpen(false);
       setNewField({ label: "" });
@@ -102,9 +109,11 @@ export default function Expenses() {
   });
 
   const deleteExpenseMutation = useMutation({
-    mutationFn: expenseRecordsApi.delete,
+    mutationFn: (id: number) => fetchApi<void>(`expense-records/${id}/`, {
+      method: "DELETE"
+    }, "laundry"),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['expense-records'] });
+      queryClient.invalidateQueries({ queryKey: ['expense-records', 'laundry'] });
       toast.success('Expense deleted');
     },
     onError: () => {
@@ -112,13 +121,11 @@ export default function Expenses() {
     },
   });
 
-  const getFieldName = (fieldId: number) => {
-    return expenseFields.find((f: ExpenseField) => f.id === fieldId)?.label || 'Unknown';
-  };
 
   // Filter records based on shop and date range
+  // Note: Removed 'Hotel' check as we are fetching from Laundry app only
   const filteredRecords = expenseRecords.filter((record: ExpenseRecord) => {
-    // Shop filter
+    // Shop filter (Laundry A or B)
     if (shopFilter !== "all" && record.shop !== shopFilter) {
       return false;
     }
@@ -142,7 +149,7 @@ export default function Expenses() {
     });
   };
 
-  // Stats - FIXED: Ensure these are numbers
+  // Stats
   const totalExpenses = filteredRecords.reduce((sum: number, r: ExpenseRecord) => {
     return sum + (Number(r.amount) || 0);
   }, 0);
@@ -179,7 +186,6 @@ export default function Expenses() {
 
   const handleFilter = (e: React.FormEvent) => {
     e.preventDefault();
-    // The filter is applied automatically through state changes
   };
 
   const handleResetFilters = () => {
@@ -188,10 +194,9 @@ export default function Expenses() {
     
     setEndDate(today);
     setStartDate(firstDay);
-    setShopFilter("all");
+    setShopFilter("Shop A");
   };
 
-  // Get color for field badge
   const getFieldColor = (fieldLabel: string) => {
     const colors: Record<string, string> = {
       'Food': 'bg-blue-100 text-blue-800',
@@ -206,18 +211,31 @@ export default function Expenses() {
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6 lg:py-8">
       {/* Header */}
       <div className="mb-6 sm:mb-8">
-        <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-2">Expense Records</h1>
+        <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-2">Laundry Expense Records</h1>
       </div>
 
-      {/* Header Section with Date Filter */}
+      {/* Header Section with Date & Shop Filter */}
       <div className="mb-6 sm:mb-8">
         <div className="flex flex-col sm:flex-row gap-4">
-          {/* Date Filter Form */}
+          {/* Date & Shop Filter Form */}
           <form 
             onSubmit={handleFilter}
             className="flex flex-col sm:flex-row gap-2 bg-white p-3 rounded-lg border border-gray-200 shadow-sm w-full"
           >
             <div className="flex flex-col sm:flex-row gap-2 items-start sm:items-center w-full">
+              <div className="flex items-center gap-2">
+                <label className="text-sm font-medium text-gray-700 whitespace-nowrap">Shop:</label>
+                <Select value={shopFilter} onValueChange={setShopFilter}>
+                  <SelectTrigger className="w-[140px]">
+                    <SelectValue placeholder="Select Shop" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Shop A">Shop A</SelectItem>
+                    <SelectItem value="Shop B">Shop B</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
               <div className="flex items-center gap-2">
                 <label className="text-sm font-medium text-gray-700 whitespace-nowrap">From:</label>
                 <input 
@@ -274,15 +292,6 @@ export default function Expenses() {
               <Plus className="-ml-1 mr-2 h-5 w-5" />
               <span className="hidden xs:inline">Add Expense</span>
               <span className="xs:hidden">Expense</span>
-            </Button>
-
-            <Button
-              onClick={() => setIsFieldDialogOpen(true)}
-              className="flex-1 inline-flex items-center justify-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700"
-            >
-              <Plus className="-ml-1 mr-2 h-5 w-5" />
-              <span className="hidden xs:inline">Add Field</span>
-              <span className="xs:hidden">Field</span>
             </Button>
           </div>
         </div>
@@ -393,18 +402,18 @@ export default function Expenses() {
                     <td className="px-4 py-4 whitespace-nowrap">
                       <div className="text-sm font-medium text-gray-900">{formatDate(record.date)}</div>
                       <div className="text-xs text-gray-500 sm:hidden">
-                        {getFieldName(record.field_id)}
+                        {record.field.label}
                       </div>
                     </td>
                     <td className="px-4 py-4 whitespace-nowrap hidden sm:table-cell">
                       <div className="flex items-center">
                         <div className="flex-shrink-0 h-8 w-8 sm:h-10 sm:w-10">
-                          <div className={`h-8 w-8 sm:h-10 sm:w-10 rounded-full flex items-center justify-center ${getFieldColor(getFieldName(record.field_id))}`}>
-                            {getFieldName(record.field_id).charAt(0)}
+                          <div className={`h-8 w-8 sm:h-10 sm:w-10 rounded-full flex items-center justify-center ${getFieldColor(record.field.label)}`}>
+                            {record.field.label.charAt(0)}
                           </div>
                         </div>
                         <div className="ml-2 sm:ml-4">
-                          <div className="text-sm font-medium text-gray-900">{getFieldName(record.field_id)}</div>
+                          <div className="text-sm font-medium text-gray-900">{record.field.label}</div>
                         </div>
                       </div>
                     </td>
@@ -462,7 +471,7 @@ export default function Expenses() {
       <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Add New Expense</DialogTitle>
+            <DialogTitle>Add New Laundry Expense</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 pt-4">
             <div>

@@ -32,6 +32,8 @@ from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from .models import HotelOrderItem, FoodItem
 from rest_framework.decorators import api_view, permission_classes
+from django_filters.rest_framework import DjangoFilterBackend
+from rest_framework.filters import SearchFilter
 
 # @api_view(['GET']) # This tells Django to treat this as a REST API endpoint
 # @permission_classes([AllowAny])
@@ -127,6 +129,14 @@ class HotelOrderItemViewSet(viewsets.ModelViewSet):
 class HotelOrderViewSet(viewsets.ModelViewSet):
     queryset = HotelOrder.objects.all().order_by('-created_at')
     permission_classes = [AllowAny]
+    filter_backends = [
+        DjangoFilterBackend,
+        SearchFilter,
+    ]
+
+    filterset_fields = {
+        "created_at": ["date__gte", "date__lte"],
+    }
     pagination_class = CustomPageNumberPagination
     
     def get_serializer_class(self):
@@ -192,4 +202,5 @@ class HotelExpenseRecordViewSet(viewsets.ModelViewSet):
     queryset = HotelExpenseRecord.objects.all().select_related("field")
     serializer_class = HotelExpenseRecordSerializer
     permission_classes = [permissions.IsAuthenticated]
+    filterset_fields = {"date": ["gte", "lte"]}
     #permission_classes = [AllowAny]

@@ -66,7 +66,7 @@ class HotelOrderItem(models.Model):
         ).aggregate(total=Sum('price'))['total'] or 0
 
         # Update the related FoodItem
-        self.food_item.total_cash_revenue = total_revenue
+        self.food_item.total_order_price = total_revenue
         
         self.food_item.save()
     

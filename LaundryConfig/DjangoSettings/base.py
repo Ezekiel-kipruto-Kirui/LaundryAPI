@@ -65,7 +65,18 @@ INSTALLED_APPS = [
     'rest_framework',
     'rest_framework_simplejwt',
     "corsheaders",
+    "django_filters",
 ]
+
+REST_FRAMEWORK = {
+    "DEFAULT_FILTER_BACKENDS": [
+        "django_filters.rest_framework.DjangoFilterBackend",
+        "rest_framework.filters.SearchFilter",
+        "rest_framework.filters.OrderingFilter",
+    ],
+}
+
+
 MIDDLEWARE = [
 
     
@@ -199,6 +210,7 @@ STATICFILES_DIRS = [
     os.path.join(FRONTEND_BUILD_DIR, "assets"),
     FRONTEND_BUILD_DIR,  # Include root files like images from public folder
 ]
+
 
 # Tell Whitenoise to compress your static files
 STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'

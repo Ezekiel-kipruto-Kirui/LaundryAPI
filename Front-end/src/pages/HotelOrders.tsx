@@ -1146,9 +1146,9 @@ export default function HotelOrderItems() {
                       <div className="text-sm text-gray-900 font-medium">
                         {getFoodItemName(item)}
                       </div>
-                      <div className="text-xs text-gray-500">
+                      {/* <div className="text-xs text-gray-500">
                         {getFoodItemCategory(item)}
-                      </div>
+                      </div> */}
                       {item.oncredit && item.name && (
                         <div className="text-xs text-purple-600 font-medium mt-0.5 sm:mt-1">
                           Credit: {item.name}

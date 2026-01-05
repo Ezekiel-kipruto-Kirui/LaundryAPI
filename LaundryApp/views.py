@@ -2,7 +2,7 @@ from django.db import transaction
 
 from rest_framework import viewsets, status
 from rest_framework.views import APIView
-from rest_framework.decorators import api_view, permission_classes
+from rest_framework.decorators import api_view, permission_classes, action
 from rest_framework.response import Response
 from rest_framework.permissions import (
     IsAuthenticated,
@@ -21,6 +21,9 @@ from .serializers import (
 )
 from .pagination import CustomPageNumberPagination
 from .sms_utility import send_sms   
+from django_filters.rest_framework import DjangoFilterBackend
+from rest_framework.filters import SearchFilter
+from django.db.models import Sum, Count, Q
 
 class CurrentUserView(APIView):
     permission_classes = [IsAuthenticated]
@@ -79,6 +82,53 @@ class OrderViewSet(viewsets.ModelViewSet):
         updated_order = serializer.save()
 
         return Response(OrderSerializer(updated_order).data, status=status.HTTP_200_OK)
+    filter_backends = [
+        DjangoFilterBackend,
+        SearchFilter,
+    ]
+
+    filterset_fields = {
+        "created_at": ["date__gte", "date__lte"],
+        "order_status": ["exact"],
+        "payment_status": ["exact"],
+        "shop": ["exact"],
+    }
+
+    search_fields = [
+        "uniquecode",
+        "customer__name",
+        "customer__phone",
+    ]
+
+    @action(detail=False, methods=['get'])
+    def summary(self, request):
+        """Get order summary statistics with optional date filtering"""
+        queryset = self.filter_queryset(self.get_queryset())
+
+        total_orders = queryset.count()
+        total_revenue = queryset.aggregate(total=Sum('total_price'))['total'] or 0
+        pending_orders = queryset.filter(order_status='pending').count()
+        completed_orders = queryset.filter(order_status='Completed').count()
+        pending_revenue = queryset.filter(payment_status='pending').aggregate(total=Sum('total_price'))['total'] or 0
+        completed_revenue = queryset.filter(payment_status='completed').aggregate(total=Sum('total_price'))['total'] or 0
+
+        # Shop breakdown
+        shop_stats = queryset.values('shop').annotate(
+            total_orders=Count('id'),
+            total_revenue=Sum('total_price'),
+            pending_orders=Count('id', filter=Q(order_status='pending')),
+            completed_orders=Count('id', filter=Q(order_status='Completed'))
+        )
+
+        return Response({
+            'total_orders': total_orders,
+            'total_revenue': float(total_revenue),
+            'pending_orders': pending_orders,
+            'completed_orders': completed_orders,
+            'pending_revenue': float(pending_revenue),
+            'completed_revenue': float(completed_revenue),
+            'shop_breakdown': list(shop_stats)
+        })
 
 
 # ---------------------- ORDER ITEM CRUD ---------------------- #
@@ -103,7 +153,8 @@ class ExpenseFieldViewSet(viewsets.ModelViewSet):
 class ExpenseRecordViewSet(viewsets.ModelViewSet):
     queryset = ExpenseRecord.objects.all().order_by("-date")
     serializer_class = ExpenseRecordSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
+    filterset_fields = {"date": ["gte", "lte"]}
 
 
 # ---------------------- PAYMENT CRUD ---------------------- #
@@ -114,8 +165,8 @@ class PaymentViewSet(viewsets.ModelViewSet):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def sendsms_view(request):
-    to_number = request.data.get("")
-    message = request.data.get('hi')
+    to_number = request.data.get("to_number")
+    message = request.data.get('message')
     if not to_number or not message:
         return Response(
             {"error": "to_number and message are required"},
@@ -131,6 +182,6 @@ def sendsms_view(request):
         )
 
     return Response(
-         {"error": "to_number and message are required"},
+         {"error": "Failed to send SMS"},
             status=status.HTTP_400_BAD_REQUEST
     )

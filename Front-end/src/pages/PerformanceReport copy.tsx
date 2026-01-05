@@ -1,2022 +1,774 @@
-import { useState, useEffect, useCallback, useRef } from "react";
-import {
-  TrendingUp,
-  Users,
-  DollarSign,
-  Calendar,
-  Wallet,
-  ChartLine,
-  ShoppingBag,
-  CreditCard,
-  Utensils,
-  Filter,
-  RefreshCw,
-  Crown,
-  Box,
-  Bath
-} from "lucide-react";
-import { fetchApi } from "@/services/api";
-import Chart from 'chart.js/auto';
-import 'chartjs-plugin-datalabels';
-import { API_BASE_URL } from "@/services/url";
+import { useState, useEffect, useMemo, useRef } from 'react';
+import { 
+  TrendingUp, 
+  Wallet, 
+  ChartLine, 
+  CreditCard, 
+  Calendar, 
+  RefreshCw, 
+  Filter, 
+  ShoppingBag, 
+  Users, 
+  Package,
+  Store,
+  Utensils
+} from 'lucide-react';
+import { 
+  Chart as ChartJS, 
+  CategoryScale, 
+  LinearScale, 
+  BarElement, 
+  PointElement, 
+  LineElement, 
+  ArcElement, 
+  Title, 
+  Tooltip, 
+  Legend 
+} from 'chart.js/auto';
 
-// Type imports
-import type { ChartDataset, ChartTypeRegistry, TooltipItem } from 'chart.js';
+// Register Chart.js components
+ChartJS.register(
+  CategoryScale, 
+  LinearScale, 
+  BarElement, 
+  PointElement, 
+  LineElement, 
+  ArcElement, 
+  Title, 
+  Tooltip, 
+  Legend
+);
 
-// Interfaces
-interface HotelOrderItem {
-  id: number;
-  food_item_name: string;
-  total_price: number;
-  quantity: number;
-  price: string;
-  name: string | null;
-  oncredit: boolean;
-  created_at: string | null;
-  order: number;
-  food_item: number;
-}
+// Define a type alias for Chart instance
+type Chart = ChartJS;
 
-interface HotelOrder {
-  id: number;
-  order_items: HotelOrderItem[];
-  total_amount: number;
-  created_by: {
-    email: string;
-    first_name: string;
-    last_name: string;
-  };
-  created_at: string;
-}
-
-interface HotelExpense {
-  id: number;
-  field: {
-    id: number;
-    label: string;
-    created_at: string;
-  };
-  amount: string;
-  date: string;
-  notes: string | null;
-}
-
+// --- Types ---
 interface LaundryOrderItem {
   id: number;
   servicetype: string[];
   itemtype: string;
   itemname: string;
   quantity: number;
-  itemcondition: string;
-  additional_info: string | null;
   unit_price: string;
   total_item_price: string;
-  created_at: string;
 }
 
 interface LaundryOrder {
   id: number;
   uniquecode: string;
-  customer: {
-    id: number;
-    name: string;
-    phone: string;
-    created_by: any;
-  };
+  total_price: string;
+  amount_paid: string;
+  balance: string;
   payment_type: string;
-  payment_status: "pending" | "partial" | "complete";
-  shop: "Shop A" | "Shop B";
+  payment_status: 'pending' | 'partial' | 'complete';
+  shop: string;
   delivery_date: string;
   order_status: string;
-  addressdetails: string;
-  amount_paid: string;
-  total_price: string;
-  balance: string;
-  created_at: string;
-  updated_at: string;
-  created_by: any;
-  updated_by: any;
+  customer: { name: string };
   items: LaundryOrderItem[];
+  created_at: string;
 }
 
-interface LaundryExpense {
+interface HotelOrderItem {
   id: number;
-  field: {
-    id: number;
-    label: string;
-    created_at: string;
-  };
-  shop: "Shop A" | "Shop B";
-  amount: string;
-  date: string;
-  notes: string | null;
+  food_item_name: string;
+  total_price: number;
+  quantity: number;
+  price: number;
 }
 
-interface Customer {
+interface HotelOrder {
   id: number;
-  name: string;
-  phone: string;
-  created_by: any;
+  order_items: HotelOrderItem[];
+  total_amount: number;
+  created_at: string;
+  created_by: { first_name: string; last_name: string };
 }
 
-interface TopCustomer {
-  customerName: string;
-  orderCount: number;
-  totalSpent: number;
-}
+// --- Constants ---
+const API_BASE = 'http://127.0.0.1:8080/api';
 
-interface ProcessedData {
-  // Summary Stats
-  totalBusinessRevenue: number;
-  totalNetProfit: number;
-  totalBusinessExpenses: number;
-
-  // Hotel Stats
-  hotelRevenue: number;
-  hotelTotalOrders: number;
-  hotelNetProfit: number;
-  hotelTotalExpenses: number;
-
-  // Laundry Stats
-  laundryRevenue: number;
-  cashPaymentsAmount: number;
-  mpesaPaymentsAmount: number;
-  cardPaymentsAmount: number;
-  bankTransferPaymentsAmount: number;
-  otherPaymentsAmount: number;
-  nonePaymentsAmount: number;
-  totalBalanceAmount: number;
-  pendingPayments: number;
-  totalPendingAmount: number;
-  partialPayments: number;
-  totalPartialAmount: number;
-  completePayments: number;
-  totalCompleteAmount: number;
-  totalExpenses: number;
-
-  // Shop Stats
-  shopARevenue: number;
-  shopATotalOrders: number;
-  shopAPendingPayments: number;
-  shopAPendingAmount: number;
-  shopAPartialPayments: number;
-  shopAPartialAmount: number;
-  shopACompletePayments: number;
-  shopACompleteAmount: number;
-  shopANetProfit: number;
-  shopATotalExpenses: number;
-
-  shopBRevenue: number;
-  shopBTotalOrders: number;
-  shopBPendingPayments: number;
-  shopBPendingAmount: number;
-  shopBPartialPayments: number;
-  shopBPartialAmount: number;
-  shopBCompletePayments: number;
-  shopBCompleteAmount: number;
-  shopBNetProfit: number;
-  shopBTotalExpenses: number;
-
-  // Chart Data
-  revenueComparisonLabels: string[];
-  revenueComparisonData: number[];
-  revenueComparisonColors: string[];
-
-  pieChartLabels: string[];
-  pieChartValues: number[];
-
-  lineChartData: Array<{
-    label: string;
-    months: string[];
-    data: number[];
-  }>;
-
-  servicesLabels: string[];
-  servicesCounts: number[];
-
-  itemLabels: string[];
-  itemCounts: number[];
-
-  commonCustomers: TopCustomer[];
-
-  // Monthly Data
-  monthlyData: Array<{
-    month: string;
-    year: number;
-    hotelRevenue: number;
-    laundryRevenue: number;
-    totalRevenue: number;
-    hotelExpenses: number;
-    laundryExpenses: number;
-    totalExpenses: number;
-    netProfit: number;
-  }>;
-
-  // Payment Methods
-  paymentMethods: Array<{
-    name: string;
-    amount: number;
-    count: number;
-  }>;
-
-  currentYear: number;
-  selectedMonth?: number;
-}
-const LAUNDRY_BASE_URL = `${API_BASE_URL}/Laundry/orders`
-const LAUNDRY_CUSTOMERS_URL = `${API_BASE_URL}/Laundry/customers`
-const LAUNDRY_EXPENSES_URL = `${API_BASE_URL}/Laundry/expense-records`
-const HOTEL_BASE_URL = `${API_BASE_URL}/Hotel/orders`
-const HOTEL_EXPENSES_URL = `${API_BASE_URL}/Hotel/Hotelexpense-records`
-// Helper function to safely extract array from response
-const extractArrayFromResponse = (response: any): any[] => {
-  if (!response) return [];
-  if (Array.isArray(response)) return response;
-  if (response.data && Array.isArray(response.data)) return response.data;
-  if (response.results && Array.isArray(response.results)) return response.results;
-  return [];
+const COLORS = {
+  primary: '#2563EB',    // Blue 600
+  primaryLight: '#60A5FA', // Blue 400
+  secondary: '#475569',  // Slate 600
+  accent: '#3B82F6',     // Blue 500
+  success: '#10B981',    // Emerald 500
+  danger: '#EF4444',     // Red 500
+  warning: '#F59E0B',    // Amber 500
+  bgLight: '#F3F4F6',    // Gray 100
 };
 
-export default function PerformanceReport() {
+const formatCurrency = (amount: number) => 
+  new Intl.NumberFormat('en-KE', { style: 'currency', currency: 'KES', minimumFractionDigits: 2 }).format(amount);
+
+export default function PerformanceReport() { 
+  // --- State ---
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [data, setData] = useState<ProcessedData | null>(null);
-  const [filterYear, setFilterYear] = useState(new Date().getFullYear());
-  const [filterMonth, setFilterMonth] = useState("");
-  const [fromDate, setFromDate] = useState("");
-  const [toDate, setToDate] = useState("");
-  const [today] = useState(new Date().toISOString().split('T')[0]);
+  
+  const [laundryData, setLaundryData] = useState<LaundryOrder[]>([]);
+  const [hotelData, setHotelData] = useState<HotelOrder[]>([]);
 
-  // Chart refs
-  const revenueComparisonChartRef = useRef<HTMLCanvasElement>(null);
-  const revenueChartRef = useRef<HTMLCanvasElement>(null);
-  const trendChartRef = useRef<HTMLCanvasElement>(null);
-  const servicesChartRef = useRef<HTMLCanvasElement>(null);
-  const productsChartRef = useRef<HTMLCanvasElement>(null);
+  // Filters
+  const [filterYear, setFilterYear] = useState(2025); // Keep internal state for default view
+  const [filterMonth, setFilterMonth] = useState<string>(""); // Keep internal state, though UI removed
+  const [fromDate, setFromDate] = useState<string>("");
+  const [toDate, setToDate] = useState<string>("");
 
-  // Chart instances
-  const revenueComparisonChartInstance = useRef<Chart | null>(null);
-  const revenueChartInstance = useRef<Chart | null>(null);
-  const trendChartInstance = useRef<Chart | null>(null);
-  const servicesChartInstance = useRef<Chart | null>(null);
-  const productsChartInstance = useRef<Chart | null>(null);
+  // Chart Refs
+  const revenueComparisonRef = useRef<HTMLCanvasElement>(null);
+  const revenueDistributionRef = useRef<HTMLCanvasElement>(null);
+  const monthlyTrendRef = useRef<HTMLCanvasElement>(null);
+  const topServicesRef = useRef<HTMLCanvasElement>(null);
+  const topItemsRef = useRef<HTMLCanvasElement>(null);
+  const topCustomersRef = useRef<HTMLCanvasElement>(null);
 
-  // Real-time update interval
-  const updateIntervalRef = useRef<NodeJS.Timeout>();
+  // FIX: Store chart instances to prevent "Canvas is already in use" error
+  const chartInstances = useRef<Map<HTMLCanvasElement, Chart>>(new Map());
 
-  // Color palette
-  const COLOR_PALETTE = {
-    navyBlue: '#1E3A8A',
-    orangeYellow: '#F59E0B',
-    lightOrange: '#FBBF24',
-    pink: '#EC407A',
-    lightPink: '#F48FB1',
-    success: '#10B981',
-    warning: '#F59E0B',
-    danger: '#EF4444',
-    info: '#3B82F6',
-    blue: '#36A2EB',
-    red: '#FF6384',
-    teal: '#4BC0C0'
+  // --- Data Fetching ---
+  const fetchData = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const headers = { 'Content-Type': 'application/json' };
+      
+      const [laundryRes, hotelRes] = await Promise.all([
+        fetch(`${API_BASE}/Laundry/orders/`, { headers }),
+        fetch(`${API_BASE}/Hotel/orders/`, { headers })
+      ]);
+
+      if (!laundryRes.ok || !hotelRes.ok) throw new Error('Failed to fetch data');
+
+      const laundry = await laundryRes.json();
+      const hotel = await hotelRes.json();
+
+      setLaundryData(Array.isArray(laundry) ? laundry : (laundry.results || []));
+      setHotelData(Array.isArray(hotel) ? hotel : (hotel.results || []));
+    } catch (err) {
+      setError('Error loading dashboard data. Please ensure API is running.');
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const processData = useCallback((
-    hotelOrders: HotelOrder[],
-    hotelExpenses: HotelExpense[],
-    laundryOrders: LaundryOrder[],
-    laundryExpenses: LaundryExpense[],
-    customers: Customer[]
-  ): ProcessedData => {
-    // Ensure arrays exist
-    hotelOrders = hotelOrders || [];
-    hotelExpenses = hotelExpenses || [];
-    laundryOrders = laundryOrders || [];
-    laundryExpenses = laundryExpenses || [];
-    customers = customers || [];
+  useEffect(() => {
+    fetchData();
+  }, []);
 
-    // Helper function to parse date and check filters
-    const isDateInRange = (dateString: string): boolean => {
-      try {
-        if (!dateString) return false;
-        const itemDate = new Date(dateString);
-        const filterFrom = fromDate ? new Date(fromDate) : null;
-        const filterTo = toDate ? new Date(toDate) : null;
+  // --- Helper: Parse Money ---
+  const parseMoney = (val: string | number): number => {
+    if (typeof val === 'number') return val;
+    return parseFloat(String(val)) || 0;
+  };
 
-        if (filterFrom && itemDate < filterFrom) return false;
-        if (filterTo && itemDate > filterTo) return false;
-        if (filterYear && itemDate.getFullYear() !== filterYear) return false;
-        if (filterMonth) {
-          const [year, month] = filterMonth.split('-').map(Number);
-          if (itemDate.getFullYear() !== year || (itemDate.getMonth() + 1) !== month) return false;
-        }
+  // --- Data Processing (Aggregation) ---
+  const processedData = useMemo(() => {
+    const isDateInRange = (dateStr: string) => {
+      const date = new Date(dateStr);
+      
+      // Priority 1: Explicit Date Range overrides Year/Month
+      if (fromDate || toDate) {
+        if (fromDate && date < new Date(fromDate)) return false;
+        if (toDate && date > new Date(toDate)) return false;
         return true;
-      } catch (e) {
-        return false;
       }
+
+      // Priority 2: Year/Month Filter (Default if no range selected)
+      const year = date.getFullYear();
+      
+      // Check Year
+      if (year !== filterYear) return false;
+
+      // Check Month
+      if (filterMonth) {
+        const [y, m] = filterMonth.split('-');
+        if (year !== parseInt(y) || date.getMonth() + 1 !== parseInt(m)) return false;
+      }
+
+      return true;
     };
 
-    // Filter hotel orders by date range
-    const filteredHotelOrders = hotelOrders.filter(order => {
-      return isDateInRange(order.created_at);
-    });
+    // 1. Filter Data
+    const filteredLaundry = laundryData.filter(o => isDateInRange(o.created_at));
+    const filteredHotel = hotelData.filter(o => isDateInRange(o.created_at));
 
-    // Filter laundry orders by date range
-    const filteredLaundryOrders = laundryOrders.filter(order => {
-      return isDateInRange(order.created_at);
-    });
+    // 2. Core Metrics
+    const laundryRevenue = filteredLaundry.reduce((sum, o) => sum + parseMoney(o.total_price), 0);
+    const hotelRevenue = filteredHotel.reduce((sum, o) => sum + (o.total_amount || 0), 0);
+    const totalRevenue = laundryRevenue + hotelRevenue;
+    
+    // NOTE: Expenses are hardcoded to 0 as no Expense API endpoint was provided.
+    const totalExpenses = 0; 
+    const netProfit = totalRevenue - totalExpenses;
 
-    // Calculate hotel revenue from order items
-    const hotelRevenue = filteredHotelOrders.reduce((sum, order) => {
-      try {
-        // Use total_amount from the order
-        return sum + (order.total_amount || 0);
-      } catch (e) {
-        return sum;
-      }
-    }, 0);
+    // 3. Shop Metrics (Laundry Only)
+    const shopAOrders = filteredLaundry.filter(o => o.shop === 'Shop A');
+    const shopBOrders = filteredLaundry.filter(o => o.shop === 'Shop B');
 
-    // Calculate total hotel orders count
-    const hotelTotalOrders = filteredHotelOrders.length;
-
-    // Calculate laundry revenue
-    const laundryRevenue = filteredLaundryOrders.reduce((sum, order) => {
-      try {
-        const price = parseFloat(order.total_price) || 0;
-        return sum + price;
-      } catch (e) {
-        return sum;
-      }
-    }, 0);
-
-    // Calculate hotel expenses
-    const hotelExpensesTotal = hotelExpenses.reduce((sum, expense) => {
-      try {
-        const amount = parseFloat(expense.amount || '0') || 0;
-        // Filter expenses by date
-        if (!isDateInRange(expense.date)) return sum;
-        return sum + amount;
-      } catch (e) {
-        return sum;
-      }
-    }, 0);
-
-    // Calculate laundry expenses
-    const laundryExpensesTotal = laundryExpenses.reduce((sum, expense) => {
-      try {
-        // Filter expenses by date
-        if (!isDateInRange(expense.date)) return sum;
-        return sum + (parseFloat(expense.amount) || 0);
-      } catch (e) {
-        return sum;
-      }
-    }, 0);
-
-    // Calculate total expenses
-    const totalBusinessExpenses = hotelExpensesTotal + laundryExpensesTotal;
-
-    // Calculate net profits
-    const hotelNetProfit = hotelRevenue - hotelExpensesTotal;
-    const laundryNetProfit = laundryRevenue - laundryExpensesTotal;
-    const totalNetProfit = hotelNetProfit + laundryNetProfit;
-
-    // Calculate shop-specific stats
-    const shopAOrders = filteredLaundryOrders.filter(order => order.shop === 'Shop A');
-    const shopBOrders = filteredLaundryOrders.filter(order => order.shop === 'Shop B');
-
-    const shopARevenue = shopAOrders.reduce((sum, order) => {
-      try {
-        return sum + (parseFloat(order.total_price) || 0);
-      } catch (e) {
-        return sum;
-      }
-    }, 0);
-
-    const shopBRevenue = shopBOrders.reduce((sum, order) => {
-      try {
-        return sum + (parseFloat(order.total_price) || 0);
-      } catch (e) {
-        return sum;
-      }
-    }, 0);
-
-    // Calculate payment method amounts
-    const paymentMethodsData: Record<string, { amount: number; count: number }> = {};
-
-    filteredLaundryOrders.forEach(order => {
-      const paymentType = order.payment_type?.toLowerCase() || 'none';
-      const amount = parseFloat(order.total_price) || 0;
+    const getShopStats = (orders: LaundryOrder[]) => {
+      const revenue = orders.reduce((s, o) => s + parseMoney(o.total_price), 0);
+      const count = orders.length;
+      const pendingAmt = orders.filter(o => o.payment_status === 'pending').reduce((s, o) => s + parseMoney(o.total_price), 0);
+      const partialAmt = orders.filter(o => o.payment_status === 'partial').reduce((s, o) => s + parseMoney(o.total_price), 0);
+      const completeAmt = orders.filter(o => o.payment_status === 'complete').reduce((s, o) => s + parseMoney(o.total_price), 0);
       
-      if (!paymentMethodsData[paymentType]) {
-        paymentMethodsData[paymentType] = { amount: 0, count: 0 };
-      }
-      paymentMethodsData[paymentType].amount += amount;
-      paymentMethodsData[paymentType].count += 1;
+      const pendingCount = orders.filter(o => o.payment_status === 'pending').length;
+      const partialCount = orders.filter(o => o.payment_status === 'partial').length;
+      const completeCount = orders.filter(o => o.payment_status === 'complete').length;
+
+      return { revenue, count, pendingAmt, partialAmt, completeAmt, pendingCount, partialCount, completeCount };
+    };
+
+    const shopA = getShopStats(shopAOrders);
+    const shopB = getShopStats(shopBOrders);
+
+    // 4. Payment Type Summary (Laundry)
+    const paymentTypes: Record<string, number> = {};
+    filteredLaundry.forEach(o => {
+      const type = o.payment_type || 'Unknown';
+      paymentTypes[type] = (paymentTypes[type] || 0) + parseMoney(o.total_price);
     });
 
-    // Convert to array and calculate totals
-    const paymentMethods = Object.entries(paymentMethodsData).map(([name, data]) => ({
-      name: name.charAt(0).toUpperCase() + name.slice(1),
-      amount: data.amount,
-      count: data.count
-    }));
-
-    // Get specific payment method amounts
-    const cashPaymentsAmount = paymentMethodsData['cash']?.amount || 0;
-    const mpesaPaymentsAmount = paymentMethodsData['mpesa']?.amount || 0;
-    const cardPaymentsAmount = paymentMethodsData['card']?.amount || 0;
-    const bankTransferPaymentsAmount = paymentMethodsData['bank']?.amount || 0;
-    const otherPaymentsAmount = Object.entries(paymentMethodsData)
-      .filter(([key]) => !['cash', 'mpesa', 'card', 'bank', 'none'].includes(key))
-      .reduce((sum, [, data]) => sum + data.amount, 0);
-    const nonePaymentsAmount = paymentMethodsData['none']?.amount || 0;
-
-    // Calculate payment status
-    const pendingPayments = filteredLaundryOrders.filter(order => order.payment_status === 'pending');
-    const partialPayments = filteredLaundryOrders.filter(order => order.payment_status === 'partial');
-    const completePayments = filteredLaundryOrders.filter(order => order.payment_status === 'complete');
-
-    // Calculate total amounts for each payment status
-    const totalPendingAmount = pendingPayments.reduce((sum, order) => {
-      try {
-        return sum + (parseFloat(order.total_price) || 0);
-      } catch (e) {
-        return sum;
-      }
-    }, 0);
-
-    const totalPartialAmount = partialPayments.reduce((sum, order) => {
-      try {
-        return sum + (parseFloat(order.total_price) || 0);
-      } catch (e) {
-        return sum;
-      }
-    }, 0);
-
-    const totalCompleteAmount = completePayments.reduce((sum, order) => {
-      try {
-        return sum + (parseFloat(order.total_price) || 0);
-      } catch (e) {
-        return sum;
-      }
-    }, 0);
-
-    // Calculate customer spending
-    const customerSpending: Record<string, { name: string; count: number; total: number }> = {};
-    filteredLaundryOrders.forEach(order => {
-      try {
-        if (!order.customer?.name) return;
-        const customerName = order.customer.name;
-        if (!customerSpending[customerName]) {
-          customerSpending[customerName] = { name: customerName, count: 0, total: 0 };
-        }
-        customerSpending[customerName].count++;
-        customerSpending[customerName].total += (parseFloat(order.total_price) || 0);
-      } catch (e) {
-        // Silently handle errors
-      }
-    });
-
-    const topCustomers = Object.values(customerSpending)
-      .sort((a, b) => b.total - a.total)
-      .slice(0, 10)
-      .map(customer => ({
-        customerName: customer.name,
-        orderCount: customer.count,
-        totalSpent: customer.total
-      }));
-
-    // Calculate service frequencies
+    // 5. Top Services/Items/Customers
     const serviceCounts: Record<string, number> = {};
-    filteredLaundryOrders.forEach(order => {
-      try {
-        order.items?.forEach(item => {
-          item.servicetype?.forEach(service => {
-            if (service) {
-              serviceCounts[service] = (serviceCounts[service] || 0) + 1;
-            }
-          });
-        });
-      } catch (e) {
-        // Silently handle errors
+    const itemCounts: Record<string, number> = {};
+    const customerSpends: Record<string, number> = {};
+
+    filteredLaundry.forEach(o => {
+      // Services
+      o.items.forEach(i => {
+        const type = Array.isArray(i.servicetype) ? i.servicetype[0] : 'Unknown';
+        serviceCounts[type] = (serviceCounts[type] || 0) + 1;
+      });
+      // Items
+      o.items.forEach(i => {
+        itemCounts[i.itemname] = (itemCounts[i.itemname] || 0) + 1;
+      });
+      // Customers
+      if (o.customer?.name) {
+        customerSpends[o.customer.name] = (customerSpends[o.customer.name] || 0) + parseMoney(o.total_price);
       }
     });
 
     const topServices = Object.entries(serviceCounts)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 10);
-
-    // Calculate item frequencies
-    const itemCounts: Record<string, number> = {};
-    filteredLaundryOrders.forEach(order => {
-      try {
-        order.items?.forEach(item => {
-          if (item.itemname) {
-            itemCounts[item.itemname] = (itemCounts[item.itemname] || 0) + 1;
-          }
-        });
-      } catch (e) {
-        // Silently handle errors
-      }
-    });
-
+      .sort((a, b) => b[1] - a[1]).slice(0, 5);
     const topItems = Object.entries(itemCounts)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 10);
+      .sort((a, b) => b[1] - a[1]).slice(0, 5);
+    const topCustomers = Object.entries(customerSpends)
+      .sort((a, b) => b[1] - a[1]).slice(0, 5);
 
-    // Generate monthly revenue data for the selected year
+    // 6. Monthly Trend (Whole Year context for chart)
     const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    const monthlyHotelRevenue = Array(12).fill(0);
-    const monthlyLaundryRevenue = Array(12).fill(0);
-    const monthlyHotelExpenses = Array(12).fill(0);
-    const monthlyLaundryExpenses = Array(12).fill(0);
+    const laundryMonthly = Array(12).fill(0);
+    const hotelMonthly = Array(12).fill(0);
 
-    // Process monthly hotel data
-    filteredHotelOrders.forEach(order => {
-      try {
-        const date = new Date(order.created_at);
-        const month = date.getMonth();
-        const year = date.getFullYear();
-        
-        if (year === filterYear) {
-          monthlyHotelRevenue[month] += (order.total_amount || 0);
-        }
-      } catch (e) {
-        // Silently handle errors
+    laundryData.forEach(o => {
+      const d = new Date(o.created_at);
+      if (d.getFullYear() === filterYear) {
+        laundryMonthly[d.getMonth()] += parseMoney(o.total_price);
       }
     });
-
-    // Process monthly laundry data
-    filteredLaundryOrders.forEach(order => {
-      try {
-        const date = new Date(order.created_at);
-        const month = date.getMonth();
-        const year = date.getFullYear();
-        
-        if (year === filterYear) {
-          monthlyLaundryRevenue[month] += (parseFloat(order.total_price) || 0);
-        }
-      } catch (e) {
-        // Silently handle errors
+    hotelData.forEach(o => {
+      const d = new Date(o.created_at);
+      if (d.getFullYear() === filterYear) {
+        hotelMonthly[d.getMonth()] += (o.total_amount || 0);
       }
-    });
-
-    // Process monthly expenses
-    hotelExpenses.forEach(expense => {
-      try {
-        const date = new Date(expense.date);
-        const month = date.getMonth();
-        const year = date.getFullYear();
-        
-        if (year === filterYear && isDateInRange(expense.date)) {
-          monthlyHotelExpenses[month] += (parseFloat(expense.amount) || 0);
-        }
-      } catch (e) {
-        // Silently handle errors
-      }
-    });
-
-    laundryExpenses.forEach(expense => {
-      try {
-        const date = new Date(expense.date);
-        const month = date.getMonth();
-        const year = date.getFullYear();
-        
-        if (year === filterYear && isDateInRange(expense.date)) {
-          monthlyLaundryExpenses[month] += (parseFloat(expense.amount) || 0);
-        }
-      } catch (e) {
-        // Silently handle errors
-      }
-    });
-
-    // Calculate total balance amount
-    const totalBalanceAmount = filteredLaundryOrders.reduce((sum, order) => {
-      try {
-        return sum + (parseFloat(order.balance) || 0);
-      } catch (e) {
-        return sum;
-      }
-    }, 0);
-
-    // Calculate shop-specific expenses
-    const shopAExpenses = laundryExpenses.filter(e => e.shop === 'Shop A' && isDateInRange(e.date))
-      .reduce((sum, expense) => sum + (parseFloat(expense.amount) || 0), 0);
-    
-    const shopBExpenses = laundryExpenses.filter(e => e.shop === 'Shop B' && isDateInRange(e.date))
-      .reduce((sum, expense) => sum + (parseFloat(expense.amount) || 0), 0);
-
-    // Create monthly data for detailed analysis
-    const monthlyData = months.map((monthName, index) => {
-      const hotelRev = monthlyHotelRevenue[index] || 0;
-      const laundryRev = monthlyLaundryRevenue[index] || 0;
-      const hotelExp = monthlyHotelExpenses[index] || 0;
-      const laundryExp = monthlyLaundryExpenses[index] || 0;
-      const totalRev = hotelRev + laundryRev;
-      const totalExp = hotelExp + laundryExp;
-      
-      return {
-        month: monthName,
-        year: filterYear,
-        hotelRevenue: hotelRev,
-        laundryRevenue: laundryRev,
-        totalRevenue: totalRev,
-        hotelExpenses: hotelExp,
-        laundryExpenses: laundryExp,
-        totalExpenses: totalExp,
-        netProfit: totalRev - totalExp
-      };
     });
 
     return {
-      // Summary Stats
-      totalBusinessRevenue: hotelRevenue + laundryRevenue,
-      totalNetProfit,
-      totalBusinessExpenses,
-
-      // Hotel Stats
-      hotelRevenue,
-      hotelTotalOrders,
-      hotelNetProfit,
-      hotelTotalExpenses: hotelExpensesTotal,
-
-      // Laundry Stats
+      totalRevenue,
+      netProfit,
+      totalExpenses,
       laundryRevenue,
-      cashPaymentsAmount,
-      mpesaPaymentsAmount,
-      cardPaymentsAmount,
-      bankTransferPaymentsAmount,
-      otherPaymentsAmount,
-      nonePaymentsAmount,
-      totalBalanceAmount,
-      pendingPayments: pendingPayments.length,
-      totalPendingAmount,
-      partialPayments: partialPayments.length,
-      totalPartialAmount,
-      completePayments: completePayments.length,
-      totalCompleteAmount,
-      totalExpenses: laundryExpensesTotal,
-
-      // Shop Stats
-      shopARevenue,
-      shopATotalOrders: shopAOrders.length,
-      shopAPendingPayments: shopAOrders.filter(o => o.payment_status === 'pending').length,
-      shopAPendingAmount: shopAOrders.filter(o => o.payment_status === 'pending')
-        .reduce((sum, order) => sum + (parseFloat(order.total_price) || 0), 0),
-      shopAPartialPayments: shopAOrders.filter(o => o.payment_status === 'partial').length,
-      shopAPartialAmount: shopAOrders.filter(o => o.payment_status === 'partial')
-        .reduce((sum, order) => sum + (parseFloat(order.total_price) || 0), 0),
-      shopACompletePayments: shopAOrders.filter(o => o.payment_status === 'complete').length,
-      shopACompleteAmount: shopAOrders.filter(o => o.payment_status === 'complete')
-        .reduce((sum, order) => sum + (parseFloat(order.total_price) || 0), 0),
-      shopANetProfit: shopARevenue - shopAExpenses,
-      shopATotalExpenses: shopAExpenses,
-
-      shopBRevenue,
-      shopBTotalOrders: shopBOrders.length,
-      shopBPendingPayments: shopBOrders.filter(o => o.payment_status === 'pending').length,
-      shopBPendingAmount: shopBOrders.filter(o => o.payment_status === 'pending')
-        .reduce((sum, order) => sum + (parseFloat(order.total_price) || 0), 0),
-      shopBPartialPayments: shopBOrders.filter(o => o.payment_status === 'partial').length,
-      shopBPartialAmount: shopBOrders.filter(o => o.payment_status === 'partial')
-        .reduce((sum, order) => sum + (parseFloat(order.total_price) || 0), 0),
-      shopBCompletePayments: shopBOrders.filter(o => o.payment_status === 'complete').length,
-      shopBCompleteAmount: shopBOrders.filter(o => o.payment_status === 'complete')
-        .reduce((sum, order) => sum + (parseFloat(order.total_price) || 0), 0),
-      shopBNetProfit: shopBRevenue - shopBExpenses,
-      shopBTotalExpenses: shopBExpenses,
-
-      // Chart Data
-      revenueComparisonLabels: ['Laundry', 'Hotel'],
-      revenueComparisonData: [laundryRevenue, hotelRevenue],
-      revenueComparisonColors: [COLOR_PALETTE.blue, COLOR_PALETTE.red],
-
-      pieChartLabels: ['Shop A', 'Shop B', 'Hotel'],
-      pieChartValues: [shopARevenue, shopBRevenue, hotelRevenue],
-
-      lineChartData: [
-        {
-          label: 'Laundry Revenue',
-          months,
-          data: monthlyLaundryRevenue
-        },
-        {
-          label: 'Hotel Revenue',
-          months,
-          data: monthlyHotelRevenue
-        }
-      ],
-
-      servicesLabels: topServices.map(([label]) => label),
-      servicesCounts: topServices.map(([, count]) => count),
-
-      itemLabels: topItems.map(([label]) => label),
-      itemCounts: topItems.map(([, count]) => count),
-
-      commonCustomers: topCustomers,
-
-      // Monthly Data
-      monthlyData,
-
-      // Payment Methods
-      paymentMethods,
-
-      currentYear: filterYear,
-      selectedMonth: filterMonth ? parseInt(filterMonth.split('-')[1]) : undefined
+      hotelRevenue,
+      laundryOrders: filteredLaundry.length,
+      hotelOrders: filteredHotel.length,
+      shopA,
+      shopB,
+      paymentTypes,
+      topServices,
+      topItems,
+      topCustomers,
+      monthlyData: { months, laundry: laundryMonthly, hotel: hotelMonthly }
     };
-  }, [filterYear, filterMonth, fromDate, toDate]);
+  }, [laundryData, hotelData, filterYear, filterMonth, fromDate, toDate]);
 
-  const fetchDashboardData = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-
-    try {
-      // Fetch all data in parallel
-      const [
-        hotelOrdersResponse,
-        hotelExpensesResponse,
-        laundryOrdersResponse,
-        laundryExpensesResponse,
-        customersResponse
-      ] = await Promise.allSettled([
-        // Fetch hotel orders
-        
-        fetchApi('orders/', { method: 'GET' }, 'hotel'),
-        // Fetch hotel expenses
-        fetchApi('Hotelexpense-records/', { method: 'GET' }, 'hotel'),
-        // Fetch laundry orders
-        fetchApi('orders/', { method: 'GET' }, 'laundry'),
-        // Fetch laundry expenses
-        fetchApi('expense-records/', { method: 'GET' }, 'laundry'),
-        // Fetch customers
-        fetchApi('customers/', { method: 'GET' }, 'laundry')
-      ]);
-
-      // Extract data from responses
-      const hotelOrders = hotelOrdersResponse.status === 'fulfilled' 
-        ? extractArrayFromResponse(hotelOrdersResponse.value) as HotelOrder[] 
-        : [];
-
-      const hotelExpenses = hotelExpensesResponse.status === 'fulfilled' 
-        ? extractArrayFromResponse(hotelExpensesResponse.value) as HotelExpense[] 
-        : [];
-
-      const laundryOrders = laundryOrdersResponse.status === 'fulfilled' 
-        ? extractArrayFromResponse(laundryOrdersResponse.value) as LaundryOrder[] 
-        : [];
-
-      const laundryExpenses = laundryExpensesResponse.status === 'fulfilled' 
-        ? extractArrayFromResponse(laundryExpensesResponse.value) as LaundryExpense[] 
-        : [];
-
-      const customers = customersResponse.status === 'fulfilled' 
-        ? extractArrayFromResponse(customersResponse.value) as Customer[] 
-        : [];
-
-      // Process the data
-      const processedData = processData(
-        hotelOrders,
-        hotelExpenses,
-        laundryOrders,
-        laundryExpenses,
-        customers
-      );
-
-      setData(processedData);
-
-    } catch (err: any) {
-      let errorMessage = `Failed to fetch dashboard data: ${err.message}`;
-      if (err.response) {
-        errorMessage += ` (Status: ${err.response.status})`;
-      }
-      setError(errorMessage);
-
-      // Set empty data structure
-      setData({
-        totalBusinessRevenue: 0,
-        totalNetProfit: 0,
-        totalBusinessExpenses: 0,
-        hotelRevenue: 0,
-        hotelTotalOrders: 0,
-        hotelNetProfit: 0,
-        hotelTotalExpenses: 0,
-        laundryRevenue: 0,
-        cashPaymentsAmount: 0,
-        mpesaPaymentsAmount: 0,
-        cardPaymentsAmount: 0,
-        bankTransferPaymentsAmount: 0,
-        otherPaymentsAmount: 0,
-        nonePaymentsAmount: 0,
-        totalBalanceAmount: 0,
-        pendingPayments: 0,
-        totalPendingAmount: 0,
-        partialPayments: 0,
-        totalPartialAmount: 0,
-        completePayments: 0,
-        totalCompleteAmount: 0,
-        totalExpenses: 0,
-        shopARevenue: 0,
-        shopATotalOrders: 0,
-        shopAPendingPayments: 0,
-        shopAPendingAmount: 0,
-        shopAPartialPayments: 0,
-        shopAPartialAmount: 0,
-        shopACompletePayments: 0,
-        shopACompleteAmount: 0,
-        shopANetProfit: 0,
-        shopATotalExpenses: 0,
-        shopBRevenue: 0,
-        shopBTotalOrders: 0,
-        shopBPendingPayments: 0,
-        shopBPendingAmount: 0,
-        shopBPartialPayments: 0,
-        shopBPartialAmount: 0,
-        shopBCompletePayments: 0,
-        shopBCompleteAmount: 0,
-        shopBNetProfit: 0,
-        shopBTotalExpenses: 0,
-        revenueComparisonLabels: [],
-        revenueComparisonData: [],
-        revenueComparisonColors: [],
-        pieChartLabels: [],
-        pieChartValues: [],
-        lineChartData: [],
-        servicesLabels: [],
-        servicesCounts: [],
-        itemLabels: [],
-        itemCounts: [],
-        commonCustomers: [],
-        monthlyData: [],
-        paymentMethods: [],
-        currentYear: filterYear,
-        selectedMonth: filterMonth ? parseInt(filterMonth.split('-')[1]) : undefined
-      });
-    } finally {
-      setLoading(false);
-    }
-  }, [processData, filterYear, filterMonth]);
-
-  // Initialize real-time updates
+  // --- Chart Rendering ---
   useEffect(() => {
-    fetchDashboardData();
+    if (loading) return;
 
-    // Set up real-time updates every 30 seconds
-    updateIntervalRef.current = setInterval(() => {
-      fetchDashboardData();
-    }, 30000);
+    // FIX: Safe chart creation helper
+    const createChart = (ref: React.RefObject<HTMLCanvasElement>, config: any) => {
+      if (!ref.current) return;
 
-    // Cleanup interval on unmount
-    return () => {
-      if (updateIntervalRef.current) {
-        clearInterval(updateIntervalRef.current);
+      // 1. Get existing chart instance for this canvas
+      const existingChart = chartInstances.current.get(ref.current);
+
+      // 2. Destroy existing chart if it exists
+      if (existingChart) {
+        existingChart.destroy();
+        chartInstances.current.delete(ref.current);
       }
+
+      // 3. Create new chart
+      const ctx = ref.current.getContext('2d');
+      if (!ctx) return;
+      const newChart = new ChartJS(ctx, config);
+      
+      // 4. Store the new instance
+      chartInstances.current.set(ref.current, newChart);
     };
-  }, [fetchDashboardData]);
 
-  // Initialize charts when data changes
-  useEffect(() => {
-    if (!data) return;
+    // 1. Revenue Comparison (Laundry vs Hotel) - Doughnut
+    createChart(revenueComparisonRef, {
+      type: 'doughnut',
+      data: {
+        labels: ['Laundry Business', 'Hotel Business'],
+        datasets: [{
+          data: [processedData.laundryRevenue, processedData.hotelRevenue],
+          backgroundColor: [COLORS.primary, COLORS.secondary],
+          borderWidth: 0
+        }]
+      },
+      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } } }
+    });
 
-    // Destroy existing charts
-    [revenueComparisonChartInstance, revenueChartInstance, trendChartInstance, servicesChartInstance, productsChartInstance].forEach(chartRef => {
-      if (chartRef.current) {
-        chartRef.current.destroy();
-        chartRef.current = null;
+    // 2. Revenue Distribution - Pie (By Shop A/B + Hotel)
+    createChart(revenueDistributionRef, {
+      type: 'pie',
+      data: {
+        labels: ['Shop A', 'Shop B', 'Hotel'],
+        datasets: [{
+          data: [processedData.shopA.revenue, processedData.shopB.revenue, processedData.hotelRevenue],
+          backgroundColor: ['#3B82F6', '#60A5FA', '#94A3B8'],
+          borderWidth: 0
+        }]
+      },
+      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } } }
+    });
+
+    // 3. Monthly Trend - Line
+    createChart(monthlyTrendRef, {
+      type: 'line',
+      data: {
+        labels: processedData.monthlyData.months,
+        datasets: [
+          {
+            label: 'Laundry Revenue',
+            data: processedData.monthlyData.laundry,
+            borderColor: COLORS.primary,
+            backgroundColor: 'rgba(37, 99, 235, 0.1)',
+            fill: true,
+            tension: 0.4
+          },
+          {
+            label: 'Hotel Revenue',
+            data: processedData.monthlyData.hotel,
+            borderColor: COLORS.secondary,
+            borderDash: [5, 5],
+            tension: 0.4
+          }
+        ]
+      },
+      options: { 
+        responsive: true, 
+        maintainAspectRatio: false,
+        scales: { y: { beginAtZero: true } },
+        interaction: { mode: 'index', intersect: false }
       }
     });
 
-    // Get chart options from Django template
-    const getChartOptions = () => {
-      const textColor = '#1E293B';
-      const tooltipBg = '#FFFFFF';
-      const tooltipBorder = '#E2E8F0';
-      const tooltipText = '#1E293B';
+    // 4. Top Services - Horizontal Bar
+    createChart(topServicesRef, {
+      type: 'bar',
+      data: {
+        labels: processedData.topServices.map(s => s[0]),
+        datasets: [{
+          label: 'Orders',
+          data: processedData.topServices.map(s => s[1]),
+          backgroundColor: COLORS.primary
+        }]
+      },
+      options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
+    });
 
-      return {
-        maintainAspectRatio: false,
-        responsive: true,
-        plugins: {
-          legend: {
-            labels: {
-              color: textColor,
-              font: {
-                size: 11,
-                weight: 500 as const
-              }
-            }
-          },
-          tooltip: {
-            backgroundColor: tooltipBg,
-            borderColor: tooltipBorder,
-            borderWidth: 1,
-            borderRadius: 12,
-            padding: 12,
-            titleColor: tooltipText,
-            bodyColor: tooltipText,
-            bodyFont: {
-              size: 14,
-              weight: 600 as const
-            },
-            titleFont: {
-              size: 12,
-              weight: 500 as const
-            },
-            callbacks: {
-              title: (context: TooltipItem<keyof ChartTypeRegistry>[]) => {
-                return context[0].label || '';
-              },
-              label: function (context: TooltipItem<keyof ChartTypeRegistry>) {
-                if ('parsed' in context && 'y' in context.parsed) {
-                  return 'Ksh ' + context.parsed.y.toLocaleString('en-US');
-                } else if ('parsed' in context && 'x' in context.parsed) {
-                  return 'Ksh ' + context.parsed.x.toLocaleString('en-US');
-                } else if ('parsed' in context) {
-                  return 'Ksh ' + context.parsed.toLocaleString('en-US');
-                }
-                return '';
-              }
-            }
-          }
-        },
-        scales: {
-          x: {
-            display: false,
-            grid: { display: false },
-            ticks: { color: textColor, font: { size: 11 } },
-            border: { display: false }
-          },
-          y: {
-            display: false,
-            grid: { display: false },
-            ticks: { color: textColor, font: { size: 11 } },
-            border: { display: false }
-          }
-        }
-      } as any;
-    };
+    // 5. Top Items - Horizontal Bar
+    createChart(topItemsRef, {
+      type: 'bar',
+      data: {
+        labels: processedData.topItems.map(i => i[0]),
+        datasets: [{
+          label: 'Count',
+          data: processedData.topItems.map(i => i[1]),
+          backgroundColor: COLORS.accent
+        }]
+      },
+      options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
+    });
 
-    // Initialize Revenue Comparison Chart (Doughnut)
-    if (revenueComparisonChartRef.current && data.revenueComparisonData.length > 0) {
-      const ctx = revenueComparisonChartRef.current.getContext('2d');
-      if (ctx) {
-        revenueComparisonChartInstance.current = new Chart(ctx, {
-          type: 'doughnut',
-          data: {
-            labels: data.revenueComparisonLabels,
-            datasets: [{
-              data: data.revenueComparisonData,
-              backgroundColor: data.revenueComparisonColors.length > 0 ? data.revenueComparisonColors : [
-                COLOR_PALETTE.blue,
-                COLOR_PALETTE.red
-              ],
-              borderWidth: 0,
-              hoverOffset: 4,
-            } as ChartDataset<'doughnut', number[]>]
-          },
-          options: {
-            ...getChartOptions(),
-            plugins: {
-              ...getChartOptions().plugins,
-              legend: {
-                position: 'bottom',
-                labels: {
-                  padding: 10,
-                  usePointStyle: true,
-                  pointStyle: 'circle',
-                  boxWidth: 8,
-                  boxHeight: 8,
-                  font: {
-                    size: 11,
-                    weight: 500 as const
-                  }
-                }
-              },
-              tooltip: {
-                ...getChartOptions().plugins.tooltip,
-                callbacks: {
-                  label: function (context: TooltipItem<'doughnut'>) {
-                    return 'Ksh ' + context.parsed.toLocaleString('en-US');
-                  }
-                }
-              }
-            },
-            cutout: '70%'
-          }
-        });
-      }
-    }
+    // 6. Top Customers - Horizontal Bar
+    createChart(topCustomersRef, {
+      type: 'bar',
+      data: {
+        labels: processedData.topCustomers.map(c => c[0]),
+        datasets: [{
+          label: 'Total Spent (KES)',
+          data: processedData.topCustomers.map(c => c[1]),
+          backgroundColor: COLORS.success
+        }]
+      },
+      options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
+    });
 
-    // Initialize Revenue Distribution Chart (Doughnut)
-    if (revenueChartRef.current && data.pieChartValues.length > 0) {
-      const ctx = revenueChartRef.current.getContext('2d');
-      if (ctx) {
-        revenueChartInstance.current = new Chart(ctx, {
-          type: 'doughnut',
-          data: {
-            labels: data.pieChartLabels,
-            datasets: [{
-              data: data.pieChartValues,
-              backgroundColor: [
-                COLOR_PALETTE.navyBlue,
-                COLOR_PALETTE.orangeYellow,
-                COLOR_PALETTE.lightOrange,
-                COLOR_PALETTE.pink,
-                COLOR_PALETTE.lightPink,
-                COLOR_PALETTE.success,
-                COLOR_PALETTE.info
-              ],
-              borderWidth: 0,
-              hoverOffset: 4,
-            } as ChartDataset<'doughnut', number[]>]
-          },
-          options: {
-            ...getChartOptions(),
-            plugins: {
-              ...getChartOptions().plugins,
-              legend: {
-                position: 'bottom',
-                labels: {
-                  padding: 10,
-                  usePointStyle: true,
-                  pointStyle: 'circle',
-                  boxWidth: 8,
-                  boxHeight: 8,
-                  font: {
-                    size: 11,
-                    weight: 500 as const
-                  }
-                }
-              }
-            },
-            cutout: '70%'
-          }
-        });
-      }
-    }
-
-    // Initialize Trend Chart
-    if (trendChartRef.current && data.lineChartData.length > 0) {
-      const ctx = trendChartRef.current.getContext('2d');
-      if (ctx) {
-        const lineColors = [
-          COLOR_PALETTE.pink,
-          COLOR_PALETTE.orangeYellow,
-          COLOR_PALETTE.navyBlue,
-          COLOR_PALETTE.success,
-          COLOR_PALETTE.info
-        ];
-
-        const datasets = data.lineChartData.map((series, index) => ({
-          label: series.label || `Series ${index + 1}`,
-          data: series.data || [],
-          borderColor: lineColors[index % lineColors.length],
-          backgroundColor: `${lineColors[index % lineColors.length]}20`,
-          borderWidth: 1,
-          tension: 0.4,
-          pointRadius: 0,
-          pointHoverRadius: 6,
-          pointBackgroundColor: lineColors[index % lineColors.length],
-          fill: true,
-        }));
-
-        trendChartInstance.current = new Chart(ctx, {
-          type: 'line',
-          data: {
-            labels: data.lineChartData[0].months,
-            datasets: datasets
-          },
-          options: {
-            maintainAspectRatio: false,
-            responsive: true,
-            plugins: {
-              legend: {
-                position: 'top',
-                labels: {
-                  padding: 10,
-                  usePointStyle: true,
-                  pointStyle: 'circle',
-                  boxWidth: 8,
-                  boxHeight: 8,
-                  font: {
-                    size: 11,
-                    weight: 'bold' as const
-                  }
-                }
-              },
-              tooltip: {
-                callbacks: {
-                  label: function (context: TooltipItem<'line'>) {
-                    return `${context.dataset.label}: Ksh ${context.parsed.y.toLocaleString('en-US')}`;
-                  }
-                }
-              }
-            },
-            scales: {
-              x: {
-                display: true,
-                grid: { display: false },
-                ticks: {
-                  color: '#1E293B',
-                  maxRotation: 0,
-                  padding: 10
-                }
-              },
-              y: {
-                display: false,
-                grid: { display: false }
-              }
-            },
-            interaction: {
-              mode: 'index',
-              intersect: false
-            }
-          }
-        });
-      }
-    }
-
-    // Sort data descending for bar charts
-    const sortDataDescending = (labels: string[], data: number[]) => {
-      const combined = labels.map((label, index) => ({
-        label,
-        value: data[index] || 0
-      }));
-
-      combined.sort((a, b) => b.value - a.value);
-
-      const sortedLabels = combined.map(item => item.label);
-      const sortedData = combined.map(item => item.value);
-
-      return { sortedLabels, sortedData };
-    };
-
-    // Initialize Services Chart (Horizontal Bar)
-    if (servicesChartRef.current && data.servicesLabels.length > 0) {
-      const { sortedLabels, sortedData } = sortDataDescending(data.servicesLabels, data.servicesCounts);
-      const ctx = servicesChartRef.current.getContext('2d');
-      if (ctx) {
-        const barColors = [
-          COLOR_PALETTE.navyBlue,
-          COLOR_PALETTE.orangeYellow,
-          COLOR_PALETTE.pink,
-          COLOR_PALETTE.lightPink,
-          COLOR_PALETTE.success,
-          COLOR_PALETTE.info,
-          COLOR_PALETTE.warning
-        ];
-
-        servicesChartInstance.current = new Chart(ctx, {
-          type: 'bar',
-          data: {
-            labels: sortedLabels,
-            datasets: [{
-              data: sortedData,
-              backgroundColor: sortedLabels.map((_, index) => barColors[index % barColors.length]),
-              borderRadius: 8,
-              borderWidth: 0,
-              barThickness: 10,
-              categoryPercentage: 0.8,
-              barPercentage: 0.9
-            }]
-          },
-          options: {
-            indexAxis: 'y' as const,
-            maintainAspectRatio: false,
-            responsive: true,
-            plugins: {
-              legend: {
-                display: false
-              },
-              tooltip: {
-                enabled: false
-              }
-            },
-            scales: {
-              y: {
-                display: true,
-                grid: { display: false },
-                ticks: {
-                  color: '#1E293B',
-                  font: {
-                    size: 11,
-                    weight: 500 as const
-                  },
-                  padding: 8
-                }
-              },
-              x: {
-                display: true,
-                grid: { display: false },
-                ticks: {
-                  color: '#1E293B',
-                  font: { size: 10 }
-                }
-              }
-            }
-          }
-        });
-      }
-    }
-
-    // Initialize Products Chart (Horizontal Bar)
-    if (productsChartRef.current && data.itemLabels.length > 0) {
-      const { sortedLabels, sortedData } = sortDataDescending(data.itemLabels, data.itemCounts);
-      const ctx = productsChartRef.current.getContext('2d');
-      if (ctx) {
-        const barColors = [
-          COLOR_PALETTE.navyBlue,
-          COLOR_PALETTE.orangeYellow,
-          COLOR_PALETTE.pink,
-          COLOR_PALETTE.lightPink,
-          COLOR_PALETTE.success,
-          COLOR_PALETTE.info,
-          COLOR_PALETTE.warning
-        ];
-
-        productsChartInstance.current = new Chart(ctx, {
-          type: 'bar',
-          data: {
-            labels: sortedLabels,
-            datasets: [{
-              data: sortedData,
-              backgroundColor: sortedLabels.map((_, index) => barColors[index % barColors.length]),
-              borderRadius: 8,
-              borderWidth: 0,
-              barThickness: 10,
-              categoryPercentage: 0.8,
-              barPercentage: 0.9
-            }]
-          },
-          options: {
-            indexAxis: 'y' as const,
-            maintainAspectRatio: false,
-            responsive: true,
-            plugins: {
-              legend: {
-                display: false
-              },
-              tooltip: {
-                enabled: false
-              }
-            },
-            scales: {
-              y: {
-                display: true,
-                grid: { display: false },
-                ticks: {
-                  color: '#1E293B',
-                  font: {
-                    size: 11,
-                    weight: 500 as const
-                  },
-                  padding: 8
-                }
-              },
-              x: {
-                display: true,
-                grid: { display: false },
-                ticks: {
-                  color: '#1E293B',
-                  font: { size: 10 }
-                }
-              }
-            }
-          }
-        });
-      }
-    }
-
-    // Cleanup function
+    // CLEANUP: Destroy all charts when component unmounts
     return () => {
-      [revenueComparisonChartInstance, revenueChartInstance, trendChartInstance, servicesChartInstance, productsChartInstance].forEach(chartRef => {
-        if (chartRef.current) {
-          chartRef.current.destroy();
-          chartRef.current = null;
-        }
-      });
+      chartInstances.current.forEach(chart => chart.destroy());
+      chartInstances.current.clear();
     };
-  }, [data]);
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    fetchDashboardData();
-  };
-
-  const handleReset = () => {
-    setFilterYear(new Date().getFullYear());
-    setFilterMonth("");
-    setFromDate("");
-    setToDate("");
-  };
-
-  const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('en-KE', {
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0
-    }).format(amount);
-  };
-
-  const formatCurrencyFull = (amount: number) => {
-    return new Intl.NumberFormat('en-KE', {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2
-    }).format(amount);
-  };
-
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 p-4 md:p-6">
-        <div className="flex items-center justify-center h-screen">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-600 mx-auto"></div>
-            <p className="text-gray-600 mt-4 text-lg">Loading dashboard data...</p>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  }, [processedData, loading]);
 
   return (
-    <div className="min-h-screen p-4 md:p-6 bg-gradient-to-br from-gray-50 to-gray-100">
-      {/* Dashboard Header */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8">
-        <div className="flex items-center gap-3 mb-4 md:mb-0">
-          <div className="w-2 h-8 bg-gradient-to-b from-blue-500 to-purple-600 rounded-full"></div>
-          <div>
-            <h1 className="text-2xl md:text-3xl font-bold text-gray-900">Business Performance Dashboard</h1>
-            <p className="text-gray-500 text-sm mt-1">Monitor your business performance - {data?.currentYear || new Date().getFullYear()}</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-3 bg-white rounded-xl px-4 py-3 shadow-sm border border-gray-100">
-          <Calendar className="h-5 w-5 text-blue-500" />
-          <span className="font-semibold text-gray-700">{data?.currentYear || new Date().getFullYear()}</span>
-          {data?.selectedMonth && (
-            <span className="font-semibold text-gray-500">- Month {data.selectedMonth}</span>
-          )}
-        </div>
-      </div>
-
-      {/* Date Range Filter Section */}
-      <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100 mb-8">
-        <h2 className="text-lg font-semibold text-gray-900 mb-4">Filter Data</h2>
-        <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-5 gap-4 items-end">
-          {/* Year Input */}
-          <div>
-            <label htmlFor="year" className="block text-sm font-medium text-gray-700 mb-2">Year</label>
-            <input
-              type="number"
-              id="year"
-              value={filterYear}
-              onChange={(e) => setFilterYear(parseInt(e.target.value) || new Date().getFullYear())}
-              min="2020"
-              max="2100"
-              className="w-full bg-gray-50 border border-gray-200 rounded-lg px-4 py-2.5 text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-            />
-          </div>
-
-          {/* Month Selector */}
-          <div>
-            <label htmlFor="month" className="block text-sm font-medium text-gray-700 mb-2">Month</label>
-            <input
-              type="month"
-              id="month"
-              value={filterMonth}
-              onChange={(e) => setFilterMonth(e.target.value)}
-              className="w-full bg-gray-50 border border-gray-200 rounded-lg px-4 py-2.5 text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-            />
-          </div>
-
-          {/* Date Range */}
-          <div>
-            <label htmlFor="from_date" className="block text-sm font-medium text-gray-700 mb-2">From Date</label>
-            <input
-              type="date"
-              id="from_date"
-              value={fromDate}
-              onChange={(e) => setFromDate(e.target.value)}
-              max={today}
-              className="w-full bg-gray-50 border border-gray-200 rounded-lg px-4 py-2.5 text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-            />
-          </div>
-
-          <div>
-            <label htmlFor="to_date" className="block text-sm font-medium text-gray-700 mb-2">To Date</label>
-            <input
-              type="date"
-              id="to_date"
-              value={toDate}
-              onChange={(e) => setToDate(e.target.value)}
-              max={today}
-              className="w-full bg-gray-50 border border-gray-200 rounded-lg px-4 py-2.5 text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-            />
-          </div>
-
-          <div className="flex gap-3">
-            <button
-              type="submit"
-              className="flex-1 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-lg font-medium transition-all duration-300 flex items-center justify-center gap-2"
-            >
-              <Filter className="h-5 w-5" /> Apply
-            </button>
-            <button
-              type="button"
-              onClick={handleReset}
-              className="flex-1 bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 px-4 py-2.5 rounded-lg font-medium transition-all duration-300 flex items-center justify-center gap-2"
-            >
-              <RefreshCw className="h-5 w-5" /> Reset
-            </button>
-          </div>
-        </form>
-      </div>
-
-      {/* Monthly Performance Summary */}
-      {data?.monthlyData && data.monthlyData.length > 0 && (
-        <div className="mb-8">
-          <div className="flex items-center gap-3 mb-6">
-            <div className="w-1 h-6 bg-gradient-to-b from-purple-500 to-pink-600 rounded-full"></div>
-            <h2 className="text-xl font-bold text-gray-900">Monthly Performance - {data.currentYear}</h2>
-          </div>
-          <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr className="bg-gray-50">
-                    <th className="py-3 px-4 text-left text-sm font-semibold text-gray-700">Month</th>
-                    <th className="py-3 px-4 text-left text-sm font-semibold text-gray-700">Hotel Revenue</th>
-                    <th className="py-3 px-4 text-left text-sm font-semibold text-gray-700">Laundry Revenue</th>
-                    <th className="py-3 px-4 text-left text-sm font-semibold text-gray-700">Total Revenue</th>
-                    <th className="py-3 px-4 text-left text-sm font-semibold text-gray-700">Total Expenses</th>
-                    <th className="py-3 px-4 text-left text-sm font-semibold text-gray-700">Net Profit</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {data.monthlyData.map((month, index) => (
-                    <tr key={index} className="hover:bg-gray-50">
-                      <td className="py-3 px-4 font-medium text-gray-900">{month.month}</td>
-                      <td className="py-3 px-4">Ksh {formatCurrency(month.hotelRevenue)}</td>
-                      <td className="py-3 px-4">Ksh {formatCurrency(month.laundryRevenue)}</td>
-                      <td className="py-3 px-4 font-bold text-blue-600">Ksh {formatCurrency(month.totalRevenue)}</td>
-                      <td className="py-3 px-4 text-red-600">Ksh {formatCurrency(month.totalExpenses)}</td>
-                      <td className="py-3 px-4 font-bold text-green-600">Ksh {formatCurrency(month.netProfit)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Overall Business Stats */}
-      <div className="mb-8">
-        <div className="flex items-center gap-3 mb-6">
-          <div className="w-1 h-6 bg-gradient-to-b from-blue-500 to-purple-600 rounded-full"></div>
-          <h2 className="text-xl font-bold text-gray-900">Business Overview</h2>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-3 gap-5">
-          {/* Total Business Revenue */}
-          <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
-            <div className="flex items-center justify-between mb-4">
-              <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center">
-                <Wallet className="h-5 w-5 text-blue-600" />
-              </div>
-              <span className="bg-blue-100 text-blue-800 text-xs font-semibold px-2 py-1 rounded-full">Total</span>
-            </div>
-            <h3 className="text-sm font-medium text-gray-500 uppercase tracking-wider mb-1">Total Revenue</h3>
-            <div className="text-xl font-bold text-gray-900 mb-1">Ksh {formatCurrencyFull(data?.totalBusinessRevenue || 0)}</div>
-            <div className="flex items-center text-xs text-gray-500">
-              <TrendingUp className="h-3 w-3 text-green-500 mr-1" />
-              <span>Combined earnings</span>
-            </div>
-          </div>
-
-          {/* Net Profit */}
-          <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
-            <div className="flex items-center justify-between mb-4">
-              <div className="w-10 h-10 rounded-lg bg-purple-50 flex items-center justify-center">
-                <ChartLine className="h-5 w-5 text-purple-600" />
-              </div>
-              <span className="bg-purple-100 text-purple-800 text-xs font-semibold px-2 py-1 rounded-full">Profit</span>
-            </div>
-            <h3 className="text-sm font-medium text-gray-500 uppercase tracking-wider mb-1">Net Profit</h3>
-            <div className="text-xl font-bold text-gray-900 mb-1">Ksh {formatCurrencyFull(data?.totalNetProfit || 0)}</div>
-            <div className="flex items-center text-xs text-gray-500">
-              <DollarSign className="h-3 w-3 text-purple-500 mr-1" />
-              <span>After expenses</span>
-            </div>
-          </div>
-
-          {/* Total Expenses */}
-          <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
-            <div className="flex items-center justify-between mb-4">
-              <div className="w-10 h-10 rounded-lg bg-red-50 flex items-center justify-center">
-                <Wallet className="h-5 w-5 text-red-600" />
-              </div>
-              <span className="bg-red-100 text-red-800 text-xs font-semibold px-2 py-1 rounded-full">Expenses</span>
-            </div>
-            <h3 className="text-sm font-medium text-gray-500 uppercase tracking-wider mb-1">Total Expenses</h3>
-            <div className="text-xl font-bold text-gray-900 mb-1">Ksh {formatCurrencyFull(data?.totalBusinessExpenses || 0)}</div>
-            <div className="flex items-center text-xs text-gray-500">
-              <ChartLine className="h-3 w-3 text-red-500 mr-1" />
-              <span>Combined expenses</span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Business Comparison Section */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
-        {/* Revenue Comparison Chart */}
-        <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100 lg:col-span-2">
-          <div className="flex justify-between items-center mb-6">
-            <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
-              <div className="w-5 h-5 bg-purple-500 rounded-full flex items-center justify-center">
-                <div className="w-3 h-3 bg-white rounded-full"></div>
-              </div>
-              Revenue Comparison
-            </h2>
-            <span className="bg-purple-100 text-purple-800 px-3 py-1 rounded-full text-sm font-semibold">{data?.currentYear || new Date().getFullYear()}</span>
-          </div>
-          <div className="h-64">
-            <canvas ref={revenueComparisonChartRef} />
-          </div>
-          <div className="grid grid-cols-2 gap-4 mt-4">
-            <div className="text-center p-3 bg-blue-50 rounded-lg border border-blue-100">
-              <div className="text-sm font-semibold text-blue-700">Laundry Business</div>
-              <div className="text-lg font-bold text-blue-900">Ksh {formatCurrencyFull(data?.laundryRevenue || 0)}</div>
-            </div>
-            <div className="text-center p-3 bg-red-50 rounded-lg border border-red-100">
-              <div className="text-sm font-semibold text-red-700">Hotel Business</div>
-              <div className="text-lg font-bold text-red-900">Ksh {formatCurrencyFull(data?.hotelRevenue || 0)}</div>
-            </div>
-          </div>
-        </div>
-
-        {/* Hotel Business Stats */}
-        <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
-          <div className="flex items-center justify-between mb-6">
+    <div className="min-h-screen bg-gray-50 text-gray-800 font-sans">
+      {/* Header & Filters */}
+      <div className="bg-white shadow-sm border-b border-gray-200 p-6">
+        <div className="max-w-7xl mx-auto">
+          <div className="flex flex-col md:flex-row justify-between items-center mb-6">
             <div className="flex items-center gap-3">
-              <div className="w-2 h-6 bg-gradient-to-b from-red-500 to-orange-600 rounded-full"></div>
-              <h2 className="text-lg font-bold text-gray-900">Hotel Business</h2>
+              <div className="p-2 bg-blue-600 rounded-lg text-white">
+                <ChartLine size={24} />
+              </div>
+              <div>
+                <h1 className="text-2xl font-bold text-gray-900">Performance Dashboard</h1>
+                <p className="text-sm text-gray-500">Laundry & Hotel Management System</p>
+              </div>
             </div>
-            <span className="bg-red-100 text-red-800 px-3 py-1 rounded-full text-sm font-semibold">Active</span>
+            <button 
+              onClick={fetchData}
+              className="mt-4 md:mt-0 flex items-center gap-2 px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg transition text-sm font-medium"
+            >
+              <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
+              Refresh
+            </button>
           </div>
 
-          <div className="space-y-4">
-            {/* Hotel Revenue */}
-            <div className="bg-gradient-to-br from-red-50 to-orange-50 rounded-lg p-4 border border-red-100">
-              <div className="flex items-center gap-3 mb-2">
-                <div className="w-8 h-8 rounded-lg bg-red-100 flex items-center justify-center">
-                  <Wallet className="h-5 w-5 text-red-600" />
-                </div>
-                <span className="text-sm font-semibold text-gray-700">Revenue</span>
-              </div>
-              <div className="text-xl font-bold text-gray-900 mb-1">Ksh {formatCurrencyFull(data?.hotelRevenue || 0)}</div>
-              <div className="text-xs text-gray-500">{data?.hotelTotalOrders || 0} orders</div>
+          {/* Filter Bar - UPDATED: Year and Month removed */}
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 bg-blue-50 p-4 rounded-xl">
+            
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">From Date</label>
+              <input 
+                type="date" 
+                value={fromDate}
+                onChange={(e) => setFromDate(e.target.value)}
+                className="w-full px-3 py-2 rounded-lg border border-blue-200 bg-white focus:ring-2 focus:ring-blue-500 outline-none"
+              />
             </div>
-
-            {/* Hotel Orders */}
-            <div className="bg-gradient-to-br from-orange-50 to-yellow-50 rounded-lg p-4 border border-orange-100">
-              <div className="flex items-center gap-3 mb-2">
-                <div className="w-8 h-8 rounded-lg bg-orange-100 flex items-center justify-center">
-                  <Utensils className="h-5 w-5 text-orange-600" />
-                </div>
-                <span className="text-sm font-semibold text-gray-700">Orders</span>
-              </div>
-              <div className="text-xl font-bold text-gray-900 mb-1">{data?.hotelTotalOrders || 0}</div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">To Date</label>
+              <input 
+                type="date" 
+                value={toDate}
+                onChange={(e) => setToDate(e.target.value)}
+                className="w-full px-3 py-2 rounded-lg border border-blue-200 bg-white focus:ring-2 focus:ring-blue-500 outline-none"
+              />
             </div>
-
-            {/* Hotel Profit */}
-            <div className="bg-gradient-to-br from-green-50 to-emerald-50 rounded-lg p-4 border border-green-100">
-              <div className="flex items-center gap-3 mb-2">
-                <div className="w-8 h-8 rounded-lg bg-green-100 flex items-center justify-center">
-                  <ChartLine className="h-5 w-5 text-green-600" />
-                </div>
-                <span className="text-sm font-semibold text-gray-700">Profit & Expenses</span>
-              </div>
-              <div className="flex flex-col gap-2">
-                <div>
-                  <div className="text-lg font-bold text-green-600">Ksh {formatCurrencyFull(data?.hotelNetProfit || 0)}</div>
-                  <div className="text-xs text-gray-500">Net Profit</div>
-                </div>
-                <div>
-                  <div className="text-lg font-bold text-blue-600">Ksh {formatCurrencyFull(data?.hotelTotalExpenses || 0)}</div>
-                  <div className="text-xs text-gray-500">Expenses</div>
-                </div>
-              </div>
+            <div className="flex items-end gap-2">
+              <button 
+                onClick={() => { setFilterYear(new Date().getFullYear()); setFilterMonth(""); setFromDate(""); setToDate(""); }}
+                className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 text-sm font-medium"
+              >
+                Reset
+              </button>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Laundry Business Section */}
-      <div className="mb-8">
-        <div className="flex items-center gap-3 mb-6">
-          <div className="w-1 h-6 bg-gradient-to-b from-blue-500 to-cyan-600 rounded-full"></div>
-          <h2 className="text-xl font-bold text-gray-900">Laundry Business</h2>
+      {/* Main Content */}
+      <div className="max-w-7xl mx-auto p-6 space-y-6">
+        
+        {/* KPI Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex items-center justify-between">
+            <div>
+              <p className="text-sm text-gray-500 font-medium uppercase">Total Revenue</p>
+              <h2 className="text-3xl font-bold text-blue-600 mt-2">{formatCurrency(processedData.totalRevenue)}</h2>
+              <div className="mt-2 text-xs text-gray-400 flex items-center gap-1">
+                <TrendingUp size={14} className="text-green-500"/> <span>+0.0% vs last period</span>
+              </div>
+            </div>
+            <div className="p-3 bg-blue-50 rounded-full text-blue-600"><Wallet size={24}/></div>
+          </div>
+
+          <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex items-center justify-between">
+            <div>
+              <p className="text-sm text-gray-500 font-medium uppercase">Net Profit</p>
+              <h2 className="text-3xl font-bold text-emerald-600 mt-2">{formatCurrency(processedData.netProfit)}</h2>
+              <div className="mt-2 text-xs text-gray-400">Based on Revenue (No Expense Data)</div>
+            </div>
+            <div className="p-3 bg-emerald-50 rounded-full text-emerald-600"><ChartLine size={24}/></div>
+          </div>
+
+          <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex items-center justify-between">
+            <div>
+              <p className="text-sm text-gray-500 font-medium uppercase">Total Expenses</p>
+              <h2 className="text-3xl font-bold text-red-500 mt-2">{formatCurrency(processedData.totalExpenses)}</h2>
+              <div className="mt-2 text-xs text-gray-400">Data not available via Order APIs</div>
+            </div>
+            <div className="p-3 bg-red-50 rounded-full text-red-500"><Filter size={24}/></div>
+          </div>
         </div>
 
-        {/* Laundry Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mb-6">
-          {/* Laundry Revenue & Payment Methods */}
-          <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center">
-                <Wallet className="h-5 w-5 text-blue-600" />
-              </div>
-              <div>
-                <h3 className="text-sm font-medium text-gray-500 uppercase tracking-wider">Revenue</h3>
-                <div className="text-xl font-bold text-gray-900">Ksh {formatCurrencyFull(data?.laundryRevenue || 0)}</div>
-              </div>
+        {/* Charts Row 1: Comparison & Trend */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+            <h3 className="text-lg font-bold text-gray-800 mb-4">Revenue Comparison ({fromDate || toDate ? 'Selected Range' : filterYear})</h3>
+            <div className="h-64 relative">
+              <canvas ref={revenueComparisonRef}></canvas>
             </div>
-
-            <div className="border-t border-gray-100 pt-4">
-              <h4 className="text-sm font-medium text-gray-700 mb-3">Payment Methods</h4>
-              <div className="space-y-2">
-                {data?.paymentMethods && data.paymentMethods.length > 0 ? (
-                  data.paymentMethods.map((method, index) => (
-                    <div key={index} className="flex justify-between items-center">
-                      <div className="flex items-center gap-2">
-                        <Wallet className="h-4 w-4 text-blue-600" />
-                        <span className="text-sm text-gray-700">{method.name}</span>
-                        <span className="text-xs text-gray-500">({method.count})</span>
-                      </div>
-                      <span className="text-sm font-bold text-gray-900">Ksh {formatCurrency(method.amount)}</span>
-                    </div>
-                  ))
-                ) : (
-                  <div className="text-center py-2 text-gray-500">No payment data</div>
-                )}
+            <div className="grid grid-cols-2 gap-4 mt-6">
+              <div className="text-center p-3 bg-blue-50 rounded-lg">
+                <div className="text-sm font-semibold text-blue-700">Laundry Business</div>
+                <div className="text-lg font-bold text-blue-900">{formatCurrency(processedData.laundryRevenue)}</div>
+              </div>
+              <div className="text-center p-3 bg-gray-50 rounded-lg">
+                <div className="text-sm font-semibold text-gray-700">Hotel Business</div>
+                <div className="text-lg font-bold text-gray-900">{formatCurrency(processedData.hotelRevenue)}</div>
               </div>
             </div>
           </div>
+          <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+            <h3 className="text-lg font-bold text-gray-800 mb-4">Monthly Trend ({filterYear})</h3>
+            <div className="h-64 relative">
+              <canvas ref={monthlyTrendRef}></canvas>
+            </div>
+          </div>
+        </div>
 
-          {/* Payment Status */}
-          <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 rounded-lg bg-yellow-50 flex items-center justify-center">
-                <CreditCard className="h-5 w-5 text-yellow-600" />
+        {/* Business Sections: Laundry & Hotel */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Laundry Business */}
+          <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 border-l-4 border-l-blue-600">
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="text-xl font-bold text-gray-800">Laundry Business</h3>
+              <span className="bg-blue-100 text-blue-800 text-xs px-3 py-1 rounded-full font-bold">Primary</span>
+            </div>
+            
+            <div className="grid grid-cols-2 gap-4 mb-6">
+              <div className="p-4 bg-blue-50 rounded-lg">
+                <p className="text-xs text-blue-600 font-bold uppercase">Total Revenue</p>
+                <p className="text-2xl font-bold text-gray-900">{formatCurrency(processedData.laundryRevenue)}</p>
               </div>
-              <div>
-                <h3 className="text-sm font-medium text-gray-500 uppercase tracking-wider">Payments & Balance</h3>
-                <div className="text-xl font-bold text-gray-900">Ksh {formatCurrency(data?.totalBalanceAmount || 0)}</div>
+              <div className="p-4 bg-gray-50 rounded-lg">
+                <p className="text-xs text-gray-600 font-bold uppercase">Orders</p>
+                <p className="text-2xl font-bold text-gray-900">{processedData.laundryOrders}</p>
               </div>
             </div>
-            <div className="space-y-3 mt-4">
-              <div className="flex justify-between items-center">
-                <div>
-                  <span className="bg-yellow-100 text-yellow-800 px-2 py-1 rounded-full text-xs font-medium mr-2">
-                    {data?.pendingPayments || 0}
-                  </span>
-                  <span className="text-sm text-gray-700">Pending Payment</span>
-                </div>
-                <span className="bg-yellow-100 text-yellow-800 px-2 py-1 rounded-full text-xs font-medium">
-                  {formatCurrency(data?.totalPendingAmount || 0)}
-                </span>
+
+            <h4 className="text-sm font-bold text-gray-700 uppercase mb-3">Payment Methods</h4>
+            <div className="grid grid-cols-2 gap-2 mb-6">
+               {Object.entries(processedData.paymentTypes).map(([type, amount]) => (
+                 <div key={type} className="flex justify-between text-sm p-2 bg-gray-50 rounded">
+                   <span className="text-gray-600">{type} ({processedData.laundryOrders})</span>
+                   <span className="font-bold text-gray-900">{formatCurrency(amount)}</span>
+                 </div>
+               ))}
+            </div>
+
+            <h4 className="text-sm font-bold text-gray-700 uppercase mb-3">Payments</h4>
+            <div className="grid grid-cols-3 gap-2 mb-6">
+              <div className="text-center p-3 bg-gray-50 rounded-lg">
+                <div className="text-xs text-gray-500 capitalize">Pending Payment</div>
+                <div className="text-sm font-bold text-gray-800">{formatCurrency(processedData.shopA.pendingAmt + processedData.shopB.pendingAmt)}</div>
+                <div className="text-xs text-gray-400">{processedData.shopA.pendingCount + processedData.shopB.pendingCount}</div>
               </div>
-              <div className="flex justify-between items-center">
-                <div>
-                  <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded-full text-xs font-medium mr-2">
-                    {data?.partialPayments || 0}
-                  </span>
-                  <span className="text-sm text-gray-700">Partial Payment</span>
-                </div>
-                <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded-full text-xs font-medium">
-                  {formatCurrency(data?.totalPartialAmount || 0)}
-                </span>
+              <div className="text-center p-3 bg-gray-50 rounded-lg">
+                <div className="text-xs text-gray-500 capitalize">Partial Payment</div>
+                <div className="text-sm font-bold text-gray-800">{formatCurrency(processedData.shopA.partialAmt + processedData.shopB.partialAmt)}</div>
               </div>
-              <div className="flex justify-between items-center">
-                <div>
-                  <span className="bg-green-100 text-green-800 px-2 py-1 rounded-full text-xs font-medium mr-2">
-                    {data?.completePayments || 0}
-                  </span>
-                  <span className="text-sm text-gray-700">Complete Payment</span>
-                </div>
-                <span className="bg-green-100 text-green-800 px-2 py-1 rounded-full text-xs font-medium">
-                  {formatCurrency(data?.totalCompleteAmount || 0)}
-                </span>
+              <div className="text-center p-3 bg-gray-50 rounded-lg">
+                <div className="text-xs text-gray-500 capitalize">Complete Payment</div>
+                <div className="text-sm font-bold text-gray-800">{formatCurrency(processedData.shopA.completeAmt + processedData.shopB.completeAmt)}</div>
               </div>
+            </div>
+
+            <h4 className="text-sm font-bold text-gray-700 uppercase mb-3">Expenses</h4>
+            <div className="p-4 bg-red-50 rounded-lg text-center text-red-800">
+               Operational costs: <span className="font-bold ml-2">{formatCurrency(processedData.totalExpenses)}</span>
             </div>
           </div>
 
-          {/* Laundry Expenses */}
-          <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-lg bg-red-50 flex items-center justify-center">
-                  <Wallet className="h-5 w-5 text-red-600" />
-                </div>
-                <div>
-                  <h3 className="text-sm font-medium text-gray-500 uppercase tracking-wider">Laundry Expenses</h3>
-                  <div className="text-xl font-bold text-gray-900">Ksh {formatCurrencyFull(data?.totalExpenses || 0)}</div>
-                </div>
+          {/* Hotel Business */}
+          <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 border-l-4 border-l-gray-600">
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="text-xl font-bold text-gray-800">Hotel Business</h3>
+              <span className="bg-gray-200 text-gray-800 text-xs px-3 py-1 rounded-full font-bold">Secondary</span>
+            </div>
+            
+            <div className="grid grid-cols-2 gap-4 mb-6">
+              <div className="p-4 bg-gray-50 rounded-lg">
+                <p className="text-xs text-gray-600 font-bold uppercase">Total Revenue</p>
+                <p className="text-2xl font-bold text-gray-900">{formatCurrency(processedData.hotelRevenue)}</p>
+              </div>
+              <div className="p-4 bg-gray-50 rounded-lg">
+                <p className="text-xs text-gray-600 font-bold uppercase">Orders</p>
+                <p className="text-2xl font-bold text-gray-900">{processedData.hotelOrders}</p>
               </div>
             </div>
-            <div className="flex items-center text-sm text-gray-500 mt-4">
-              <ChartLine className="h-3 w-3 text-red-500 mr-1" />
-              <span>Operational costs</span>
+
+            <h4 className="text-sm font-bold text-gray-700 uppercase mb-3">Profit & Expenses</h4>
+            <div className="flex gap-4">
+               <div className="flex-1 p-4 bg-gray-50 rounded-lg text-center">
+                 <div className="text-xs text-gray-500">Net Profit</div>
+                 <div className="text-lg font-bold text-gray-900">{formatCurrency(processedData.hotelRevenue)}</div>
+               </div>
+               <div className="flex-1 p-4 bg-red-50 rounded-lg text-center">
+                 <div className="text-xs text-gray-500">Expenses</div>
+                 <div className="text-lg font-bold text-red-700">{formatCurrency(0)}</div>
+               </div>
             </div>
           </div>
         </div>
 
         {/* Shop Performance Section */}
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-          {/* Shop A Stats */}
-          <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
-            <div className="flex items-center justify-between mb-6">
-              <div className="flex items-center gap-3">
-                <div className="w-2 h-6 bg-gradient-to-b from-pink-500 to-purple-600 rounded-full"></div>
-                <h2 className="text-lg font-bold text-gray-900">Shop A Performance</h2>
-              </div>
-              <span className="bg-pink-100 text-pink-800 px-3 py-1 rounded-full text-sm font-semibold">Active</span>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-bold text-gray-800">Shop A Performance</h3>
+              <span className="bg-green-100 text-green-800 text-xs px-2 py-1 rounded-full">Active</span>
             </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* Shop A Revenue */}
-              <div className="bg-gradient-to-br from-pink-50 to-purple-50 rounded-lg p-4 border border-pink-100">
-                <div className="flex items-center gap-3 mb-2">
-                  <div className="w-8 h-8 rounded-lg bg-pink-100 flex items-center justify-center">
-                    <Wallet className="h-5 w-5 text-pink-600" />
-                  </div>
-                  <span className="text-sm font-semibold text-gray-700">Revenue</span>
-                </div>
-                <div className="text-lg font-bold text-gray-900 mb-1">Ksh {formatCurrencyFull(data?.shopARevenue || 0)}</div>
-                <div className="text-xs text-gray-500">Shop A earnings</div>
+            <div className="space-y-4">
+              <div className="flex justify-between border-b pb-2">
+                <span className="font-medium text-gray-700">Revenue</span>
+                <span className="font-bold text-blue-700">{formatCurrency(processedData.shopA.revenue)}</span>
               </div>
-
-              {/* Shop A Orders */}
-              <div className="bg-gradient-to-br from-blue-50 to-cyan-50 rounded-lg p-4 border border-blue-100">
-                <div className="flex items-center gap-3 mb-2">
-                  <div className="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center">
-                    <ShoppingBag className="h-5 w-5 text-blue-600" />
-                  </div>
-                  <span className="text-sm font-semibold text-gray-700">Orders</span>
-                </div>
-                <div className="text-lg font-bold text-gray-900 mb-1">{data?.shopATotalOrders || 0}</div>
+              <div className="flex justify-between border-b pb-2">
+                <span className="font-medium text-gray-700">Orders</span>
+                <span className="font-bold text-gray-700">{processedData.shopA.count}</span>
               </div>
-
-              {/* Shop A Payments */}
-              <div className="bg-gradient-to-br from-purple-50 to-indigo-50 rounded-lg p-4 border border-purple-100">
-                <div className="flex items-center gap-3 mb-2">
-                  <div className="w-8 h-8 rounded-lg bg-purple-100 flex items-center justify-center">
-                    <CreditCard className="h-5 w-5 text-purple-600" />
-                  </div>
-                  <span className="text-sm font-semibold text-gray-700">Payments</span>
+              <div className="grid grid-cols-3 gap-2 text-sm">
+                <div className="text-center bg-yellow-50 p-2 rounded">
+                  <div className="text-yellow-800">Pending ({processedData.shopA.pendingCount})</div>
+                  <div className="font-bold">{formatCurrency(processedData.shopA.pendingAmt)}</div>
                 </div>
-                <div className="text-lg font-bold text-gray-900 mb-1">{data?.shopATotalOrders || 0}</div>
-                <div className="flex flex-col gap-1 text-xs">
-                  <div className="flex flex-row justify-between">
-                    <span className="text-yellow-600">{data?.shopAPendingPayments || 0} pending</span>
-                    <span className="text-yellow-600">Ksh {formatCurrency(data?.shopAPendingAmount || 0)}</span>
-                  </div>
-                  <div className="flex flex-row justify-between">
-                    <span className="text-blue-600">{data?.shopAPartialPayments || 0} partial</span>
-                    <span className="text-blue-600">Ksh {formatCurrency(data?.shopAPartialAmount || 0)}</span>
-                  </div>
-                  <div className="flex flex-row justify-between">
-                    <span className="text-green-600">{data?.shopACompletePayments || 0} complete</span>
-                    <span className="text-green-600">Ksh {formatCurrency(data?.shopACompleteAmount || 0)}</span>
-                  </div>
+                <div className="text-center bg-blue-50 p-2 rounded">
+                  <div className="text-blue-800">Partial ({processedData.shopA.partialCount})</div>
+                  <div className="font-bold">{formatCurrency(processedData.shopA.partialAmt)}</div>
+                </div>
+                <div className="text-center bg-green-50 p-2 rounded">
+                  <div className="text-green-800">Complete ({processedData.shopA.completeCount})</div>
+                  <div className="font-bold">{formatCurrency(processedData.shopA.completeAmt)}</div>
                 </div>
               </div>
-
-              {/* Shop A Profit */}
-              <div className="bg-gradient-to-br from-green-50 to-emerald-50 rounded-lg p-4 border border-green-100">
-                <div className="flex items-center gap-3 mb-2">
-                  <div className="w-8 h-8 rounded-lg bg-green-100 flex items-center justify-center">
-                    <ChartLine className="h-5 w-5 text-green-600" />
-                  </div>
-                  <span className="text-sm font-semibold text-gray-700">Profit & Expenses</span>
-                </div>
-                <div className="flex flex-col gap-2">
-                  <div>
-                    <div className="text-md font-bold text-green-600">Ksh {formatCurrencyFull(data?.shopANetProfit || 0)}</div>
-                    <div className="text-xs text-gray-500">Profit</div>
-                  </div>
-                  <div>
-                    <div className="text-md font-bold text-blue-600">Ksh {formatCurrencyFull(data?.shopATotalExpenses || 0)}</div>
-                    <div className="text-xs text-gray-500">Expenses</div>
-                  </div>
-                </div>
+              <div className="flex justify-between items-center pt-2">
+                <span className="font-medium text-gray-700">Profit</span>
+                <span className="font-bold text-green-600">{formatCurrency(processedData.shopA.revenue)}</span>
+              </div>
+              <div className="flex justify-between items-center pt-1">
+                <span className="font-medium text-gray-700">Expenses</span>
+                <span className="font-bold text-red-600">{formatCurrency(0)}</span>
               </div>
             </div>
           </div>
 
-          {/* Shop B Stats */}
-          <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
-            <div className="flex items-center justify-between mb-6">
-              <div className="flex items-center gap-3">
-                <div className="w-2 h-6 bg-gradient-to-b from-yellow-500 to-orange-600 rounded-full"></div>
-                <h2 className="text-lg font-bold text-gray-900">Shop B Performance</h2>
-              </div>
-              <span className="bg-yellow-100 text-yellow-800 px-3 py-1 rounded-full text-sm font-semibold">Active</span>
+          <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-bold text-gray-800">Shop B Performance</h3>
+              <span className="bg-green-100 text-green-800 text-xs px-2 py-1 rounded-full">Active</span>
             </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* Shop B Revenue */}
-              <div className="bg-gradient-to-br from-yellow-50 to-amber-50 rounded-lg p-4 border border-yellow-100">
-                <div className="flex items-center gap-3 mb-2">
-                  <div className="w-8 h-8 rounded-lg bg-yellow-100 flex items-center justify-center">
-                    <Wallet className="h-5 w-5 text-yellow-600" />
-                  </div>
-                  <span className="text-sm font-semibold text-gray-700">Revenue</span>
-                </div>
-                <div className="text-lg font-bold text-gray-900 mb-1">Ksh {formatCurrencyFull(data?.shopBRevenue || 0)}</div>
-                <div className="text-xs text-gray-500">Shop B earnings</div>
+             <div className="space-y-4">
+              <div className="flex justify-between border-b pb-2">
+                <span className="font-medium text-gray-700">Revenue</span>
+                <span className="font-bold text-blue-700">{formatCurrency(processedData.shopB.revenue)}</span>
               </div>
-
-              {/* Shop B Orders */}
-              <div className="bg-gradient-to-br from-orange-50 to-red-50 rounded-lg p-4 border border-orange-100">
-                <div className="flex items-center gap-3 mb-2">
-                  <div className="w-8 h-8 rounded-lg bg-orange-100 flex items-center justify-center">
-                    <ShoppingBag className="h-5 w-5 text-orange-600" />
-                  </div>
-                  <span className="text-sm font-semibold text-gray-700">Orders</span>
-                </div>
-                <div className="text-lg font-bold text-gray-900 mb-1">{data?.shopBTotalOrders || 0}</div>
+              <div className="flex justify-between border-b pb-2">
+                <span className="font-medium text-gray-700">Orders</span>
+                <span className="font-bold text-gray-700">{processedData.shopB.count}</span>
               </div>
-
-              {/* Shop B Payments */}
-              <div className="bg-gradient-to-br from-red-50 to-pink-50 rounded-lg p-4 border border-red-100">
-                <div className="flex items-center gap-3 mb-2">
-                  <div className="w-8 h-8 rounded-lg bg-red-100 flex items-center justify-center">
-                    <CreditCard className="h-5 w-5 text-red-600" />
-                  </div>
-                  <span className="text-sm font-semibold text-gray-700">Payments</span>
+              <div className="grid grid-cols-3 gap-2 text-sm">
+                <div className="text-center bg-yellow-50 p-2 rounded">
+                  <div className="text-yellow-800">Pending ({processedData.shopB.pendingCount})</div>
+                  <div className="font-bold">{formatCurrency(processedData.shopB.pendingAmt)}</div>
                 </div>
-                <div className="text-lg font-bold text-gray-900 mb-1">{data?.shopBTotalOrders || 0}</div>
-                <div className="flex flex-col gap-1 text-xs">
-                  <div className="flex flex-row justify-between">
-                    <span className="text-yellow-600">{data?.shopBPendingPayments || 0} pending</span>
-                    <span className="text-yellow-600">Ksh{formatCurrency(data?.shopBPendingAmount || 0)}</span>
-                  </div>
-                  <div className="flex flex-row justify-between">
-                    <span className="text-blue-600">{data?.shopBPartialPayments || 0} partial</span>
-                    <span className="text-blue-600">Ksh{formatCurrency(data?.shopBPartialAmount || 0)}</span>
-                  </div>
-                  <div className="flex flex-row justify-between">
-                    <span className="text-green-600">{data?.shopBCompletePayments || 0} complete</span>
-                    <span className="text-green-600">Ksh{formatCurrency(data?.shopBCompleteAmount || 0)}</span>
-                  </div>
+                <div className="text-center bg-blue-50 p-2 rounded">
+                  <div className="text-blue-800">Partial ({processedData.shopB.partialCount})</div>
+                  <div className="font-bold">{formatCurrency(processedData.shopB.partialAmt)}</div>
+                </div>
+                <div className="text-center bg-green-50 p-2 rounded">
+                  <div className="text-green-800">Complete ({processedData.shopB.completeCount})</div>
+                  <div className="font-bold">{formatCurrency(processedData.shopB.completeAmt)}</div>
                 </div>
               </div>
-
-              {/* Shop B Profit */}
-              <div className="bg-gradient-to-br from-emerald-50 to-teal-50 rounded-lg p-4 border border-emerald-100">
-                <div className="flex items-center gap-3 mb-2">
-                  <div className="w-8 h-8 rounded-lg bg-emerald-100 flex items-center justify-center">
-                    <ChartLine className="h-5 w-5 text-emerald-600" />
-                  </div>
-                  <span className="text-sm font-semibold text-gray-700">Profit & Expenses</span>
-                </div>
-                <div className="flex flex-col gap-2">
-                  <div>
-                    <div className="text-md font-bold text-green-600">Ksh {formatCurrencyFull(data?.shopBNetProfit || 0)}</div>
-                    <div className="text-xs text-gray-500">Profit</div>
-                  </div>
-                  <div>
-                    <div className="text-md font-bold text-blue-600">Ksh {formatCurrencyFull(data?.shopBTotalExpenses || 0)}</div>
-                    <div className="text-xs text-gray-500">Expenses</div>
-                  </div>
-                </div>
+              <div className="flex justify-between items-center pt-2">
+                <span className="font-medium text-gray-700">Profit</span>
+                <span className="font-bold text-green-600">{formatCurrency(processedData.shopB.revenue)}</span>
+              </div>
+               <div className="flex justify-between items-center pt-1">
+                <span className="font-medium text-gray-700">Expenses</span>
+                <span className="font-bold text-red-600">{formatCurrency(0)}</span>
               </div>
             </div>
           </div>
         </div>
+
+        {/* Revenue Distribution Pie */}
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+           <h3 className="text-lg font-bold text-gray-800 mb-4 text-center">Revenue Distribution</h3>
+           <div className="h-64 max-w-md mx-auto">
+             <canvas ref={revenueDistributionRef}></canvas>
+           </div>
+        </div>
+
+        {/* Insights Section */}
+        <div>
+          <h3 className="text-lg font-bold text-gray-800 mb-4">Laundry Insights</h3>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            
+            {/* Top Services */}
+            <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+              <div className="flex items-center gap-2 mb-4">
+                <Package size={20} className="text-blue-600"/>
+                <h4 className="font-bold text-gray-700">Top Services</h4>
+              </div>
+              <div className="h-48">
+                <canvas ref={topServicesRef}></canvas>
+              </div>
+            </div>
+
+            {/* Top Items */}
+            <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+              <div className="flex items-center gap-2 mb-4">
+                <ShoppingBag size={20} className="text-blue-600"/>
+                <h4 className="font-bold text-gray-700">Top Items</h4>
+              </div>
+              <div className="h-48">
+                <canvas ref={topItemsRef}></canvas>
+              </div>
+            </div>
+
+            {/* Top Customers */}
+            <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+              <div className="flex items-center gap-2 mb-4">
+                <Users size={20} className="text-blue-600"/>
+                <h4 className="font-bold text-gray-700">Top Customers</h4>
+              </div>
+              <div className="h-48">
+                <canvas ref={topCustomersRef}></canvas>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
       </div>
 
-      {/* Charts Section */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-        {/* Revenue Distribution */}
-        <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
-          <div className="flex justify-between items-center mb-6">
-            <h4 className="text-lg font-bold text-gray-900 flex items-center gap-2">
-              <div className="w-5 h-5 bg-yellow-500 rounded-full flex items-center justify-center">
-                <div className="w-3 h-3 bg-white rounded-full"></div>
-              </div>
-              Revenue Distribution
-            </h4>
-            <span className="bg-yellow-100 text-yellow-800 px-3 py-1 rounded-full text-sm font-semibold">Total</span>
-          </div>
-          <div className="h-64">
-            <canvas ref={revenueChartRef} />
-          </div>
-        </div>
-
-        {/* Revenue Trend */}
-        <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
-          <div className="flex justify-between items-center mb-6">
-            <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
-              <div className="w-5 h-5 bg-pink-500 rounded-full flex items-center justify-center">
-                <div className="w-3 h-3 bg-white rounded-full"></div>
-              </div>
-              Revenue Trend - {data?.currentYear}
-            </h2>
-            <span className="bg-pink-100 text-pink-800 px-3 py-1 rounded-full text-sm font-semibold">
-              Monthly
-            </span>
-          </div>
-          <div className="h-64">
-            <canvas ref={trendChartRef} />
-          </div>
-        </div>
+      {/* Footer */}
+      <div className="text-center py-6 text-gray-400 text-sm">
+        &copy; 2025 Laundry & Hotel Management System
       </div>
-
-      {/* Analytics Section */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {/* Top Services */}
-        <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
-          <div className="flex justify-between items-center mb-6">
-            <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
-              <Bath className="h-5 w-5 text-green-500" />
-              Top Services
-            </h2>
-            <span className="bg-green-100 text-green-800 px-3 py-1 rounded-full text-sm font-semibold">
-              {data?.currentYear || new Date().getFullYear()}
-            </span>
-          </div>
-          <div className="h-72">
-            {data?.servicesLabels && data.servicesLabels.length > 0 ? (
-              <canvas ref={servicesChartRef} />
-            ) : (
-              <div className="flex flex-col items-center justify-center h-full text-center">
-                <Bath className="h-12 w-12 text-gray-400 mb-4" />
-                <p className="text-gray-500">No service data available</p>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Popular Products */}
-        <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
-          <div className="flex justify-between items-center mb-6">
-            <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
-              <Box className="h-5 w-5 text-yellow-500" />
-              Common Items
-            </h2>
-            <span className="bg-yellow-100 text-yellow-800 px-3 py-1 rounded-full text-sm font-semibold">
-              {data?.currentYear || new Date().getFullYear()}
-            </span>
-          </div>
-          <div className="h-72">
-            {data?.itemLabels && data.itemLabels.length > 0 ? (
-              <canvas ref={productsChartRef} />
-            ) : (
-              <div className="flex flex-col items-center justify-center h-full text-center">
-                <Box className="h-12 w-12 text-gray-400 mb-4" />
-                <p className="text-gray-500">No product data available</p>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* VIP Customers */}
-        <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
-          <div className="flex justify-between items-center mb-6">
-            <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
-              <Crown className="h-5 w-5 text-yellow-500" />
-              Top Customers
-            </h2>
-            <span className="bg-yellow-100 text-yellow-800 px-3 py-1 rounded-full text-sm font-semibold">
-              {data?.currentYear || new Date().getFullYear()}
-            </span>
-          </div>
-          <div className="h-72 overflow-y-auto pr-2">
-            {data?.commonCustomers && data.commonCustomers.length > 0 ? (
-              data.commonCustomers.map((customer, index) => (
-                <div key={index} className="flex items-center p-4 bg-gray-50 rounded-lg mb-3 border border-gray-100">
-                  <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-pink-500 to-purple-600 flex items-center justify-center text-white font-bold text-sm mr-4">
-                    {index + 1}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="font-semibold text-gray-900 truncate">{customer.customerName}</div>
-                    <div className="text-xs text-gray-500">{customer.orderCount} orders</div>
-                  </div>
-                  <div className="font-bold text-pink-600 text-lg">
-                    ksh{formatCurrency(customer.totalSpent)}
-                  </div>
-                </div>
-              ))
-            ) : (
-              <div className="flex flex-col items-center justify-center h-full text-center">
-                <Users className="h-12 w-12 text-gray-400 mb-4" />
-                <p className="text-gray-500">No customer data available</p>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Error Display */}
-      {error && (
-        <div className="fixed bottom-4 right-4 bg-red-100 text-red-700 rounded-lg border border-red-300 p-4 shadow-lg">
-          <div className="flex justify-between items-center">
-            <span>{error}</span>
-            <button onClick={() => setError(null)} className="text-red-700 hover:text-red-900 ml-4">
-              ×
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

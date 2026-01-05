@@ -75,6 +75,7 @@ export interface FoodItem {
   category_id: number;
   created_by: User;
   quantity: number;
+  created_at:string;
   total_order_price: number;
 }
 
@@ -83,14 +84,14 @@ export interface HotelOrderItem {
   order?: number;
   food_item: FoodItem;
   food_item_name: string;
-  food_item_id: HotelOrder;
+  food_item_id: number;
   quantity: number;
   price: any;
   oncredit:boolean;
   name:string;
-  
 
- 
+
+
 }
 
 export interface HotelOrder {

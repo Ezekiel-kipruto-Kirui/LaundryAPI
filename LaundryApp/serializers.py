@@ -233,10 +233,11 @@ class ExpenseRecordSerializer(serializers.ModelSerializer):
         queryset=ExpenseField.objects.all(),
         write_only=True
     )
+    description = serializers.CharField(source='notes', required=False, allow_blank=True)
 
     class Meta:
         model = ExpenseRecord
-        fields = ['id', 'field', 'field_id', 'shop', 'amount', 'date', 'notes']
+        fields = ['id', 'field', 'field_id', 'shop', 'amount', 'date', 'description']
         read_only_fields = ['date']
 
     def create(self, validated_data):

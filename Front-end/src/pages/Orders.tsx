@@ -1,14 +1,14 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { API_BASE_URL } from "@/services/url";
 import {
   Home, Search, Download, ChevronDown,
   PlusCircle, CheckCircle, Truck, X, Edit, Trash2,
   Filter, Clock, Check, Truck as TruckIcon,
   MoreVertical, Inbox, ChevronLeft, ChevronRight,
-  Wallet, PlusCircle as PlusCircleIcon, CreditCard, XCircle,
+  Wallet, CreditCard, XCircle,
   FileText, FileSpreadsheet, Printer, Loader2, EllipsisVertical,
-  MessageSquare, Send, Calendar, CheckSquare, Square, Phone,
-  Database, AlertCircle, Users, Package, DollarSign
+  MessageSquare, Send, Calendar, Phone,
+  Database, AlertCircle
 } from 'lucide-react';
 import { Order, OrderItem } from "@/services/types";
 import { ROUTES } from "@/services/Routes";
@@ -16,13 +16,9 @@ import { ROUTES } from "@/services/Routes";
 export const ORDERS_URL = `${API_BASE_URL}/Laundry/orders/`;
 export const SEND_SMS_URL = `${API_BASE_URL}/Laundry/send_sms/`;
 
-// Helper function to get auth token
-const getAuthToken = (): string | null => {
-  return localStorage.getItem("accessToken");
-};
+// --- Constants & Types ---
 
-// Status Colors
-const STATUS_COLORS: { [key: string]: { bg: string; text: string; icon: any } } = {
+const STATUS_COLORS: { [key: string]:  { bg: string; text: string; icon: any } } = {
   'Completed': { bg: 'bg-green-100', text: 'text-green-800', icon: CheckCircle },
   'pending': { bg: 'bg-yellow-100', text: 'text-yellow-800', icon: Clock },
   'Delivered_picked': { bg: 'bg-purple-100', text: 'text-purple-800', icon: TruckIcon },
@@ -34,7 +30,83 @@ const PAYMENT_STATUS_COLORS: { [key: string]: { bg: string; text: string; icon: 
   'pending': { bg: 'bg-red-100', text: 'text-red-800', icon: Clock },
 };
 
-// SMS Dialog Modal Component (unchanged)
+interface PaginatedResponse<T> {
+  count: number;
+  next: string | null;
+  previous: string | null;
+  results: T[];
+  current_page?: number;
+  total_pages?: number;
+  page_size?: number;
+}
+
+interface PaginatedOrdersResponse extends PaginatedResponse<Order> {
+  results: Order[];
+}
+
+interface FilterState {
+  searchQuery: string;
+  paymentFilter: string;
+  shopFilter: string;
+  orderStatusFilter: string;
+  dateFilter: { startDate: string; endDate: string };
+}
+
+// --- Helper Functions (Outside Component) ---
+
+const getAuthToken = (): string | null => localStorage.getItem("accessToken");
+
+const formatCurrency = (amount: string | number): string => {
+  const numAmount = typeof amount === 'string' ? parseFloat(amount) : amount;
+  return `KSh ${numAmount.toLocaleString('en-KE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+};
+
+const formatDate = (dateString: string): string => {
+  return new Date(dateString).toLocaleDateString('en-US', {
+    year: 'numeric', month: 'short', day: 'numeric',
+  });
+};
+
+const calculateDaysSince = (dateString: string): number => {
+  const orderDate = new Date(dateString);
+  const today = new Date();
+  const diffTime = Math.abs(today.getTime() - orderDate.getTime());
+  return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+};
+
+const formatServiceType = (servicetype: string[]): string => servicetype.join(', ');
+
+const getUserFullName = (order: Order): string => {
+  if (order.created_by) {
+    const firstName = order.created_by.first_name || '';
+    const lastName = order.created_by.last_name || '';
+    return `${firstName} ${lastName}`.trim() || 'Unknown';
+  }
+  return 'Unknown';
+};
+
+const apiFetch = async <T,>(url: string, options: RequestInit = {}): Promise<T> => {
+  const token = getAuthToken();
+  const headers: HeadersInit = {
+    'Content-Type': 'application/json',
+    ...(token && { 'Authorization': `Bearer ${token}` }),
+    ...options.headers,
+  };
+
+  const response = await fetch(url, { ...options, headers });
+
+  if (!response.ok) {
+    if (response.status === 401) throw new Error('Unauthorized');
+    const errorText = await response.text();
+    console.error(`API Error ${response.status}:`, errorText);
+    throw new Error(`HTTP error! status: ${response.status}`);
+  }
+
+  return response.json();
+};
+
+// --- Components ---
+
 const SMSDialogModal = ({
   selectedOrders,
   allOrders = [],
@@ -50,22 +122,16 @@ const SMSDialogModal = ({
   onClose: () => void,
   loadAllOrders?: () => Promise<void>,
   loadingAll?: boolean,
-  currentFilters?: any
+  currentFilters?: FilterState
 }) => {
   const [message, setMessage] = useState('');
   const [sending, setSending] = useState(false);
-  const [previewMessage, setPreviewMessage] = useState('');
   const [useAllOrders, setUseAllOrders] = useState(false);
   
-  // Determine which orders to use
   const ordersToUse = useAllOrders ? allOrders : selectedOrders;
-  
-  const handleSend = async () => {
-    if (!message.trim()) {
-      alert('Please enter a message');
-      return;
-    }
 
+  const handleSend = async () => {
+    if (!message.trim()) return alert('Please enter a message');
     setSending(true);
     try {
       await onSend(message, ordersToUse);
@@ -74,97 +140,37 @@ const SMSDialogModal = ({
     }
   };
 
-  // Generate default reminder message
   const generateDefaultMessage = () => {
     const orders = ordersToUse.slice(0, 3);
     const customerNames = orders.map(order => order.customer.name.split(' ')[0]);
     const nameList = customerNames.join(', ');
     const extra = ordersToUse.length > 3 ? ` and ${ordersToUse.length - 3} others` : '';
-
     return `Dear ${nameList}${extra}, this is a friendly reminder about your pending laundry order. Please visit us to collect your items. Thank you!`;
   };
-
-  const handleUseDefault = () => {
-    setMessage(generateDefaultMessage());
-  };
-
-  useEffect(() => {
-    if (ordersToUse.length === 1) {
-      const order = ordersToUse[0];
-      setPreviewMessage(`SMS will be sent to: ${order.customer.name} (${order.customer.phone})`);
-    } else {
-      setPreviewMessage(`SMS will be sent to ${ordersToUse.length} customers`);
-    }
-  }, [ordersToUse]);
 
   return (
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg">
         <div className="px-6 py-4 border-b border-gray-200">
-          <h2 className="text-xl font-semibold text-gray-900">
-            <MessageSquare className="inline-block w-5 h-5 mr-2" />
+          <h2 className="text-xl font-semibold text-gray-900 flex items-center">
+            <MessageSquare className="w-5 h-5 mr-2" />
             Send SMS to Customers
           </h2>
         </div>
         <div className="p-6">
-          {/* Current Filters Info */}
           {currentFilters && (
             <div className="mb-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
               <p className="text-xs font-medium text-blue-800 mb-1">Current Filters:</p>
               <div className="flex flex-wrap gap-1">
-                {currentFilters.search && (
-                  <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">Search: {currentFilters.search}</span>
-                )}
-                {currentFilters.paymentFilter && (
-                  <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">Payment: {currentFilters.paymentFilter}</span>
-                )}
-                {currentFilters.orderStatusFilter && (
-                  <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">Status: {currentFilters.orderStatusFilter}</span>
-                )}
-                {currentFilters.dateFilter.startDate && (
-                  <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">From: {currentFilters.dateFilter.startDate}</span>
-                )}
-                {currentFilters.dateFilter.endDate && (
-                  <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">To: {currentFilters.dateFilter.endDate}</span>
-                )}
+                {currentFilters.searchQuery && <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">Search: {currentFilters.searchQuery}</span>}
+                {currentFilters.paymentFilter && <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">Payment: {currentFilters.paymentFilter}</span>}
+                {currentFilters.orderStatusFilter && <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">Status: {currentFilters.orderStatusFilter}</span>}
+                {currentFilters.dateFilter.startDate && <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">From: {currentFilters.dateFilter.startDate}</span>}
+                {currentFilters.dateFilter.endDate && <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">To: {currentFilters.dateFilter.endDate}</span>}
               </div>
             </div>
           )}
 
-          {/* Load All Orders Option */}
-          {/* {loadAllOrders && allOrders.length === 0 && (
-            <div className="mb-6 p-4 bg-blue-50 rounded-lg border border-blue-200">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-blue-800 font-medium mb-1">
-                    Want to send SMS to all customers?
-                  </p>
-                  <p className="text-xs text-blue-600">
-                    Load all orders to send SMS to all matching your current filters.
-                  </p>
-                </div>
-                <button
-                  onClick={loadAllOrders}
-                  disabled={loadingAll}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center"
-                >
-                  {loadingAll ? (
-                    <>
-                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                      Loading...
-                    </>
-                  ) : (
-                    <>
-                      <Database className="w-4 h-4 mr-2" />
-                      Load All Orders
-                    </>
-                  )}
-                </button>
-              </div>
-            </div>
-          )} */}
-
-          {/* All Orders Toggle */}
           {allOrders.length > 0 && (
             <div className="mb-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
               <label className="flex items-center cursor-pointer">
@@ -172,29 +178,20 @@ const SMSDialogModal = ({
                   type="checkbox"
                   checked={useAllOrders}
                   onChange={(e) => setUseAllOrders(e.target.checked)}
-                  className="sr-only"
+                  className="sr-only peer"
                 />
-                <div className={`relative w-11 h-6 bg-gray-200 rounded-full transition-colors duration-200 ${useAllOrders ? 'bg-green-500' : ''}`}>
-                  <div className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform duration-200 ${useAllOrders ? 'transform translate-x-5' : ''}`}></div>
+                <div className={`relative w-11 h-6 bg-gray-200 rounded-full transition-colors duration-200 peer-checked:bg-green-500`}>
+                  <div className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform duration-200 peer-checked:translate-x-5`}></div>
                 </div>
                 <div className="ml-3">
-                  <span className="text-sm font-medium text-gray-900">
-                    Send to all {allOrders.length} filtered orders
-                  </span>
-                  <p className="text-xs text-gray-500 mt-1">
-                    This will send SMS to all orders matching your current filters, not just selected ones.
-                  </p>
+                  <span className="text-sm font-medium text-gray-900">Send to all {allOrders.length} filtered orders</span>
                 </div>
               </label>
             </div>
           )}
 
-         
-          {/* Message Input */}
           <div className="mb-4">
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Message Content
-            </label>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Message Content</label>
             <textarea
               value={message}
               onChange={(e) => setMessage(e.target.value)}
@@ -203,86 +200,32 @@ const SMSDialogModal = ({
               maxLength={160}
             />
             <div className="flex justify-between items-center mt-2">
-              <span className="text-xs text-gray-500">
-                {message.length}/160 characters
-              </span>
-              <button
-                type="button"
-                onClick={handleUseDefault}
-                className="text-xs text-blue-600 hover:text-blue-800 font-medium"
-              >
-                Use Default Reminder
-              </button>
+              <span className="text-xs text-gray-500">{message.length}/160 characters</span>
+              <button type="button" onClick={() => setMessage(generateDefaultMessage())} className="text-xs text-blue-600 hover:text-blue-800 font-medium">Use Default Reminder</button>
             </div>
           </div>
 
-          {/* Character Count Warning */}
-          {/* {message.length > 160 && (
-            <div className="mb-4 p-3 bg-red-50 rounded-lg border border-red-200">
-              <p className="text-sm text-red-700">
-                Message exceeds 160 characters. SMS messages are typically limited to 160 characters.
-              </p>
-            </div>
-          )} */}
-
-          {/* Selected Orders List */}
           <div className="mb-6">
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              {useAllOrders ? 'All Orders' : 'Selected Orders'} ({ordersToUse.length})
-            </label>
-            <div className="max-h-40 overflow-y-auto border border-gray-200 rounded-lg">
-              {ordersToUse.slice(0, 10).map((order) => (
-                <div key={order.id} className="px-4 py-2 border-b border-gray-100 last:border-b-0">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm font-medium text-gray-900">{order.customer.name}</p>
-                      <p className="text-xs text-gray-500">{order.customer.phone}</p>
-                      <p className="text-xs text-gray-400">Order: {order.uniquecode}</p>
-                    </div>
-                    <span className="text-xs text-yellow-600 font-medium">
-                      {order.balance === '0.00' ? 'Paid' : `Balance: ${order.balance}`}
-                    </span>
-                  </div>
-                </div>
-              ))}
-              {ordersToUse.length > 10 && (
-                <div className="px-4 py-2 bg-gray-50">
-                  <p className="text-xs text-gray-600 text-center">
-                    ... and {ordersToUse.length - 10} more orders
-                  </p>
-                </div>
-              )}
-            </div>
+             <label className="block text-sm font-medium text-gray-700 mb-2">Recipients ({ordersToUse.length})</label>
+             <div className="max-h-40 overflow-y-auto border border-gray-200 rounded-lg bg-gray-50">
+               {ordersToUse.slice(0, 10).map((order) => (
+                 <div key={order.id} className="px-4 py-2 border-b border-gray-100 last:border-b-0">
+                   <div className="flex justify-between">
+                     <span className="text-sm font-medium text-gray-900">{order.customer.name}</span>
+                     <span className={`text-xs font-medium ${order.balance === '0.00' ? 'text-green-600' : 'text-yellow-600'}`}>
+                       {order.balance === '0.00' ? 'Paid' : `Bal: ${order.balance}`}
+                     </span>
+                   </div>
+                 </div>
+               ))}
+               {ordersToUse.length > 10 && <div className="px-4 py-2 text-center text-xs text-gray-500">...and {ordersToUse.length - 10} more</div>}
+             </div>
           </div>
 
-         
-
-          {/* Action Buttons */}
           <div className="flex justify-end space-x-3 pt-4 border-t border-gray-200">
-            <button
-              type="button"
-              onClick={onClose}
-              disabled={sending}
-              className="px-6 py-2 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={handleSend}
-              disabled={sending || !message.trim()}
-              className="px-6 py-2 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-lg transition-colors duration-200 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
-            >
-              {sending ? (
-                <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  Sending...
-                </>
-              ) : (
-                <>
-                  <Send className="w-4 h-4 mr-2" />
-                  Send SMS ({ordersToUse.length} customers)
-                </>
-              )}
+            <button type="button" onClick={onClose} disabled={sending} className="px-6 py-2 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg">Cancel</button>
+            <button onClick={handleSend} disabled={sending || !message.trim()} className="px-6 py-2 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-lg flex items-center disabled:opacity-50">
+              {sending ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Sending...</> : <><Send className="w-4 h-4 mr-2" /> Send SMS</>}
             </button>
           </div>
         </div>
@@ -291,106 +234,34 @@ const SMSDialogModal = ({
   );
 };
 
-// --- Types for Pagination ---
-interface PaginatedResponse<T> {
-  count: number;
-  next: string | null;
-  previous: string | null;
-  results: T[];
-  current_page?: number;
-  total_pages?: number;
-  page_size?: number;
-}
-
-interface PaginatedOrdersResponse extends PaginatedResponse<Order> {
-  results: Order[];
-}
-
-// Helper function for API calls
-const apiFetch = async <T,>(url: string, options: RequestInit = {}): Promise<T> => {
-  const token = localStorage.getItem('accessToken');
-  
-  const defaultHeaders = {
-    'Content-Type': 'application/json',
-    ...(token && { 'Authorization': `Bearer ${token}` }),
-  };
-
-  const response = await fetch(url, {
-    ...options,
-    headers: {
-      ...defaultHeaders,
-      ...options.headers,
-    },
-  });
-
-  if (!response.ok) {
-    if (response.status === 401) {
-      throw new Error('Unauthorized');
-    }
-    const errorText = await response.text();
-    console.error(`API Error ${response.status}:`, errorText);
-    throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
-  }
-
-  return response.json();
-};
-
 export default function Orders() {
+  // State
   const [orders, setOrders] = useState<Order[]>([]);
   const [allOrders, setAllOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingAll, setLoadingAll] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  // Filter State
-  const [searchQuery, setSearchQuery] = useState('');
-  const [paymentFilter, setPaymentFilter] = useState('');
-  const [shopFilter, setShopFilter] = useState('');
-  const [orderStatusFilter, setOrderStatusFilter] = useState<string>('');
-
-  // Date Filter State
-  const [dateFilter, setDateFilter] = useState({
-    startDate: '',
-    endDate: ''
-  });
-
-  // Selection State
   const [selectedOrders, setSelectedOrders] = useState<Set<number>>(new Set());
   const [showBulkActions, setShowBulkActions] = useState(false);
-
-  // SMS Modal State
   const [showSMSModal, setShowSMSModal] = useState(false);
-
-  // Modal States
   const [showEditModal, setShowEditModal] = useState(false);
   const [showReceiptModal, setShowReceiptModal] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
-  const [currentOrder, setCurrentOrder] = useState<Order | null>(null);
   const [showExportDropdown, setShowExportDropdown] = useState(false);
-
-  // Dropdown state for each row
   const [openDropdownId, setOpenDropdownId] = useState<number | null>(null);
-
-  // Payment Modal State
+  const [currentOrder, setCurrentOrder] = useState<Order | null>(null);
   const [paymentType, setPaymentType] = useState('cash');
 
-  // Edit Form State
-  const [editFormData, setEditFormData] = useState({
-    name: '',
-    phone: '',
-    order_status: '',
-    payment_status: '',
-    amount_paid: '',
-    total_price: '',
-    items: [] as OrderItem[],
+  // Filter State
+  const [filters, setFilters] = useState<FilterState>({
+    searchQuery: '',
+    paymentFilter: '',
+    shopFilter: '',
+    orderStatusFilter: '',
+    dateFilter: { startDate: '', endDate: '' }
   });
 
-  // Refs
-  const searchTimeoutRef = useRef<NodeJS.Timeout>();
-  const exportDropdownRef = useRef<HTMLDivElement>(null);
-  const dropdownRefs = useRef<{ [key: number]: HTMLDivElement | null }>({});
-
-  // Enhanced Pagination State
+  // Pagination State
   const [pagination, setPagination] = useState({
     currentPage: 1,
     totalPages: 1,
@@ -400,7 +271,7 @@ export default function Orders() {
     previous: null as string | null
   });
 
-  // Stats state
+  // Stats State
   const [stats, setStats] = useState({
     total_orders: 0,
     pending_orders: 0,
@@ -411,412 +282,242 @@ export default function Orders() {
     completed_revenue: 0,
   });
 
-  // Calculate days since order was created
-  const calculateDaysSince = (dateString: string) => {
-    const orderDate = new Date(dateString);
-    const today = new Date();
-    const diffTime = Math.abs(today.getTime() - orderDate.getTime());
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-    return diffDays;
-  };
-
-  // Helper function to fetch ALL orders with pagination (for SMS sending)
-  const fetchAllOrdersWithPagination = async (): Promise<Order[]> => {
-    let allOrders: Order[] = [];
-    let nextUrl: string | null = `${ORDERS_URL}?page_size=100`;
-    let pageCount = 0;
-    const MAX_PAGES = 20;
-
-    console.log('Starting to fetch all orders...');
-
-    while (nextUrl && pageCount < MAX_PAGES) {
-      try {
-        console.log(`Fetching orders page ${pageCount + 1}: ${nextUrl}`);
-        const response = await apiFetch<PaginatedOrdersResponse>(nextUrl);
-        
-        if (response.results && Array.isArray(response.results)) {
-          console.log(`Page ${pageCount + 1}: Found ${response.results.length} orders`);
-          allOrders = [...allOrders, ...response.results];
-          nextUrl = response.next;
-          pageCount++;
-          
-          console.log(`Total orders so far: ${allOrders.length}`);
-          
-          if (!nextUrl) {
-            console.log('No more pages to fetch');
-          }
-        } else {
-          console.error('Invalid response format - missing results array:', response);
-          break;
-        }
-      } catch (error) {
-        console.error('Error fetching orders page:', error);
-        break;
-      }
-    }
-
-    console.log(`Finished fetching orders. Total: ${allOrders.length} orders`);
-    return allOrders;
-  };
-
-  // Fetch all orders with current filters (for SMS sending)
-  const fetchAllOrders = useCallback(async () => {
-    setLoadingAll(true);
+  // Fetch stats from backend summary endpoint
+  const fetchStats = useCallback(async () => {
     try {
-      const allOrdersData = await fetchAllOrdersWithPagination();
-      
-      // Apply client-side filtering if needed
-      let filteredOrders = allOrdersData;
-      
-      if (searchQuery) {
-        filteredOrders = filteredOrders.filter(order =>
-          order.customer.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          order.customer.phone.includes(searchQuery) ||
-          order.uniquecode.toLowerCase().includes(searchQuery.toLowerCase())
-        );
+      const params = buildQueryParams();
+      const response = await apiFetch<{total_orders: number, total_revenue: number, pending_orders: number, completed_orders: number, pending_revenue: number, completed_revenue: number, shop_breakdown: any[]}>(`${ORDERS_URL}summary/?${params.toString()}`);
+      setStats({
+        total_orders: response.total_orders,
+        pending_orders: response.pending_orders,
+        completed_orders: response.completed_orders,
+        delivered_orders: 0, // Not in summary, can add if needed
+        total_revenue: response.total_revenue,
+        pending_revenue: response.pending_revenue,
+        completed_revenue: response.completed_revenue,
+      });
+    } catch (err) {
+      console.error("Error fetching stats:", err);
+      // Fallback to local calculation if summary fails
+      if (orders.length > 0) {
+        const computedStats = calculateLocalStats(orders);
+        setStats(prev => ({ ...prev, ...computedStats }));
       }
-      
-      if (paymentFilter) {
-        filteredOrders = filteredOrders.filter(order => order.payment_status === paymentFilter);
-      }
-      
-      if (shopFilter) {
-        filteredOrders = filteredOrders.filter(order => order.shop === shopFilter);
-      }
-      
-      if (orderStatusFilter) {
-        filteredOrders = filteredOrders.filter(order => order.order_status === orderStatusFilter);
-      }
-      
-      if (dateFilter.startDate) {
-        filteredOrders = filteredOrders.filter(order => 
-          new Date(order.created_at) >= new Date(dateFilter.startDate)
-        );
-      }
-      
-      if (dateFilter.endDate) {
-        filteredOrders = filteredOrders.filter(order => 
-          new Date(order.created_at) <= new Date(dateFilter.endDate)
-        );
-      }
-
-      setAllOrders(filteredOrders);
-
-    } catch (err: any) {
-      console.error("Error fetching all orders:", err);
-      alert(`Could not load all orders: ${err.message}`);
-    } finally {
-      setLoadingAll(false);
     }
-  }, [searchQuery, paymentFilter, shopFilter, orderStatusFilter, dateFilter]);
+  }, [filters, orders]);
 
-  // Fetch data with filters and pagination - UPDATED
-  const fetchOrders = useCallback(async (page = 1, search = '') => {
+  // Refs
+  const searchTimeoutRef = useRef<NodeJS.Timeout>();
+  const exportDropdownRef = useRef<HTMLDivElement>(null);
+  const dropdownRefs = useRef<{ [key: number]: HTMLDivElement | null }>({});
+
+  // Derived State
+  const selectedOrderObjects = useMemo(() => 
+    orders.filter(order => selectedOrders.has(order.id)), 
+  [orders, selectedOrders]);
+
+  // --- Local Stats Calculator ---
+  // This replaces the missing backend stats endpoint
+  const calculateLocalStats = (orderList: Order[]) => {
+    const totalRevenue = orderList.reduce((sum, order) => sum + parseFloat(order.total_price || '0'), 0);
+    const pendingOrders = orderList.filter(o => o.order_status === 'pending');
+    const completedOrders = orderList.filter(o => o.order_status === 'Completed');
+    
+    return {
+      pending_orders: pendingOrders.length,
+      completed_orders: completedOrders.length,
+      delivered_orders: orderList.filter(o => o.order_status === 'Delivered_picked').length,
+      total_revenue: totalRevenue,
+      pending_revenue: pendingOrders.reduce((sum, o) => sum + parseFloat(o.total_price || '0'), 0),
+      completed_revenue: completedOrders.reduce((sum, o) => sum + parseFloat(o.total_price || '0'), 0),
+    };
+  };
+
+  // --- Query Builder Helper ---
+ const buildQueryParams = (extra: Record<string, string> = {}) => {
+  const params = new URLSearchParams();
+
+  if (filters.searchQuery.trim()) {
+    params.set("search", filters.searchQuery.trim());
+  }
+
+  if (filters.paymentFilter) {
+    params.set("payment_status", filters.paymentFilter);
+  }
+
+  if (filters.orderStatusFilter) {
+    params.set("order_status", filters.orderStatusFilter);
+  }
+
+  if (filters.shopFilter) {
+    params.set("shop", filters.shopFilter);
+  }
+
+  // ✅ CORRECT DATE FILTER FOR DJANGO
+  if (filters.dateFilter.startDate) {
+    params.set(
+      "created_at__date__gte",
+      filters.dateFilter.startDate
+    );
+  }
+
+  if (filters.dateFilter.endDate) {
+    params.set(
+      "created_at__date__lte",
+      filters.dateFilter.endDate
+    );
+  }
+
+  Object.entries(extra).forEach(([k, v]) => params.set(k, v));
+  return params;
+};
+
+
+  // --- API Calls ---
+
+  const fetchOrders = useCallback(async (page = 1) => {
     setLoading(true);
     setError(null);
 
     try {
-      // Build query parameters
-      const params = new URLSearchParams({
-        page: page.toString(),
-        page_size: pagination.pageSize.toString()
+      const params = buildQueryParams({ 
+        page: page.toString(), 
+        page_size: pagination.pageSize.toString() 
       });
 
-      if (search.trim()) {
-        params.append('search', search);
-      }
-      if (paymentFilter) {
-        params.append('payment_status', paymentFilter);
-      }
-      if (shopFilter) {
-        params.append('shop', shopFilter);
-      }
-      if (orderStatusFilter) {
-        params.append('order_status', orderStatusFilter);
-      }
-      if (dateFilter.startDate) {
-        params.append('created_at__gte', dateFilter.startDate);
-      }
-      if (dateFilter.endDate) {
-        params.append('created_at__lte', dateFilter.endDate);
-      }
+      console.log('Fetching orders with params:', params.toString());
+      const response = await apiFetch<PaginatedOrdersResponse>(`${ORDERS_URL}?${params.toString()}`);
 
-      const url = `${ORDERS_URL}?${params}`;
-      console.log(`Fetching orders from: ${url}`);
-      
-      const response = await apiFetch<PaginatedOrdersResponse>(url);
-
-      if (!response.results || !Array.isArray(response.results)) {
-        throw new Error('Invalid response format');
-      }
+      if (!response.results || !Array.isArray(response.results)) throw new Error('Invalid response format');
 
       setOrders(response.results);
 
-      // Handle both response formats (count vs total_items)
       const totalItems = response.count || 0;
       const totalPages = response.total_pages || Math.ceil(totalItems / pagination.pageSize) || 1;
       const currentPage = response.current_page || page;
-      const pageSize = response.page_size || pagination.pageSize;
 
       setPagination({
         currentPage,
         totalPages,
         totalItems,
-        pageSize,
+        pageSize: response.page_size || pagination.pageSize,
         next: response.next,
         previous: response.previous
       });
-
-      // Fetch stats separately
-      const statsParams = new URLSearchParams(params);
-      statsParams.delete('page');
-      statsParams.delete('page_size');
-      
-      try {
-        const statsResponse = await apiFetch<any>(`${ORDERS_URL}stats/?${statsParams}`);
-        setStats({
-          total_orders: statsResponse.total_count || 0,
-          pending_orders: statsResponse.pending_count || 0,
-          completed_orders: statsResponse.completed_count || 0,
-          delivered_orders: statsResponse.delivered_count || 0,
-          total_revenue: statsResponse.total_revenue || 0,
-          pending_revenue: statsResponse.pending_revenue || 0,
-          completed_revenue: statsResponse.completed_revenue || 0,
-        });
-      } catch (statsErr) {
-        // Fallback calculation if stats endpoint doesn't exist
-        const totalRevenue = response.results.reduce((sum: number, order: Order) => {
-          return sum + parseFloat(order.total_price || '0');
-        }, 0);
-
-        const pendingRevenue = response.results
-          .filter((order: Order) => order.order_status === 'pending')
-          .reduce((sum: number, order: Order) => {
-            return sum + parseFloat(order.total_price || '0');
-          }, 0);
-
-        const completedRevenue = response.results
-          .filter((order: Order) => order.order_status === 'Completed')
-          .reduce((sum: number, order: Order) => {
-            return sum + parseFloat(order.total_price || '0');
-          }, 0);
-
-        setStats({
-          total_orders: totalItems,
-          pending_orders: response.results.filter((order: Order) => order.order_status === 'pending').length,
-          completed_orders: response.results.filter((order: Order) => order.order_status === 'Completed').length,
-          delivered_orders: response.results.filter((order: Order) => order.order_status === 'Delivered_picked').length,
-          total_revenue: totalRevenue,
-          pending_revenue: pendingRevenue,
-          completed_revenue: completedRevenue,
-        });
-      }
 
     } catch (err: any) {
       console.error("Error fetching orders:", err);
       if (err.message === "Unauthorized") {
         setError("Session expired. Please login again.");
-        window.location.href = "/login";
+        window.location.href = ROUTES.login;
       } else {
-        setError(`Could not load orders: ${err.message}`);
+        setError(err.message);
       }
       setOrders([]);
-      setPagination({
-        currentPage: 1,
-        totalPages: 1,
-        totalItems: 0,
-        pageSize: 20,
-        next: null,
-        previous: null
-      });
-      setStats({
-        total_orders: 0,
-        pending_orders: 0,
-        completed_orders: 0,
-        delivered_orders: 0,
-        total_revenue: 0,
-        pending_revenue: 0,
-        completed_revenue: 0,
-      });
     } finally {
       setLoading(false);
     }
-  }, [paymentFilter, shopFilter, orderStatusFilter, dateFilter, pagination.pageSize]);
+  }, [filters, pagination.pageSize]);
 
-  // Initial fetch and refetch when filters change
+  const fetchAllOrders = useCallback(async () => {
+    setLoadingAll(true);
+    try {
+      // We fetch all pages using the same filters as the current view
+      let allOrdersData: Order[] = [];
+      let nextUrl: string | null = `${ORDERS_URL}?${buildQueryParams({ page_size: '100' }).toString()}`;
+      
+      while (nextUrl) {
+        const response = await apiFetch<PaginatedOrdersResponse>(nextUrl);
+        allOrdersData = [...allOrdersData, ...response.results];
+        nextUrl = response.next;
+        // Safety break
+        if (allOrdersData.length > 2000) break;
+      }
+      setAllOrders(allOrdersData);
+    } catch (err) {
+      console.error("Error fetching all orders:", err);
+      alert('Could not load all orders for SMS.');
+    } finally {
+      setLoadingAll(false);
+    }
+  }, [filters]);
+
+  // --- Effects ---
+
   useEffect(() => {
-    fetchOrders(1, searchQuery);
-    setAllOrders([]);
-  }, [fetchOrders, searchQuery]);
+    fetchOrders(1);
+    setAllOrders([]); // Reset 'all orders' cache when main view changes
+  }, [fetchOrders]);
 
-  // Close dropdowns when clicking outside
+  useEffect(() => {
+    fetchStats();
+  }, [fetchStats]);
+
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (exportDropdownRef.current && !exportDropdownRef.current.contains(event.target as Node)) {
         setShowExportDropdown(false);
       }
-
       const clickedOutsideAllDropdowns = Object.values(dropdownRefs.current).every(
         ref => ref && !ref.contains(event.target as Node)
       );
-      if (clickedOutsideAllDropdowns) {
-        setOpenDropdownId(null);
-      }
+      if (clickedOutsideAllDropdowns) setOpenDropdownId(null);
     };
-
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Handle search with debounce - UPDATED
+  // --- Handlers ---
+
   const handleSearch = (query: string) => {
-    setSearchQuery(query);
+    setFilters(prev => ({ ...prev, searchQuery: query }));
     if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
     searchTimeoutRef.current = setTimeout(() => {
-      fetchOrders(1, query);
-      setAllOrders([]);
+      fetchOrders(1);
     }, 500);
   };
 
-  // Handle export
+  const applyDateFilter = () => {
+    fetchOrders(1);
+  };
+
+  const clearDateFilter = () => {
+    setFilters(prev => ({ ...prev, dateFilter: { startDate: '', endDate: '' } }));
+    fetchOrders(1); // Refresh data after clearing filter
+  };
+
+  const clearAllFilters = () => {
+    setFilters({
+      searchQuery: '',
+      paymentFilter: '',
+      shopFilter: '',
+      orderStatusFilter: '',
+      dateFilter: { startDate: '', endDate: '' }
+    });
+    // Fetch will be triggered by the useEffect that watches filters
+  };
+
   const handleExport = (format: string) => {
-    const token = getAuthToken();
-    const headers: HeadersInit = {};
-
-    if (token) {
-      headers['Authorization'] = `Bearer ${token}`;
-    }
-
-    const params = new URLSearchParams();
-    params.append('export', format);
-    if (searchQuery) params.append('search', searchQuery);
-    if (paymentFilter) params.append('payment_status', paymentFilter);
-    if (shopFilter) params.append('shop', shopFilter);
-    if (orderStatusFilter) params.append('order_status', orderStatusFilter);
-
-    const url = `${ORDERS_URL}?${params}`;
+    const params = buildQueryParams({ export: format });
+    const url = `${ORDERS_URL}?${params.toString()}`;
     const exportWindow = window.open('', '_blank');
-
-    if (exportWindow) {
-      exportWindow.location.href = url;
-    } else {
-      fetch(url, { headers })
-        .then(response => response.blob())
-        .then(blob => {
-          const downloadUrl = window.URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = downloadUrl;
-          a.download = `orders_export.${format}`;
-          document.body.appendChild(a);
-          a.click();
-          window.URL.revokeObjectURL(downloadUrl);
-          document.body.removeChild(a);
-        })
-        .catch(error => {
-          console.error('Export error:', error);
-          alert('Failed to export. Please try again.');
-        });
-    }
-
+    if (exportWindow) exportWindow.location.href = url;
     setShowExportDropdown(false);
   };
 
-  // Send SMS to customers
-  const sendBulkSMS = async (message: string, recipients: Order[]) => {
-    const token = getAuthToken();
-    if (!token) {
-      alert('Authentication required. Please login again.');
-      return;
-    }
-
-    if (recipients.length === 0) {
-      alert('No customers selected to send SMS to.');
-      return;
-    }
-
-    if (!confirm(`Are you sure you want to send SMS to ${recipients.length} customers? This will cost approximately KES ${recipients.length}.`)) {
-      return;
-    }
-
-    try {
-      let successCount = 0;
-      let failCount = 0;
-
-      for (const order of recipients) {
-        try {
-          const response = await fetch(SEND_SMS_URL, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${token}`,
-            },
-            body: JSON.stringify({
-              to_number: order.customer.phone,
-              message: message
-            }),
-          });
-
-          if (response.ok) {
-            successCount++;
-          } else {
-            failCount++;
-            console.error(`Failed to send SMS to ${order.customer.phone}:`, await response.json());
-          }
-        } catch (err) {
-          failCount++;
-          console.error(`Error sending SMS to ${order.customer.phone}:`, err);
-        }
-      }
-
-      alert(`SMS sent successfully to ${successCount} customer(s). Failed: ${failCount}`);
-      setShowSMSModal(false);
-      clearSelection();
-      setAllOrders([]);
-
-    } catch (err) {
-      console.error('Error sending bulk SMS:', err);
-      alert('Failed to send SMS. Please try again.');
-    }
-  };
-
-  // Enhanced Pagination handlers
-  const handlePageChange = (page: number) => {
-    console.log('Going to page:', page);
-    if (page >= 1 && page <= pagination.totalPages) {
-      fetchOrders(page, searchQuery);
-    }
-  };
-
-  const handleNextPage = () => {
-    if (pagination.next) {
-      setPagination(prev => ({ ...prev, currentPage: prev.currentPage + 1 }));
-      fetchOrders(pagination.currentPage + 1, searchQuery);
-    }
-  };
-
-  const handlePrevPage = () => {
-    if (pagination.previous) {
-      setPagination(prev => ({ ...prev, currentPage: prev.currentPage - 1 }));
-      fetchOrders(pagination.currentPage - 1, searchQuery);
-    }
-  };
-
-  // Selection handlers
   const toggleOrderSelection = (orderId: number) => {
-    const newSelected = new Set(selectedOrders);
-    if (newSelected.has(orderId)) {
-      newSelected.delete(orderId);
-    } else {
-      newSelected.add(orderId);
-    }
-    setSelectedOrders(newSelected);
-    setShowBulkActions(newSelected.size > 0);
+    setSelectedOrders(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(orderId)) newSet.delete(orderId);
+      else newSet.add(orderId);
+      setShowBulkActions(newSet.size > 0);
+      return newSet;
+    });
   };
 
   const toggleSelectAll = (checked: boolean) => {
     if (checked) {
-      const allIds = orders.map(order => order.id);
-      setSelectedOrders(new Set(allIds));
+      setSelectedOrders(new Set(orders.map(o => o.id)));
       setShowBulkActions(true);
     } else {
       setSelectedOrders(new Set());
@@ -829,617 +530,109 @@ export default function Orders() {
     setShowBulkActions(false);
   };
 
-  // Update order status with auth token
+  const sendBulkSMS = async (message: string, recipients: Order[]) => {
+    if (!confirm(`Are you sure you want to send SMS to ${recipients.length} customers?`)) return;
+    
+    try {
+      const token = getAuthToken();
+      if (!token) throw new Error('Unauthorized');
+
+      let successCount = 0;
+      for (const order of recipients) {
+        try {
+          const res = await fetch(SEND_SMS_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify({ to_number: order.customer.phone, message })
+          });
+          if (res.ok) successCount++;
+        } catch (err) { console.error(err); }
+      }
+      alert(`SMS sent successfully to ${successCount} customer(s).`);
+      setShowSMSModal(false);
+      clearSelection();
+      setAllOrders([]);
+    } catch (err) {
+      console.error(err);
+      alert('Failed to send SMS.');
+    }
+  };
+
+  // --- Inline Helpers for Modals ---
   const updateOrderStatus = async (orderId: number, status: Order['order_status']) => {
     try {
       const token = getAuthToken();
-      const headers: HeadersInit = {
-        'Content-Type': 'application/json',
-      };
-
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
-      }
-
-      const order = orders.find(o => o.id === orderId);
-      if (!order) {
-        console.error(`Order with id ${orderId} not found`);
-        return false;
-      }
-
-      console.log(`Updating order ${orderId} to status: ${status}`);
-
-      const response = await fetch(`${ORDERS_URL}${orderId}/`, {
+      const res = await fetch(`${ORDERS_URL}${orderId}/`, {
         method: 'PATCH',
-        headers,
-        body: JSON.stringify({
-          order_status: status,
-        }),
+        headers: { 'Content-Type': 'application/json', ...(token && { 'Authorization': `Bearer ${token}` }) },
+        body: JSON.stringify({ order_status: status })
       });
-
-      if (!response.ok) {
-        if (response.status === 401) {
-          console.error("Unauthorized - redirecting to login");
-          window.location.href = "/login";
-          return false;
-        }
-        const errorData = await response.json();
-        throw new Error(errorData.message || 'Failed to update order status');
-      }
-
-      const data = await response.json();
-      if (data) {
-        setOrders(prevOrders =>
-          prevOrders.map(order =>
-            order.id === orderId ? { ...order, order_status: status } : order
-          )
-        );
-
-        // Update stats
-        if (status === 'Completed') {
-          setStats(prev => ({
-            ...prev,
-            completed_orders: prev.completed_orders + 1,
-            pending_orders: order.order_status === 'pending' ? prev.pending_orders - 1 : prev.pending_orders,
-            completed_revenue: prev.completed_revenue + parseFloat(order.total_price || '0'),
-            pending_revenue: order.order_status === 'pending' ? prev.pending_revenue - parseFloat(order.total_price || '0') : prev.pending_revenue
-          }));
-        } else if (status === 'pending' && order.order_status === 'Completed') {
-          setStats(prev => ({
-            ...prev,
-            completed_orders: prev.completed_orders - 1,
-            pending_orders: prev.pending_orders + 1,
-            completed_revenue: prev.completed_revenue - parseFloat(order.total_price || '0'),
-            pending_revenue: prev.pending_revenue + parseFloat(order.total_price || '0')
-          }));
-        } else if (status === 'Delivered_picked') {
-          setStats(prev => ({
-            ...prev,
-            delivered_orders: prev.delivered_orders + 1
-          }));
-        }
-
-        console.log(`Successfully updated order ${orderId} to ${status}`);
-        return true;
-      }
+      if (!res.ok) throw new Error('Failed to update');
+      
+      // Optimistic update or re-fetch
+      fetchOrders(pagination.currentPage);
     } catch (err) {
-      console.error('Error updating order status:', err);
-      throw err;
-    }
-    return false;
-  };
-
-  // Bulk actions with auth token
-  const handleBulkAction = async (status: 'Completed' | 'Delivered_picked') => {
-    if (selectedOrders.size === 0) {
-      alert('Please select at least one order');
-      return;
-    }
-
-    if (!confirm(`Are you sure you want to mark ${selectedOrders.size} order(s) as ${status.replace('_', ' ')}?`)) {
-      return;
-    }
-
-    try {
-      const promises = Array.from(selectedOrders).map(orderId =>
-        updateOrderStatus(orderId, status)
-      );
-
-      const results = await Promise.allSettled(promises);
-      const successful = results.filter(r => r.status === 'fulfilled').length;
-
-      if (successful > 0) {
-        alert(`Successfully updated ${successful} order(s)`);
-      }
-
-      if (successful < selectedOrders.size) {
-        alert(`Failed to update ${selectedOrders.size - successful} order(s)`);
-      }
-
-      clearSelection();
-      fetchOrders(pagination.currentPage, searchQuery);
-    } catch (err) {
-      console.error('Error in bulk update:', err);
-      alert('Failed to update orders');
+      alert('Failed to update status');
     }
   };
 
-  // Update single order status with auth token
-  const handleUpdateStatus = async (orderId: number, status: Order['order_status']) => {
-    if (!confirm(`Are you sure you want to mark this order as ${status.replace('_', ' ')}?`)) {
-      return;
-    }
-
-    try {
-      const success = await updateOrderStatus(orderId, status);
-      if (success) {
-        alert('Order status updated successfully');
-        fetchOrders(pagination.currentPage, searchQuery);
-      } else {
-        alert('Failed to update order status');
-      }
-    } catch (err) {
-      console.error('Error updating status:', err);
-      alert('Failed to update order status');
-    }
-  };
-
-  // Delete order with auth token
   const deleteOrder = async (orderId: number, orderCode: string) => {
-    if (!confirm(`Are you sure you want to delete order ${orderCode}? This action cannot be undone.`)) {
-      return;
-    }
-
+    if (!confirm(`Delete order ${orderCode}?`)) return;
     try {
       const token = getAuthToken();
-      const headers: HeadersInit = {
-        'Content-Type': 'application/json',
-      };
-
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
-      }
-
-      const response = await fetch(`${ORDERS_URL}${orderId}/`, {
+      const res = await fetch(`${ORDERS_URL}${orderId}/`, {
         method: 'DELETE',
-        headers,
+        headers: { ...(token && { 'Authorization': `Bearer ${token}` }) }
       });
-
-      if (!response.ok) {
-        if (response.status === 401) {
-          console.error("Unauthorized - redirecting to login");
-          window.location.href = "/login";
-          return;
-        }
-        if (response.status === 204) {
-          console.log(`Order ${orderId} deleted successfully`);
-        } else {
-          const errorData = await response.json();
-          throw new Error(errorData.message || 'Failed to delete order');
-        }
+      if (res.ok) {
+        fetchOrders(pagination.currentPage);
+        if (selectedOrders.has(orderId)) toggleOrderSelection(orderId);
       }
-
-      const deletedOrder = orders.find(o => o.id === orderId);
-      if (deletedOrder) {
-        setOrders(prevOrders => prevOrders.filter(order => order.id !== orderId));
-        
-        setStats(prev => ({
-          ...prev,
-          total_orders: prev.total_orders - 1,
-          pending_orders: deletedOrder.order_status === 'pending' ? prev.pending_orders - 1 : prev.pending_orders,
-          completed_orders: deletedOrder.order_status === 'Completed' ? prev.completed_orders - 1 : prev.completed_orders,
-          delivered_orders: deletedOrder.order_status === 'Delivered_picked' ? prev.delivered_orders - 1 : prev.delivered_orders,
-          total_revenue: prev.total_revenue - parseFloat(deletedOrder.total_price || '0'),
-          pending_revenue: deletedOrder.order_status === 'pending' ? prev.pending_revenue - parseFloat(deletedOrder.total_price || '0') : prev.pending_revenue,
-          completed_revenue: deletedOrder.order_status === 'Completed' ? prev.completed_revenue - parseFloat(deletedOrder.total_price || '0') : prev.completed_revenue
-        }));
-      }
-
-      alert(`Order ${orderCode} deleted successfully`);
-
-      if (selectedOrders.has(orderId)) {
-        const newSelected = new Set(selectedOrders);
-        newSelected.delete(orderId);
-        setSelectedOrders(newSelected);
-      }
-
-      fetchOrders(pagination.currentPage, searchQuery);
     } catch (err) {
-      console.error('Error deleting order:', err);
       alert('Failed to delete order');
     }
   };
 
-  // Edit modal functions with auth token
-  const openEditModal = async (order: Order) => {
-    setCurrentOrder(order);
-    setEditFormData({
-      name: order.customer.name,
-      phone: order.customer.phone,
-      order_status: order.order_status,
-      payment_status: order.payment_status,
-      amount_paid: order.amount_paid,
-      total_price: order.total_price,
-      items: order.items.map(item => ({ ...item })),
-    });
-    setShowEditModal(true);
-  };
-
-  const handleEditFormChange = (field: string, value: any) => {
-    setEditFormData(prev => ({ ...prev, [field]: value }));
-  };
-
-  const handleEditItemChange = (index: number, field: keyof OrderItem, value: any) => {
-    const newItems = [...editFormData.items];
-    newItems[index] = { ...newItems[index], [field]: value };
-    setEditFormData(prev => ({ ...prev, items: newItems }));
-  };
-
-  const submitEditForm = async () => {
-    if (!currentOrder) return;
-
-    try {
-      const token = getAuthToken();
-      const headers: HeadersInit = {
-        'Content-Type': 'application/json',
-      };
-
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
-      }
-
-      const response = await fetch(`${ORDERS_URL}${currentOrder.id}/`, {
-        method: 'PATCH',
-        headers,
-        body: JSON.stringify({
-          customer: {
-            name: editFormData.name,
-            phone: editFormData.phone,
-          },
-          order_status: editFormData.order_status,
-          payment_status: editFormData.payment_status,
-          amount_paid: parseFloat(editFormData.amount_paid),
-          total_price: parseFloat(editFormData.total_price),
-          items: editFormData.items,
-        }),
-      });
-
-      if (!response.ok) {
-        if (response.status === 401) {
-          console.error("Unauthorized - redirecting to login");
-          window.location.href = "/login";
-          return;
-        }
-        const errorData = await response.json();
-        throw new Error(errorData.message || 'Failed to update order');
-      }
-
-      const data = await response.json();
-      if (data) {
-        setOrders(prevOrders =>
-          prevOrders.map(order =>
-            order.id === currentOrder.id ? { ...order, ...data } : order
-          )
-        );
-        alert('Order updated successfully');
-        setShowEditModal(false);
-        fetchOrders(pagination.currentPage, searchQuery);
-      }
-    } catch (err) {
-      console.error('Error updating order:', err);
-      alert('Failed to update order');
+  const handleBulkAction = async (status: 'Completed' | 'Delivered_picked') => {
+    if (!confirm(`Mark ${selectedOrders.size} orders as ${status}?`)) return;
+    // Simplified bulk action: iterate and update
+    for (const id of selectedOrders) {
+      await updateOrderStatus(id, status);
     }
+    clearSelection();
   };
 
-  // Receipt modal functions
-  const openReceiptModal = async (order: Order) => {
-    setCurrentOrder(order);
-    setShowReceiptModal(true);
-  };
-
-  const printReceipt = () => {
-    const receiptContent = document.getElementById('receiptContent');
-    if (receiptContent) {
-      const originalContents = document.body.innerHTML;
-      const receiptHtml = receiptContent.innerHTML;
-
-      document.body.innerHTML = `
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <title>Receipt - ${currentOrder?.uniquecode}</title>
-          <style>
-            * {
-              margin: 0;
-              padding: 0;
-              box-sizing: border-box;
-              font-family: 'Courier New', monospace;
-            }
-            body { 
-              padding: 10px; 
-              font-size: 12px;
-              background: white;
-            }
-            .receipt { 
-              max-width: 250px; 
-              margin: 0 auto;
-              padding: 10px;
-              border: 1px solid #ccc;
-            }
-            .header { 
-              text-align: center; 
-              margin-bottom: 10px;
-              padding-bottom: 10px;
-              border-bottom: 1px dashed #000;
-            }
-            .header h3 {
-              font-size: 16px;
-              font-weight: bold;
-              margin-bottom: 5px;
-            }
-            .header p {
-              font-size: 10px;
-            }
-            .section { 
-              margin-bottom: 8px;
-              padding-bottom: 8px;
-              border-bottom: 1px dashed #ccc;
-            }
-            .total { 
-              font-weight: bold; 
-              margin-top: 10px;
-              padding-top: 10px;
-              border-top: 2px solid #000;
-            }
-            .divider {
-              border-top: 1px dashed #000;
-              margin: 5px 0;
-            }
-            .items-table {
-              width: 100%;
-              border-collapse: collapse;
-            }
-            .items-table td {
-              padding: 2px 0;
-              font-size: 11px;
-            }
-            .items-table .item-name {
-              max-width: 120px;
-              overflow: hidden;
-              text-overflow: ellipsis;
-              white-space: nowrap;
-            }
-            @media print {
-              body { 
-                padding: 0; 
-                margin: 0;
-              }
-              .receipt {
-                border: none;
-                max-width: 230px;
-              }
-              button { display: none; }
-              @page {
-                margin: 0;
-                size: auto;
-              }
-            }
-          </style>
-        </head>
-        <body>
-          <div class="receipt">${receiptHtml}</div>
-        </body>
-        </html>
-      `;
-
-      window.print();
-      document.body.innerHTML = originalContents;
-      setShowReceiptModal(false);
-    }
-  };
-
-  // Payment modal functions with auth token
-  const openPaymentModal = async (order: Order) => {
-    setCurrentOrder(order);
-    setPaymentType(order.payment_type || 'cash');
-    setShowPaymentModal(true);
-  };
-
-  const completePayment = async () => {
-    if (!currentOrder) return;
-
-    if (!paymentType) {
-      alert('Please select a payment type');
-      return;
-    }
-
-    if (!confirm(`Are you sure you want to mark payment as complete for order ${currentOrder.uniquecode}?`)) {
-      return;
-    }
-
-    try {
-      const token = getAuthToken();
-      const headers: HeadersInit = {
-        'Content-Type': 'application/json',
-      };
-
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
-      }
-
-      const response = await fetch(`${ORDERS_URL}${currentOrder.id}/`, {
-        method: 'PATCH',
-        headers,
-        body: JSON.stringify({
-          payment_status: 'completed',
-          payment_type: paymentType,
-          amount_paid: currentOrder.total_price,
-          balance: '0.00',
-        }),
-      });
-
-      if (!response.ok) {
-        if (response.status === 401) {
-          console.error("Unauthorized - redirecting to login");
-          window.location.href = "/login";
-          return;
-        }
-        const errorData = await response.json();
-        throw new Error(errorData.message || 'Failed to complete payment');
-      }
-
-      const data = await response.json();
-      if (data) {
-        setOrders(prevOrders =>
-          prevOrders.map(order =>
-            order.id === currentOrder.id
-              ? {
-                ...order,
-                payment_status: 'completed',
-                payment_type: paymentType,
-                amount_paid: currentOrder.total_price,
-                balance: '0.00',
-              }
-              : order
-          )
-        );
-        alert('Payment marked as complete successfully');
-        setShowPaymentModal(false);
-        fetchOrders(pagination.currentPage, searchQuery);
-      }
-    } catch (err) {
-      console.error('Error completing payment:', err);
-      alert('Failed to complete payment');
-    }
-  };
-
-  // Format servicetype array to string
-  const formatServiceType = (servicetype: string[]) => {
-    return servicetype.join(', ');
-  };
-
-  // Format date
-  const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-    });
-  };
-
-  // Format currency
-  const formatCurrency = (amount: string | number) => {
-    const numAmount = typeof amount === 'string' ? parseFloat(amount) : amount;
-    return `KSh ${numAmount.toLocaleString('en-KE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-  };
-
-  // Get user's full name for receipt
-  const getUserFullName = (order: Order) => {
-    if (order.created_by) {
-      const firstName = order.created_by.first_name || '';
-      const lastName = order.created_by.last_name || '';
-      return `${firstName} ${lastName}`.trim() || 'Unknown';
-    }
-    return 'Unknown';
-  };
-
-  // Toggle dropdown for a specific row
-  const toggleDropdown = (orderId: number) => {
-    setOpenDropdownId(openDropdownId === orderId ? null : orderId);
-  };
-
-  // Apply date filter - UPDATED
-  const applyDateFilter = () => {
-    if (dateFilter.startDate && dateFilter.endDate) {
-      const start = new Date(dateFilter.startDate);
-      const end = new Date(dateFilter.endDate);
-
-      if (start > end) {
-        alert('Start date cannot be after end date');
-        return;
-      }
-    }
-    fetchOrders(1, searchQuery);
-    setAllOrders([]);
-  };
-
-  // Clear date filter - UPDATED
-  const clearDateFilter = () => {
-    setDateFilter({ startDate: '', endDate: '' });
-    fetchOrders(1, searchQuery);
-    setAllOrders([]);
-  };
-
-  // Clear all filters - UPDATED
-  const clearAllFilters = () => {
-    setSearchQuery('');
-    setPaymentFilter('');
-    setShopFilter('');
-    setOrderStatusFilter('');
-    setDateFilter({ startDate: '', endDate: '' });
-    fetchOrders(1, '');
-    setAllOrders([]);
-  };
-
-  // Open SMS modal
-  const handleOpenSMSModal = async () => {
-    setShowSMSModal(true);
-    setAllOrders([]);
-  };
-
-  // Get selected order objects
-  const selectedOrderObjects = orders.filter(order => selectedOrders.has(order.id));
-
-  // Current filters for SMS modal
-  const currentFilters = {
-    search: searchQuery,
-    paymentFilter,
-    orderStatusFilter,
-    dateFilter
-  };
-
-  // Enhanced pagination display
+  // --- Render Helpers ---
   const renderPageNumbers = () => {
-    const totalPages = pagination.totalPages;
-    const currentPage = pagination.currentPage;
-    
+    const { totalPages, currentPage } = pagination;
     if (totalPages <= 1) return null;
-
-    const pageNumbers = [];
-    const maxVisiblePages = 5;
-
-    if (totalPages <= maxVisiblePages) {
-      // Show all pages
-      for (let i = 1; i <= totalPages; i++) {
-        pageNumbers.push(i);
-      }
+    
+    const pages = [];
+    const showEllipsis = totalPages > 5;
+    
+    if (!showEllipsis) {
+      for (let i = 1; i <= totalPages; i++) pages.push(i);
     } else {
-      // Show limited pages with ellipsis
       if (currentPage <= 3) {
-        // Show first 4 pages and last page
-        for (let i = 1; i <= 4; i++) {
-          pageNumbers.push(i);
-        }
-        pageNumbers.push('...');
-        pageNumbers.push(totalPages);
+        pages.push(1, 2, 3, 4, '...', totalPages);
       } else if (currentPage >= totalPages - 2) {
-        // Show first page and last 4 pages
-        pageNumbers.push(1);
-        pageNumbers.push('...');
-        for (let i = totalPages - 3; i <= totalPages; i++) {
-          pageNumbers.push(i);
-        }
+        pages.push(1, '...', totalPages - 3, totalPages - 2, totalPages - 1, totalPages);
       } else {
-        // Show first page, current-1, current, current+1, and last page
-        pageNumbers.push(1);
-        pageNumbers.push('...');
-        pageNumbers.push(currentPage - 1);
-        pageNumbers.push(currentPage);
-        pageNumbers.push(currentPage + 1);
-        pageNumbers.push('...');
-        pageNumbers.push(totalPages);
+        pages.push(1, '...', currentPage - 1, currentPage, currentPage + 1, '...', totalPages);
       }
     }
 
-    return pageNumbers.map((pageNum, index) => {
-      if (pageNum === '...') {
-        return (
-          <span key={`ellipsis-${index}`} className="px-3 py-1 text-gray-500">
-            ...
-          </span>
-        );
-      }
-
-      return (
+    return pages.map((p, i) => (
+      p === '...' ? 
+        <span key={i} className="px-3 py-1 text-gray-500">...</span> : 
         <button
-          key={pageNum}
-          onClick={() => handlePageChange(pageNum as number)}
-          className={`px-3 py-1 text-sm font-medium rounded-md ${pagination.currentPage === pageNum ? 'bg-blue-600 text-white' : 'text-gray-700 bg-white border border-gray-300 hover:bg-gray-50'}`}
+          key={i}
+          onClick={() => fetchOrders(p as number)}
+          className={`px-3 py-1 text-sm font-medium rounded-md ${currentPage === p ? 'bg-blue-600 text-white' : 'text-gray-700 bg-white border border-gray-300 hover:bg-gray-50'}`}
         >
-          {pageNum}
+          {p}
         </button>
-      );
-    });
+    ));
   };
 
   return (
@@ -1447,157 +640,82 @@ export default function Orders() {
       <div className="max-w-full mx-auto">
         {/* Header */}
         <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
-          <div className="flex-shrink-0">
-            <button
-              onClick={() => window.location.href = ROUTES.dashboard}
-              className="inline-flex items-center px-4 py-2 bg-white rounded-lg shadow-sm border border-gray-200 text-gray-700 hover:text-blue-600 hover:shadow-md transition-all duration-200"
-            >
-              <Home className="w-4 h-4 mr-2 text-blue-500" />
-              <span className="text-sm font-medium">Dashboard Home</span>
-            </button>
-          </div>
+          <button onClick={() => window.location.href = ROUTES.dashboard} className="inline-flex items-center px-4 py-2 bg-white rounded-lg shadow-sm border border-gray-200 text-gray-700 hover:text-blue-600 hover:shadow-md transition-all">
+            <Home className="w-4 h-4 mr-2 text-blue-500" />
+            <span className="text-sm font-medium">Dashboard Home</span>
+          </button>
 
           <div className="flex-grow max-w-3xl relative">
             <input
               type="text"
               placeholder="Search orders..."
-              value={searchQuery}
+              value={filters.searchQuery}
               onChange={(e) => handleSearch(e.target.value)}
-              className="pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg w-full focus:ring-2 focus:ring-blue-500 focus:border-blue-500 shadow-sm transition-all duration-200 placeholder-gray-400 text-sm"
+              className="pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg w-full focus:ring-2 focus:ring-blue-500 focus:border-blue-500 shadow-sm"
             />
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
           </div>
-        
-          {/* Date Range Filter */}
-          <div className="flex flex-col sm:flex-row gap-3">
-            <div className="flex items-center gap-2">
-              <Calendar className="w-4 h-4 text-gray-400" />
-              <span className="text-sm font-medium text-gray-700">Date Range:</span>
-            </div>
-            <div className="flex flex-col sm:flex-row gap-2">
-              <div>
-                <input
-                  type="date"
-                  value={dateFilter.startDate}
-                  onChange={(e) => setDateFilter(prev => ({ ...prev, startDate: e.target.value }))}
-                  className="px-3 py-2 border border-gray-300 rounded-md text-sm"
-                />
-              </div>
-              <span className="hidden sm:inline text-gray-400 self-center">to</span>
-              <div>
-                <input
-                  type="date"
-                  value={dateFilter.endDate}
-                  onChange={(e) => setDateFilter(prev => ({ ...prev, endDate: e.target.value }))}
-                  className="px-3 py-2 border border-gray-300 rounded-md text-sm"
-                />
-              </div>
-              <div className="flex gap-2">
-                <button
-                  onClick={applyDateFilter}
-                  className="px-3 py-2 bg-blue-500 text-white rounded-md text-sm hover:bg-blue-600 transition-colors"
-                >
-                  Apply
-                </button>
-                <button
-                  onClick={clearDateFilter}
-                  className="px-3 py-2 bg-gray-200 text-gray-700 rounded-md text-sm hover:bg-gray-300 transition-colors"
-                >
-                  Clear
-                </button>
-              </div>
-            </div>
+
+          {/* Date Filter */}
+          <div className="flex flex-col sm:flex-row gap-3 items-center">
+             <div className="flex items-center gap-2">
+               <Calendar className="w-4 h-4 text-gray-400" />
+               <span className="text-sm font-medium text-gray-700">Date Range:</span>
+             </div>
+             <div className="flex gap-2">
+               <input
+                 type="date"
+                 value={filters.dateFilter.startDate}
+                 onChange={(e) => setFilters(prev => ({ ...prev, dateFilter: { ...prev.dateFilter, startDate: e.target.value } }))}
+                 className="px-3 py-2 border border-gray-300 rounded-md text-sm"
+               />
+               <input
+                 type="date"
+                 value={filters.dateFilter.endDate}
+                 onChange={(e) => setFilters(prev => ({ ...prev, dateFilter: { ...prev.dateFilter, endDate: e.target.value } }))}
+                 className="px-3 py-2 border border-gray-300 rounded-md text-sm"
+               />
+               <button onClick={applyDateFilter} className="px-3 py-2 bg-blue-500 text-white rounded-md text-sm hover:bg-blue-600">Apply</button>
+               <button onClick={clearDateFilter} className="px-3 py-2 bg-gray-200 text-gray-700 rounded-md text-sm hover:bg-gray-300">Clear</button>
+             </div>
           </div>
-          
-          <div className="flex items-center gap-3 flex-shrink-0">
+
+          <div className="flex items-center gap-3">
             <div className="relative" ref={exportDropdownRef}>
-              <button
-                onClick={() => setShowExportDropdown(!showExportDropdown)}
-                className="inline-flex items-center gap-2 px-4 py-2.5 bg-blue-500 text-white rounded-lg font-medium shadow-md hover:shadow-lg transition-all duration-200"
-              >
+              <button onClick={() => setShowExportDropdown(!showExportDropdown)} className="inline-flex items-center gap-2 px-4 py-2.5 bg-blue-500 text-white rounded-lg font-medium shadow-md hover:shadow-lg transition-all">
                 <Download className="w-4 h-4" />
                 <span>Export</span>
                 <ChevronDown className="w-3 h-3" />
               </button>
               {showExportDropdown && (
                 <div className="absolute right-0 mt-1 bg-white rounded-lg shadow-lg py-2 z-20 w-48 border border-gray-100">
-                  <button
-                    onClick={() => handleExport('csv')}
-                    className="flex items-center gap-2 px-4 py-2 text-gray-700 hover:bg-gray-100 transition-colors duration-150 w-full text-left"
-                  >
-                    <FileText className="w-4 h-4 text-green-600" />
-                    CSV Format
-                  </button>
-                  <button
-                    onClick={() => handleExport('xlsx')}
-                    className="flex items-center gap-2 px-4 py-2 text-gray-700 hover:bg-gray-100 transition-colors duration-150 w-full text-left"
-                  >
-                    <FileSpreadsheet className="w-4 h-4 text-green-600" />
-                    Excel Format
-                  </button>
+                  <button onClick={() => handleExport('csv')} className="flex items-center gap-2 px-4 py-2 text-gray-700 hover:bg-gray-100 w-full text-left"><FileText className="w-4 h-4 text-green-600" /> CSV</button>
+                  <button onClick={() => handleExport('xlsx')} className="flex items-center gap-2 px-4 py-2 text-gray-700 hover:bg-gray-100 w-full text-left"><FileSpreadsheet className="w-4 h-4 text-green-600" /> Excel</button>
                 </div>
               )}
             </div>
-
-            <button
-              className="inline-flex items-center gap-2 px-4 py-2.5 bg-blue-500 text-white rounded-lg font-medium shadow-md hover:shadow-lg transition-all duration-200"
-              onClick={() => window.location.href = '/create-order'}
-            >
-              <PlusCircle className="w-4 h-4" />
-              <span>New Order</span>
+            <button onClick={() => window.location.href = '/create-order'} className="inline-flex items-center gap-2 px-4 py-2.5 bg-blue-500 text-white rounded-lg font-medium shadow-md hover:shadow-lg transition-all">
+              <PlusCircle className="w-4 h-4" /> <span>New Order</span>
             </button>
           </div>
         </div>
 
-        {/* Bulk Actions Container */}
+        {/* Bulk Actions */}
         {showBulkActions && (
-          <div id="bulkActionsContainer" className="bg-gray-50 border border-gray-200 rounded-lg p-3 mb-4">
-            <div className="flex flex-wrap items-center gap-4">
-              <span id="selectedCount" className="text-sm font-medium text-gray-700">
-                {selectedOrders.size} order(s) selected
-              </span>
-
-              {/* Send SMS Button */}
-              <button
-                onClick={handleOpenSMSModal}
-                className="px-4 py-2 bg-green-500 text-white rounded-lg text-sm font-medium hover:bg-green-600 transition-colors flex items-center"
-              >
-                <Send className="w-4 h-4 mr-2" />
-                Send SMS to Selected
-              </button>
-
-              <button
-                onClick={() => handleBulkAction('Completed')}
-                className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 transition-colors flex items-center"
-              >
-                <CheckCircle className="w-4 h-4 mr-2" />
-                Mark Selected as Completed
-              </button>
-              <button
-                onClick={() => handleBulkAction('Delivered_picked')}
-                className="px-4 py-2 bg-purple-500 text-white rounded-lg text-sm font-medium hover:bg-purple-600 transition-colors flex items-center"
-              >
-                <Truck className="w-4 h-4 mr-2" />
-                Mark Selected as Delivered
-              </button>
-              <button
-                onClick={clearSelection}
-                className="px-4 py-2 bg-gray-500 text-white rounded-lg text-sm font-medium hover:bg-gray-600 transition-colors flex items-center"
-              >
-                <XCircle className="w-4 h-4 mr-2" />
-                Clear Selection
-              </button>
-            </div>
+          <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 mb-4 flex flex-wrap items-center gap-4">
+            <span className="text-sm font-medium text-gray-700">{selectedOrders.size} order(s) selected</span>
+            <button onClick={() => { setAllOrders([]); setShowSMSModal(true); }} className="px-4 py-2 bg-green-500 text-white rounded-lg text-sm font-medium hover:bg-green-600 flex items-center"><Send className="w-4 h-4 mr-2" /> Send SMS</button>
+            <button onClick={() => handleBulkAction('Completed')} className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 flex items-center"><CheckCircle className="w-4 h-4 mr-2" /> Mark Completed</button>
+            <button onClick={() => handleBulkAction('Delivered_picked')} className="px-4 py-2 bg-purple-500 text-white rounded-lg text-sm font-medium hover:bg-purple-600 flex items-center"><Truck className="w-4 h-4 mr-2" /> Mark Delivered</button>
+            <button onClick={clearSelection} className="px-4 py-2 bg-gray-500 text-white rounded-lg text-sm font-medium hover:bg-gray-600 flex items-center"><XCircle className="w-4 h-4 mr-2" /> Clear</button>
           </div>
         )}
 
-        {/* Stats Overview */}
+        {/* Stats Cards */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mb-6">
           <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
             <div className="flex items-center">
-              <div className="p-3 bg-blue-100 rounded-xl m-2">
-                <Database className="text-blue-600 w-6 h-6" />
-              </div>
+              <div className="p-3 bg-blue-100 rounded-xl m-2"><Database className="text-blue-600 w-6 h-6" /></div>
               <div>
                 <h3 className="text-3xl font-bold text-gray-800 mt-1">{stats.total_orders}</h3>
                 <p className="text-sm text-gray-500 font-medium">Total Orders</p>
@@ -1605,12 +723,9 @@ export default function Orders() {
               </div>
             </div>
           </div>
-
           <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
             <div className="flex items-center">
-              <div className="p-3 bg-amber-100 rounded-xl m-2">
-                <Clock className="text-amber-600 w-6 h-6" />
-              </div>
+              <div className="p-3 bg-amber-100 rounded-xl m-2"><Clock className="text-amber-600 w-6 h-6" /></div>
               <div>
                 <h3 className="text-3xl font-bold text-gray-800 mt-1">{stats.pending_orders}</h3>
                 <p className="text-sm text-gray-500 font-medium">Pending Orders</p>
@@ -1618,12 +733,9 @@ export default function Orders() {
               </div>
             </div>
           </div>
-
           <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
             <div className="flex items-center">
-              <div className="p-3 bg-green-100 rounded-xl m-2">
-                <CheckCircle className="text-green-600 w-6 h-6" />
-              </div>
+              <div className="p-3 bg-green-100 rounded-xl m-2"><CheckCircle className="text-green-600 w-6 h-6" /></div>
               <div>
                 <h3 className="text-3xl font-bold text-gray-800 mt-1">{stats.completed_orders}</h3>
                 <p className="text-sm text-gray-500 font-medium">Completed Orders</p>
@@ -1631,349 +743,102 @@ export default function Orders() {
               </div>
             </div>
           </div>
-
-         
         </div>
 
-       
-        <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100 mb-6">
-          {/* Filters Row */}
-          <div className="flex flex-wrap gap-3">
-            <button
-              onClick={clearAllFilters}
-              className={`px-4 py-2 ${!orderStatusFilter && !paymentFilter && !shopFilter && !searchQuery && !dateFilter.startDate && !dateFilter.endDate ? 'bg-blue-600 text-white' : 'bg-blue-100 text-gray-700'} rounded-md text-sm font-medium`}
-            >
-              All Orders
-            </button>
+        {/* Filter Bar */}
+        <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100 mb-6 flex flex-wrap gap-3">
+          <button onClick={clearAllFilters} className={`px-4 py-2 text-sm font-medium rounded-md ${!filters.orderStatusFilter && !filters.paymentFilter && !filters.shopFilter && !filters.searchQuery && !filters.dateFilter.startDate ? 'bg-blue-600 text-white' : 'bg-blue-100 text-gray-700'}`}>All Orders</button>
+          
+          <select value={filters.shopFilter} onChange={(e) => { setFilters(prev => ({ ...prev, shopFilter: e.target.value }))/* fetchOrders(1)*/; }} className="border border-gray-300 rounded-md p-2 text-sm">
+            <option value="">All Shops</option>
+            <option value="Shop A">Shop A</option>
+            <option value="Shop B">Shop B</option>
+          </select>
 
-            <select
-              value={shopFilter}
-              onChange={(e) => {
-                setShopFilter(e.target.value);
-                fetchOrders(1, searchQuery);
-                setAllOrders([]);
-              }}
-              className="border border-gray-300 rounded-md p-2 text-sm"
-            >
-              <option value="">All Shops</option>
-              <option value="Shop A">Shop A</option>
-              <option value="Shop B">Shop B</option>
-            </select>
-
-            {/* Order Status Filters */}
-            <div className="flex flex-row items-center gap-2">
-              <span className="text-sm text-gray-500 font-medium">Order Status:</span>
-              {['pending', 'Completed', 'Delivered_picked'].map((status) => (
-                <button
-                  key={status}
-                  onClick={() => {
-                    setOrderStatusFilter(orderStatusFilter === status ? '' : status);
-                    fetchOrders(1, searchQuery);
-                    setAllOrders([]);
-                  }}
-                  className={`px-3 py-1.5 ${orderStatusFilter === status ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700'} rounded-full text-sm font-medium`}
-                >
-                  {status === 'Delivered_picked' ? 'Delivered' : status.charAt(0).toUpperCase() + status.slice(1)}
-                </button>
-              ))}
-            </div>
-
-            {/* Payment Status Filters */}
-            <div className="flex flex-row items-center gap-2">
-              <span className="text-sm text-gray-500 font-medium">Payment:</span>
-              {['pending', 'completed', 'partial'].map((status) => (
-                <button
-                  key={status}
-                  onClick={() => {
-                    setPaymentFilter(paymentFilter === status ? '' : status);
-                    fetchOrders(1, searchQuery);
-                    setAllOrders([]);
-                  }}
-                  className={`px-3 py-1.5 ${paymentFilter === status ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700'} rounded-full text-sm font-medium`}
-                >
-                  {status.charAt(0).toUpperCase() + status.slice(1)}
-                </button>
-              ))}
-            </div>
-
-            {/* Showing information - UPDATED */}
-            <div className="flex items-center gap-2 ml-auto">
-              <span className="text-sm text-gray-600">
-                Showing {orders.length} of {pagination.totalItems} orders (Page {pagination.currentPage} of {pagination.totalPages})
-              </span>
-            </div>
+          <div className="flex items-center gap-2">
+             <span className="text-sm text-gray-500 font-medium">Order Status:</span>
+             {['pending', 'Completed', 'Delivered_picked'].map(status => (
+               <button key={status} onClick={() => { setFilters(prev => ({ ...prev, orderStatusFilter: prev.orderStatusFilter === status ? '' : status })); }} className={`px-3 py-1.5 rounded-full text-sm font-medium ${filters.orderStatusFilter === status ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700'}`}>{status === 'Delivered_picked' ? 'Delivered' : status}</button>
+             ))}
           </div>
+
+          <div className="flex items-center gap-2">
+             <span className="text-sm text-gray-500 font-medium">Payment:</span>
+             {['pending', 'completed', 'partial'].map(status => (
+               <button key={status} onClick={() => { setFilters(prev => ({ ...prev, paymentFilter: prev.paymentFilter === status ? '' : status })); /* fetchOrders(1)*/ }} className={`px-3 py-1.5 rounded-full text-sm font-medium ${filters.paymentFilter === status ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700'}`}>{status}</button>
+             ))}
+          </div>
+
+          <div className="ml-auto text-sm text-gray-600">Showing {orders.length} of {pagination.totalItems} orders</div>
         </div>
 
-        {/* Orders Table */}
+        {/* Table */}
         <div className="bg-white rounded-xl overflow-hidden shadow-lg">
-          {loading ? (
-            <div className="text-center p-8">
-              <Loader2 className="animate-spin w-8 h-8 text-blue-500 mx-auto" />
-              <p className="text-gray-600 mt-2">Loading orders...</p>
-            </div>
-          ) : error ? (
-            <div className="text-center p-8 text-red-500">{error}</div>
-          ) : orders.length === 0 ? (
-            <div className="text-center p-8">
-              <div className="inline-flex items-center justify-start rounded-full bg-gray-100 p-4 mb-3">
-                <Inbox className="w-8 h-8 text-gray-400" />
-              </div>
-              <h3 className="text-lg font-medium text-gray-900 mb-1">No orders found</h3>
-              <p className="text-gray-500 max-w-md mx-auto">
-                {searchQuery || paymentFilter || shopFilter || orderStatusFilter || dateFilter.startDate
-                  ? 'No orders match your current filters. Try adjusting your search criteria.'
-                  : "There are no orders in the system. When you create orders, they'll appear here."}
-              </p>
-            </div>
-          ) : (
+          {loading ? <div className="text-center p-8"><Loader2 className="animate-spin w-8 h-8 text-blue-500 mx-auto" /></div> :
+          error ? <div className="text-center p-8 text-red-500">{error}</div> :
+          orders.length === 0 ? <div className="text-center p-8"><Inbox className="w-12 h-12 text-gray-300 mx-auto mb-2" /><p className="text-gray-500">No orders found</p></div> :
+          (
             <>
               <div className="overflow-x-auto">
                 <table className="w-full min-w-max">
-                  <thead>
-                    <tr className="bg-gray-50 border-b border-gray-200">
-                      <th className="w-12 py-4 px-4 text-center font-semibold text-gray-700 text-xs uppercase tracking-wider">
-                        <input
-                          type="checkbox"
-                          checked={orders.length > 0 && selectedOrders.size === orders.length}
-                          onChange={(e) => toggleSelectAll(e.target.checked)}
-                          className="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-                        />
-                      </th>
-                      <th className="py-4 px-4 text-left font-semibold text-gray-700 text-xs uppercase tracking-wider">Date</th>
-                      <th className="py-4 px-4 text-left font-semibold text-gray-700 text-xs uppercase tracking-wider">Order Code</th>
-                      <th className="py-4 px-4 text-left font-semibold text-gray-700 text-xs uppercase tracking-wider">Customer</th>
-                      <th className="py-4 px-4 text-left font-semibold text-gray-700 text-xs uppercase tracking-wider">Service</th>
-                      <th className="py-4 px-4 text-left font-semibold text-gray-700 text-xs uppercase tracking-wider">Item Type</th>
-                      <th className="py-4 px-4 text-left font-semibold text-gray-700 text-xs uppercase tracking-wider">Items</th>
-                      <th className="py-4 px-4 text-left font-semibold text-gray-700 text-xs uppercase tracking-wider">Days</th>
-                      <th className="py-4 px-4 text-left font-semibold text-gray-700 text-xs uppercase tracking-wider">Served by</th>
-                      <th className="py-4 px-4 text-left font-semibold text-gray-700 text-xs uppercase tracking-wider">Amount Paid</th>
-                      <th className="py-4 px-4 text-left font-semibold text-gray-700 text-xs uppercase tracking-wider">Balance</th>
-                      <th className="py-4 px-4 text-left font-semibold text-gray-700 text-xs uppercase tracking-wider">Total Billed</th>
-                      <th className="py-4 px-4 text-left font-semibold text-gray-700 text-xs uppercase tracking-wider">Order Status</th>
-                      <th className="py-4 px-4 text-left font-semibold text-gray-700 text-xs uppercase tracking-wider">Payment Status</th>
-                      <th className="py-4 px-4 text-left font-semibold text-gray-700 text-xs uppercase tracking-wider">Actions</th>
+                  <thead className="bg-gray-50 border-b border-gray-200">
+                    <tr>
+                      <th className="w-12 py-4 px-4 text-center font-semibold text-gray-700 text-xs uppercase"><input type="checkbox" checked={orders.length > 0 && selectedOrders.size === orders.length} onChange={(e) => toggleSelectAll(e.target.checked)} className="rounded" /></th>
+                      <th className="py-4 px-4 text-left font-semibold text-gray-700 text-xs uppercase">Date</th>
+                      <th className="py-4 px-4 text-left font-semibold text-gray-700 text-xs uppercase">Order Code</th>
+                      <th className="py-4 px-4 text-left font-semibold text-gray-700 text-xs uppercase">Customer</th>
+                      <th className="py-4 px-4 text-left font-semibold text-gray-700 text-xs uppercase">Service</th>
+                      <th className="py-4 px-4 text-left font-semibold text-gray-700 text-xs uppercase">Item Type</th>
+                      <th className="py-4 px-4 text-left font-semibold text-gray-700 text-xs uppercase">Items</th>
+                      <th className="py-4 px-4 text-left font-semibold text-gray-700 text-xs uppercase">Days</th>
+                      <th className="py-4 px-4 text-left font-semibold text-gray-700 text-xs uppercase">Served by</th>
+                      <th className="py-4 px-4 text-left font-semibold text-gray-700 text-xs uppercase">Paid</th>
+                      <th className="py-4 px-4 text-left font-semibold text-gray-700 text-xs uppercase">Balance</th>
+                      <th className="py-4 px-4 text-left font-semibold text-gray-700 text-xs uppercase">Total</th>
+                      <th className="py-4 px-4 text-left font-semibold text-gray-700 text-xs uppercase">Status</th>
+                      <th className="py-4 px-4 text-left font-semibold text-gray-700 text-xs uppercase">Payment</th>
+                      <th className="py-4 px-4 text-left font-semibold text-gray-700 text-xs uppercase">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-200">
                     {orders.map((order) => {
                       const firstItem = order.items[0] || { servicetype: [], itemtype: '', itemname: '' };
-                      const hasMultipleItems = order.items.length > 1;
                       const orderStatusConfig = STATUS_COLORS[order.order_status] || STATUS_COLORS.pending;
                       const paymentStatusConfig = PAYMENT_STATUS_COLORS[order.payment_status] || PAYMENT_STATUS_COLORS.pending;
                       const daysSinceOrder = calculateDaysSince(order.created_at);
 
                       return (
-                        <tr key={order.id} className="hover:bg-gray-50 transition-colors duration-150">
-                          <td className="px-6 text-center py-4">
-                            <input
-                              type="checkbox"
-                              checked={selectedOrders.has(order.id)}
-                              onChange={() => toggleOrderSelection(order.id)}
-                              className="order-checkbox h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-                            />
-                          </td>
-                          <td className="text-left px-4 py-4">
-                            <div className="font-medium text-gray-900 text-xs">
-                              {formatDate(order.created_at)}
-                            </div>
-                          </td>
-                          <td className="px-4 py-4">
-                            <div className="font-medium text-gray-900 text-xs">{order.uniquecode}</div>
-                          </td>
-                          <td className="px-4 py-4">
+                        <tr key={order.id} className="hover:bg-gray-50">
+                          <td className="px-6 text-center py-4"><input type="checkbox" checked={selectedOrders.has(order.id)} onChange={() => toggleOrderSelection(order.id)} className="rounded" /></td>
+                          <td className="text-left px-4 py-4 text-xs text-gray-900">{formatDate(order.created_at)}</td>
+                          <td className="px-4 py-2 text-xs font-medium text-gray-900">{order.uniquecode}</td>
+                          <td className="px-4 py-2">
                             <div className="text-xs text-gray-800">{order.customer.name}</div>
                             <div className="text-xs text-gray-500">{order.customer.phone}</div>
                           </td>
-
-                          <td className="px-4 py-4">
-                            <div className="relative group inline-block">
-                              <span className="text-xs text-gray-800">{formatServiceType(firstItem.servicetype)}</span>
-                              {hasMultipleItems && (
-                                <>
-                                  <span className="text-xs text-gray-500 ml-1">+{order.items.length - 1}</span>
-                                  <div className="absolute left-0 top-full mt-1 hidden group-hover:block z-50 w-48 rounded-md bg-gray-900 px-3 py-2 text-xs text-white shadow-lg">
-                                    <div className="font-medium mb-1">All Services:</div>
-                                    <ul className="space-y-1">
-                                      {order.items.map((item, idx) => (
-                                        <li key={idx} className="text-left truncate">{formatServiceType(item.servicetype)}</li>
-                                      ))}
-                                    </ul>
-                                  </div>
-                                </>
-                              )}
-                            </div>
-                          </td>
-
-                          <td className="px-4 py-4">
-                            <div className="relative group inline-block">
-                              <span className="text-xs text-gray-800">{firstItem.itemtype || 'N/A'}</span>
-                              {hasMultipleItems && (
-                                <>
-                                  <span className="text-xs text-gray-500 ml-1">+{order.items.length - 1}</span>
-                                  <div className="absolute left-0 top-full mt-1 hidden group-hover:block z-50 w-48 rounded-md bg-gray-900 px-3 py-2 text-xs text-white shadow-lg">
-                                    <div className="font-medium mb-1">All Item Types:</div>
-                                    <ul className="space-y-1">
-                                      {order.items.map((item, idx) => (
-                                        <li key={idx} className="text-left truncate">{item.itemtype || 'N/A'}</li>
-                                      ))}
-                                    </ul>
-                                  </div>
-                                </>
-                              )}
-                            </div>
-                          </td>
-
-                          <td className="px-4 py-4">
-                            <div className="relative group inline-block">
-                              {hasMultipleItems ? (
-                                <>
-                                  <span className="text-xs text-gray-800">
-                                    {(firstItem.itemname || 'N/A').substring(0, 30)}
-                                    {(firstItem.itemname && firstItem.itemname.length > 30) && '...'}
-                                  </span>
-                                  <span className="text-xs text-gray-500 ml-1">+{order.items.length - 1}</span>
-                                </>
-                              ) : (
-                                <span className="text-xs text-gray-800">
-                                  {(firstItem.itemname || 'N/A').substring(0, 30)}
-                                  {(firstItem.itemname && firstItem.itemname.length > 30) && '...'}
-                                </span>
-                              )}
-                            </div>
-                          </td>
-
-                          <td className="px-4 py-4">
-                            <div className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${daysSinceOrder > 7 ? 'bg-red-100 text-red-800' : 'bg-gray-100 text-gray-800'}`}>
-                              <Clock className="w-3 h-3 mr-1" />
-                              {daysSinceOrder}d
-                            </div>
-                          </td>
-
-                          <td className="px-4 py-4">
-                            <div className="font-semibold text-blue-900 text-xs">
-                              {order.created_by?.first_name || 'Unknown'}
-                            </div>
-                          </td>
-
-                          <td className="px-4 py-4">
-                            <div className="font-semibold text-blue-900 text-xs">
-                              {formatCurrency(order.amount_paid)}
-                            </div>
-                          </td>
-                          <td className="px-4 py-4">
-                            <div className="font-semibold text-blue-900 text-xs">
-                              {formatCurrency(order.balance)}
-                            </div>
-                          </td>
-                          <td className="px-4 py-4">
-                            <div className="font-semibold text-blue-900 text-xs">
-                              {formatCurrency(order.total_price)}
-                            </div>
-                          </td>
-
-                          <td className="py-4 px-4">
-                            <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${orderStatusConfig.text} ${orderStatusConfig.bg}`}>
-                              <orderStatusConfig.icon className="w-3 h-3 mr-1" />
-                              {order.order_status === 'Delivered_picked' ? 'Delivered' : order.order_status}
-                            </span>
-                          </td>
-                          <td className="px-4 py-4">
-                            <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${paymentStatusConfig.text} ${paymentStatusConfig.bg}`}>
-                              <paymentStatusConfig.icon className="w-3 h-3 mr-1" />
-                              {order.payment_status}
-                            </span>
-                          </td>
-
-                          <td className="px-4 py-4">
-                            <div className="flex items-center justify-start space-x-2">
-                              {/* SMS Button for individual orders */}
-                              <button
-                                onClick={() => {
-                                  setSelectedOrders(new Set([order.id]));
-                                  setShowSMSModal(true);
-                                }}
-                                className="p-2 text-green-600 hover:bg-green-100 rounded-lg transition-colors duration-200"
-                                title="Send SMS"
-                              >
-                                <Send className="w-4 h-4" />
-                              </button>
-
-                              {order.payment_status !== 'completed' && (
-                                <button
-                                  onClick={() => openPaymentModal(order)}
-                                  className="p-2 text-green-600 hover:bg-green-100 rounded-lg transition-colors duration-200"
-                                  title="Mark Payment Complete"
-                                >
-                                  <CheckCircle className="w-4 h-4" />
-                                </button>
-                              )}
-
-                              <button
-                                onClick={() => openEditModal(order)}
-                                className="p-2 text-amber-600 hover:bg-amber-100 rounded-lg transition-colors duration-200"
-                                title="Edit Order"
-                              >
-                                <Edit className="w-4 h-4" />
-                              </button>
-
-                              <button
-                                onClick={() => openReceiptModal(order)}
-                                className="p-2 text-blue-600 hover:bg-blue-100 rounded-lg transition-colors duration-200"
-                                title="Print Receipt"
-                              >
-                                <Printer className="w-4 h-4" />
-                              </button>
-
+                          <td className="px-4 py-2 text-xs text-gray-800">{formatServiceType(firstItem.servicetype)}</td>
+                          <td className="px-4 py-2 text-xs text-gray-800">{firstItem.itemtype || 'N/A'}</td>
+                          <td className="px-4 py-2 text-xs text-gray-800 max-w-xs truncate">{firstItem.itemname || 'N/A'}</td>
+                          <td className="px-4 py-2"><span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${daysSinceOrder > 7 ? 'bg-red-100 text-red-800' : 'bg-gray-100 text-gray-800'}`}><Clock className="w-3 h-3 mr-1" />{daysSinceOrder}d</span></td>
+                          <td className="px-4 py-2 text-xs text-blue-900 font-semibold">{order.created_by?.first_name || 'Unknown'}</td>
+                          <td className="px-4 py-2 text-xs text-blue-900 font-semibold">{formatCurrency(order.amount_paid)}</td>
+                          <td className="px-4 py-2 text-xs text-blue-900 font-semibold">{formatCurrency(order.balance)}</td>
+                          <td className="px-4 py-2 text-xs text-blue-900 font-semibold">{formatCurrency(order.total_price)}</td>
+                          <td className="py-4 px-2"><span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${orderStatusConfig.text} ${orderStatusConfig.bg}`}><orderStatusConfig.icon className="w-3 h-3 mr-1" />{order.order_status}</span></td>
+                          <td className="px-4 py-2"><span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${paymentStatusConfig.text} ${paymentStatusConfig.bg}`}><paymentStatusConfig.icon className="w-3 h-3 mr-1" />{order.payment_status}</span></td>
+                          <td className="px-4 py-2">
+                            <div className="flex items-center space-x-2">
+                              <button onClick={() => { setSelectedOrders(new Set([order.id])); setShowSMSModal(true); }} className="p-2 text-green-600 hover:bg-green-100 rounded-lg" title="Send SMS"><Send className="w-4 h-4" /></button>
+                              <button onClick={() => { setCurrentOrder(order); setShowPaymentModal(true); }} className="p-2 text-green-600 hover:bg-green-100 rounded-lg" title="Payment"><CheckCircle className="w-4 h-4" /></button>
+                              <button onClick={() => { setCurrentOrder(order); setShowReceiptModal(true); }} className="p-2 text-blue-600 hover:bg-blue-100 rounded-lg" title="Receipt"><Printer className="w-4 h-4" /></button>
                               <div className="relative" ref={el => dropdownRefs.current[order.id] = el}>
-                                <button
-                                  onClick={() => toggleDropdown(order.id)}
-                                  className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors duration-200"
-                                >
-                                  <EllipsisVertical className="w-4 h-4" />
-                                </button>
-
+                              <button onClick={() => setOpenDropdownId(openDropdownId === order.id ? null : order.id)} className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg"><EllipsisVertical className="w-4 h-4" /></button>
                                 {openDropdownId === order.id && (
                                   <div className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg py-1 z-50 border border-gray-200">
-                                    {order.order_status !== 'Completed' && (
-                                      <button
-                                        onClick={() => {
-                                          handleUpdateStatus(order.id, 'Completed');
-                                          setOpenDropdownId(null);
-                                        }}
-                                        className="w-full text-left px-4 py-2 text-sm text-green-700 hover:bg-green-50 flex items-center"
-                                      >
-                                        <CheckCircle className="w-4 h-4 mr-2" />
-                                        Mark as Completed
-                                      </button>
-                                    )}
-
-                                    {order.order_status !== 'Delivered_picked' && (
-                                      <button
-                                        onClick={() => {
-                                          handleUpdateStatus(order.id, 'Delivered_picked');
-                                          setOpenDropdownId(null);
-                                        }}
-                                        className="w-full text-left px-4 py-2 text-sm text-purple-700 hover:bg-purple-50 flex items-center"
-                                      >
-                                        <Truck className="w-4 h-4 mr-2" />
-                                        Mark as Delivered
-                                      </button>
-                                    )}
-
+                                    {order.order_status !== 'Completed' && <button onClick={() => { updateOrderStatus(order.id, 'Completed'); setOpenDropdownId(null); }} className="w-full text-left px-4 py-2 text-sm text-green-700 hover:bg-green-50 flex items-center"><CheckCircle className="w-4 h-4 mr-2" /> Complete</button>}
+                                    {order.order_status !== 'Delivered_picked' && <button onClick={() => { updateOrderStatus(order.id, 'Delivered_picked'); setOpenDropdownId(null); }} className="w-full text-left px-4 py-2 text-sm text-purple-700 hover:bg-purple-50 flex items-center"><Truck className="w-4 h-4 mr-2" /> Deliver</button>}
                                     <div className="border-t border-gray-100 my-1"></div>
-
-                                    <button
-                                      onClick={() => {
-                                        deleteOrder(order.id, order.uniquecode);
-                                        setOpenDropdownId(null);
-                                      }}
-                                      className="w-full text-left px-4 py-2 text-sm text-red-700 hover:bg-red-50 flex items-center"
-                                    >
-                                      <Trash2 className="w-4 h-4 mr-2" />
-                                      Delete Order
-                                    </button>
+                                    <button onClick={() => { deleteOrder(order.id, order.uniquecode); setOpenDropdownId(null); }} className="w-full text-left px-4 py-2 text-sm text-red-700 hover:bg-red-50 flex items-center"><Trash2 className="w-4 h-4 mr-2" /> Delete</button>
                                   </div>
                                 )}
                               </div>
@@ -1985,45 +850,15 @@ export default function Orders() {
                   </tbody>
                 </table>
               </div>
-
-              {/* Enhanced Pagination Controls */}
+              
+              {/* Pagination */}
               {pagination.totalPages > 1 && (
-                <div className="flex flex-col md:flex-row items-center justify-between px-6 py-4 border-t border-gray-200 bg-gray-50">
-                  <div className="text-sm text-gray-700 mb-4 md:mb-0">
-                    Showing <span className="font-medium">{((pagination.currentPage - 1) * pagination.pageSize) + 1}</span> to{' '}
-                    <span className="font-medium">
-                      {Math.min(pagination.currentPage * pagination.pageSize, pagination.totalItems)}
-                    </span> of{' '}
-                    <span className="font-medium">{pagination.totalItems}</span> orders
-                    <span className="ml-2 text-gray-500">
-                      (Page {pagination.currentPage} of {pagination.totalPages})
-                    </span>
-                  </div>
-
+                <div className="flex items-center justify-between px-6 py-4 border-t border-gray-200 bg-gray-50">
+                  <div className="text-sm text-gray-700">Showing <span className="font-medium">{((pagination.currentPage - 1) * pagination.pageSize) + 1}</span> to <span className="font-medium">{Math.min(pagination.currentPage * pagination.pageSize, pagination.totalItems)}</span> of <span className="font-medium">{pagination.totalItems}</span> orders</div>
                   <div className="flex items-center space-x-2">
-                    <button
-                      onClick={handlePrevPage}
-                      disabled={!pagination.previous}
-                      className={`inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md ${pagination.previous ? 'text-gray-700 bg-white hover:bg-gray-50' : 'text-gray-300 bg-gray-50 cursor-not-allowed'}`}
-                    >
-                      <ChevronLeft className="w-4 h-4 mr-1" />
-                      Previous
-                    </button>
-
-                    {/* Enhanced Page numbers */}
-                    <div className="flex items-center space-x-1">
-                      {renderPageNumbers()}
-                    </div>
-
-                    {/* NEXT BUTTON */}
-                    <button
-                      onClick={handleNextPage}
-                      disabled={!pagination.next}
-                      className={`inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md ${pagination.next ? 'text-gray-700 bg-white hover:bg-gray-50' : 'text-gray-300 bg-gray-50 cursor-not-allowed'}`}
-                    >
-                      Next
-                      <ChevronRight className="w-4 h-4 ml-1" />
-                    </button>
+                    <button onClick={() => fetchOrders(pagination.currentPage - 1)} disabled={!pagination.previous} className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50">Previous</button>
+                    <div className="flex items-center space-x-1">{renderPageNumbers()}</div>
+                    <button onClick={() => fetchOrders(pagination.currentPage + 1)} disabled={!pagination.next} className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50">Next</button>
                   </div>
                 </div>
               )}
@@ -2031,389 +866,86 @@ export default function Orders() {
           )}
         </div>
 
-        {/* SMS Dialog Modal */}
+        {/* Modals */}
         {showSMSModal && (
           <SMSDialogModal
             selectedOrders={selectedOrderObjects}
             allOrders={allOrders}
             onSend={sendBulkSMS}
-            onClose={() => {
-              setShowSMSModal(false);
-              setAllOrders([]);
-            }}
+            onClose={() => { setShowSMSModal(false); setAllOrders([]); }}
             loadAllOrders={fetchAllOrders}
             loadingAll={loadingAll}
-            currentFilters={currentFilters}
+            currentFilters={filters}
           />
         )}
-
-        {/* Edit Order Modal - unchanged */}
-        {showEditModal && currentOrder && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <div className="bg-white rounded-xl shadow-xl w-full max-w-4xl max-h-[90vh] overflow-y-auto">
-              <div className="p-6 border-b border-gray-200">
-                <h2 className="text-xl font-bold text-gray-900">Edit Order {currentOrder.uniquecode}</h2>
-                <button
-                  onClick={() => setShowEditModal(false)}
-                  className="absolute top-6 right-6 text-gray-400 hover:text-gray-600"
-                >
-                  <X className="w-6 h-6" />
-                </button>
-              </div>
-              <div className="p-6">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Customer Name
-                    </label>
-                    <input
-                      type="text"
-                      value={editFormData.name}
-                      onChange={(e) => handleEditFormChange('name', e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Phone Number
-                    </label>
-                    <input
-                      type="text"
-                      value={editFormData.phone}
-                      onChange={(e) => handleEditFormChange('phone', e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Order Status
-                    </label>
-                    <select
-                      value={editFormData.order_status}
-                      onChange={(e) => handleEditFormChange('order_status', e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    >
-                      <option value="pending">Pending</option>
-                      <option value="Completed">Completed</option>
-                      <option value="Delivered_picked">Delivered</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Payment Status
-                    </label>
-                    <select
-                      value={editFormData.payment_status}
-                      onChange={(e) => handleEditFormChange('payment_status', e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    >
-                      <option value="pending">Pending</option>
-                      <option value="partial">Partial</option>
-                      <option value="completed">Completed</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Amount Paid
-                    </label>
-                    <input
-                      type="number"
-                      value={editFormData.amount_paid}
-                      onChange={(e) => handleEditFormChange('amount_paid', e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      step="0.01"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Total Price
-                    </label>
-                    <input
-                      type="number"
-                      value={editFormData.total_price}
-                      onChange={(e) => handleEditFormChange('total_price', e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      step="0.01"
-                    />
-                  </div>
-                </div>
-
-                <div className="mb-6">
-                  <h3 className="text-lg font-medium text-gray-900 mb-4">Order Items</h3>
-                  <div className="space-y-4">
-                    {editFormData.items.map((item, index) => (
-                      <div key={index} className="border border-gray-200 rounded-lg p-4">
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">
-                              Item Name
-                            </label>
-                            <input
-                              type="text"
-                              value={item.itemname || ''}
-                              onChange={(e) => handleEditItemChange(index, 'itemname', e.target.value)}
-                              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">
-                              Service Type
-                            </label>
-                            <input
-                              type="text"
-                              value={formatServiceType(item.servicetype)}
-                              onChange={(e) => handleEditItemChange(index, 'servicetype', e.target.value.split(',').map(s => s.trim()))}
-                              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">
-                              Unit Price
-                            </label>
-                            <input
-                              type="number"
-                              value={item.unit_price}
-                              onChange={(e) => handleEditItemChange(index, 'unit_price', e.target.value)}
-                              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                              step="0.01"
-                            />
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="flex justify-end gap-3 pt-4 border-t border-gray-200">
-                  <button
-                    onClick={() => setShowEditModal(false)}
-                    className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={submitEditForm}
-                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-                  >
-                    Save Changes
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Receipt Modal - unchanged */}
-        {showReceiptModal && currentOrder && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <div className="bg-white rounded-lg shadow-lg w-full max-w-sm">
-              <div className="p-4 border-b border-gray-200 relative">
-                <button
-                  onClick={() => setShowReceiptModal(false)}
-                  className="absolute top-4 right-4 text-gray-400 hover:text-gray-600"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-              <div className="p-6">
-                <div id="receiptContent" className="bg-white">
-                  <div className="header text-center mb-4">
-                    <h3 className="text-lg font-bold">CLEAN PAGE LAUNDRY</h3>
-                    <p className="text-sm text-gray-600 mt-1">Be spotless, Be bright</p>
-                  </div>
-
-                  <div className="section">
-                    <div className="flex justify-between mb-1">
-                      <span className="font-medium">Order Code:</span>
-                      <span>{currentOrder.uniquecode}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="font-medium">Date:</span>
-                      <span>{formatDate(currentOrder.created_at)}</span>
-                    </div>
-                  </div>
-
-                  <div className="section">
-                    <h4 className="font-medium mb-1">Customer Details:</h4>
-                    <p className="text-sm">{currentOrder.customer.name}</p>
-                    <p className="text-sm text-gray-600">{currentOrder.customer.phone}</p>
-                  </div>
-
-                  <div className="section">
-                    <h4 className="font-medium mb-1">Order Summary:</h4>
-                    <div className="items-table">
-                      <div>
-                        {currentOrder.items.map((item, index) => (
-                          <div key={index} className="flex flex-row justify-between" >
-                            <p className="item-name">
-                              {item.itemname ?
-                                (item.itemname.length > 20 ? item.itemname.substring(0, 20) + '...' : item.itemname)
-                                : 'Item'}
-                            </p>
-                            <p className="text-right">{formatCurrency(item.unit_price)}</p>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="divider"></div>
-
-                  <div className="space-y-1">
-                    <div className="flex justify-between">
-                      <span>Subtotal:</span>
-                      <span>{formatCurrency(currentOrder.total_price)}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>Amount Paid:</span>
-                      <span>{formatCurrency(currentOrder.amount_paid)}</span>
-                    </div>
-                    <div className="flex justify-between font-bold">
-                      <span>Balance:</span>
-                      <span>{formatCurrency(currentOrder.balance)}</span>
-                    </div>
-                  </div>
-
-                  <div className="divider"></div>
-
-                  <div className="text-center mt-4">
-                    <p className="text-sm font-medium">Served By: {getUserFullName(currentOrder)}</p>
-                    <p className="text-xs text-gray-500 mt-1">Contact: 0705588354</p>
-                    <p className="text-xs text-gray-500 mt-1">Thank you for coming!</p>
-                  </div>
-                </div>
-
-                <div className="mt-6 flex justify-end gap-3">
-                  <button
-                    onClick={() => setShowReceiptModal(false)}
-                    className="px-4 py-2 border border-gray-300 rounded text-gray-700 hover:bg-gray-50"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={printReceipt}
-                    className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 flex items-center"
-                  >
-                    <Printer className="w-4 h-4 mr-2" />
-                    Print Receipt
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Payment Complete Modal - unchanged */}
+        
+        {/* Payment Modal */}
         {showPaymentModal && currentOrder && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <div className="bg-white rounded-xl shadow-xl w-full max-w-md">
-              <div className="p-6 border-b border-gray-200">
-                <h2 className="text-xl font-bold text-gray-900">Complete Payment</h2>
-                <button
-                  onClick={() => setShowPaymentModal(false)}
-                  className="absolute top-6 right-6 text-gray-400 hover:text-gray-600"
-                >
-                  <X className="w-6 h-6" />
-                </button>
+            <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
+              <h2 className="text-xl font-bold text-gray-900 mb-4">Complete Payment</h2>
+              <p className="text-gray-600 text-sm mb-6">Confirm payment for order {currentOrder.uniquecode}.</p>
+              
+              <div className="bg-gray-50 p-4 rounded-lg mb-6">
+                <div className="flex justify-between mb-2"><span>Total Due:</span> <span className="font-bold">{formatCurrency(currentOrder.total_price)}</span></div>
+                <div className="flex justify-between mb-2"><span>Pending:</span> <span className="text-red-600 font-bold">{formatCurrency(currentOrder.balance)}</span></div>
               </div>
-              <div className="p-6">
-                <div className="mb-6">
-                  <div className="flex items-center mb-3">
-                    <div className="w-10 h-10 bg-gradient-to-r from-green-500 to-emerald-600 rounded-full flex items-center justify-center mr-3">
-                      <CreditCard className="text-white w-5 h-5" />
-                    </div>
-                    <h3 className="text-xl font-bold text-gray-900">Complete Payment</h3>
-                  </div>
-                  <p className="text-gray-600 text-sm">
-                    Confirm to mark this payment as complete. The remaining balance will be added to the total amount paid.
-                  </p>
-                </div>
+              
+              <div className="mb-6">
+                <label className="block text-sm font-semibold text-gray-700 mb-2">Payment Method</label>
+                <select value={paymentType} onChange={e => setPaymentType(e.target.value)} className="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                  <option value="cash">Cash</option>
+                  <option value="mpesa">M-Pesa</option>
+                  <option value="card">Card</option>
+                  <option value="bank_transfer">Bank</option>
+                  <option value="other">Other</option>
+                  <option value="none">None</option>
+                </select>
+              </div>
 
-                <div className="bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-100 rounded-xl p-6 mb-6">
-                  <h4 className="text-sm font-semibold text-blue-900 mb-4">Payment Summary</h4>
-
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-                    <div className="bg-white rounded-lg p-4">
-                      <div className="flex items-center mb-2">
-                        <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center mr-2">
-                          <Wallet className="text-blue-600 w-4 h-4" />
-                        </div>
-                        <span className="text-xs font-medium text-blue-700">Current Paid</span>
-                      </div>
-                      <p className="text-lg font-bold text-blue-900">
-                        {formatCurrency(currentOrder.amount_paid)}
-                      </p>
-                    </div>
-
-                    <div className="bg-white rounded-lg p-4">
-                      <div className="flex items-center mb-2">
-                        <div className="w-8 h-8 bg-orange-100 rounded-full flex items-center justify-center mr-2">
-                          <PlusCircleIcon className="text-orange-600 w-4 h-4" />
-                        </div>
-                        <span className="text-xs font-medium text-orange-700">Balance to Add</span>
-                      </div>
-                      <p className="text-lg font-bold text-orange-900">
-                        {formatCurrency(currentOrder.balance)}
-                      </p>
-                    </div>
-
-                    <div className="bg-white rounded-lg p-4">
-                      <div className="flex items-center mb-2">
-                        <div className="w-8 h-8 bg-green-100 rounded-full flex items-center justify-center mr-2">
-                          <CheckCircle className="text-green-600 w-4 h-4" />
-                        </div>
-                        <span className="text-xs font-medium text-green-700">New Total</span>
-                      </div>
-                      <p className="text-lg font-bold text-green-900">
-                        {formatCurrency(currentOrder.total_price)}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="bg-white rounded-lg p-4">
-                    <label className="block text-sm font-semibold text-gray-700 mb-3">
-                      Payment Method
-                    </label>
-                    <select
-                      value={paymentType}
-                      onChange={(e) => setPaymentType(e.target.value)}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    >
-                      <option value="">-- Select Payment Type --</option>
-                      <option value="cash">💵 Cash</option>
-                      <option value="mpesa">📱 M-Pesa</option>
-                      <option value="card">💳 Credit/Debit Card</option>
-                      <option value="bank_transfer">🏦 Bank Transfer</option>
-                      <option value="other">🔄 Other</option>
-                      <option value="None">None</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">
-                  <button
-                    onClick={() => setShowPaymentModal(false)}
-                    className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={completePayment}
-                    className="px-4 py-2 bg-gradient-to-r from-green-600 to-emerald-600 text-white rounded-lg hover:from-green-700 hover:to-emerald-700 flex items-center"
-                  >
-                    <CheckCircle className="w-4 h-4 mr-2" />
-                    Complete Payment
-                  </button>
-                </div>
+              <div className="flex justify-end gap-3">
+                <button onClick={() => setShowPaymentModal(false)} className="px-4 py-2 border rounded-lg text-gray-700">Cancel</button>
+                <button onClick={async () => {
+                   try {
+                     const token = getAuthToken();
+                     await fetch(`${ORDERS_URL}${currentOrder.id}/`, {
+                       method: 'PATCH',
+                       headers: { 'Content-Type': 'application/json', ...(token && { 'Authorization': `Bearer ${token}` }) },
+                       body: JSON.stringify({ payment_status: 'completed', payment_type: paymentType, amount_paid: currentOrder.total_price, balance: '0.00' })
+                     });
+                     fetchOrders(pagination.currentPage);
+                     setShowPaymentModal(false);
+                   } catch (err) { alert('Failed'); }
+                }} className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700">Complete</button>
               </div>
             </div>
           </div>
+        )}
+
+        {/* Receipt Modal */}
+        {showReceiptModal && currentOrder && (
+           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+             <div className="bg-white rounded-lg shadow-lg w-full max-w-sm p-6">
+               <div className="flex justify-between items-center mb-4">
+                 <h3 className="font-bold">Receipt</h3>
+                 <button onClick={() => setShowReceiptModal(false)}><X className="w-5 h-5" /></button>
+               </div>
+               <div className="text-sm mb-4">
+                 <p><strong>Order:</strong> {currentOrder.uniquecode}</p>
+                 <p><strong>Date:</strong> {formatDate(currentOrder.created_at)}</p>
+                 <p><strong>Customer:</strong> {currentOrder.customer.name}</p>
+                 <hr className="my-2"/>
+                 {currentOrder.items.map((item, i) => (
+                   <div key={i} className="flex justify-between"><span>{item.itemname}</span><span>{formatCurrency(item.unit_price)}</span></div>
+                 ))}
+                 <hr className="my-2"/>
+                 <div className="flex justify-between font-bold"><span>Total</span><span>{formatCurrency(currentOrder.total_price)}</span></div>
+                 <div className="flex justify-between"><span>Paid</span><span>{formatCurrency(currentOrder.amount_paid)}</span></div>
+                 <div className="flex justify-between"><span>Balance</span><span>{formatCurrency(currentOrder.balance)}</span></div>
+               </div>
+               <button onClick={() => window.print()} className="w-full bg-blue-600 text-white py-2 rounded-lg">Print</button>
+             </div>
+           </div>
         )}
       </div>
     </div>
