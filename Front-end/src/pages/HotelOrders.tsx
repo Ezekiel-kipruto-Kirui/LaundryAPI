@@ -1114,9 +1114,9 @@ export default function HotelOrderItems() {
                   <th className="px-2 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Qty
                   </th>
-                  <th className="px-2 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  {isUserAdmin && <th className="px-2 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Total
-                  </th>
+                  </th>}
                   <th className="pr-4 pl-2 sm:pr-6 sm:pl-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Actions
                   </th>

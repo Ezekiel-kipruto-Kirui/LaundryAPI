@@ -3,7 +3,7 @@ from rest_framework.routers import DefaultRouter
 from .views import (
     CustomerViewSet, OrderViewSet, OrderItemViewSet,
     ExpenseFieldViewSet, ExpenseRecordViewSet, PaymentViewSet,
-    UserProfileViewset,
+    UserProfileViewset,sendsms_view
 )
 
 router = DefaultRouter()
@@ -17,8 +17,10 @@ router.register(r'payments', PaymentViewSet)
 
 
 
+
 urlpatterns = [
     path('', include(router.urls)),
-    
+    path('send-sms/', sendsms_view),
+    path('send_sms/', sendsms_view),
     
 ]

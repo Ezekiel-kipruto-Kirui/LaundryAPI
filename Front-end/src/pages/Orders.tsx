@@ -537,24 +537,33 @@ export default function Orders() {
       const token = getAuthToken();
       if (!token) throw new Error('Unauthorized');
 
-      let successCount = 0;
-      for (const order of recipients) {
-        try {
-          const res = await fetch(SEND_SMS_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-            body: JSON.stringify({ to_number: order.customer.phone, message })
-          });
-          if (res.ok) successCount++;
-        } catch (err) { console.error(err); }
+      // Collect unique phone numbers from recipients
+      const phoneNumbers = [...new Set(recipients.map(order => order.customer.phone).filter(Boolean))];
+      
+      console.log('Sending bulk SMS to:', phoneNumbers.length, 'recipients');
+      
+      // Send bulk SMS in a single request
+      const res = await fetch(SEND_SMS_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ to_number: phoneNumbers, message })
+      });
+      
+      if (!res.ok) {
+        const errorText = await res.text();
+        console.error('SMS API Error:', errorText);
+        throw new Error(`Failed to send SMS: ${res.status}`);
       }
-      alert(`SMS sent successfully to ${successCount} customer(s).`);
+      
+      const result = await res.json();
+      console.log('SMS Result:', result);
+      alert(`SMS sent successfully to ${phoneNumbers.length} customer(s)!`);
       setShowSMSModal(false);
       clearSelection();
       setAllOrders([]);
     } catch (err) {
       console.error(err);
-      alert('Failed to send SMS.');
+      alert('Failed to send SMS. Please try again.');
     }
   };
 
@@ -820,7 +829,7 @@ export default function Orders() {
                           <td className="px-4 py-2 text-xs text-gray-800">{firstItem.itemtype || 'N/A'}</td>
                           <td className="px-4 py-2 text-xs text-gray-800 max-w-xs truncate">{firstItem.itemname || 'N/A'}</td>
                           <td className="px-4 py-2"><span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${daysSinceOrder > 7 ? 'bg-red-100 text-red-800' : 'bg-gray-100 text-gray-800'}`}><Clock className="w-3 h-3 mr-1" />{daysSinceOrder}d</span></td>
-                          <td className="px-4 py-2 text-xs text-blue-900 font-semibold">{order.created_by?.first_name || 'Unknown'}</td>
+                          <td className="px-4 py-2 text-xs text-blue-900 font-semibold">{getUserFullName(order)}</td>
                           <td className="px-4 py-2 text-xs text-blue-900 font-semibold">{formatCurrency(order.amount_paid)}</td>
                           <td className="px-4 py-2 text-xs text-blue-900 font-semibold">{formatCurrency(order.balance)}</td>
                           <td className="px-4 py-2 text-xs text-blue-900 font-semibold">{formatCurrency(order.total_price)}</td>

@@ -46,10 +46,8 @@ DEBUG = env.bool('DJANGO_DEBUG', default=False)  # Set to False for production
 INSTALLED_APPS = [
     # IMPORTANT: Add whitenoise to INSTALLED_APPS for it to be recognized
     # by collectstatic and for its static file storage engine to work.
-    'twilio',
     'whitenoise.runserver_nostatic',
     'multiselectfield',
-    
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -58,7 +56,7 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'django.contrib.humanize',
     'LaundryApp',
-    'HotelApp',
+    #'HotelApp',
     'compressor',
     "widget_tweaks",
     'OpenSSL',
@@ -66,6 +64,7 @@ INSTALLED_APPS = [
     'rest_framework_simplejwt',
     "corsheaders",
     "django_filters",
+    'HotelApp.apps.HotelappConfig',
 ]
 
 REST_FRAMEWORK = {
@@ -100,11 +99,9 @@ MIDDLEWARE = [
 EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
 DEFAULT_AUTO_FIELD = env('DEFAULT_AUTO_FIELD')
 
-TWILIO_ACCOUNT_SID=env('TWILIO_ACCOUNT_SID')
-
-TWILIO_AUTH_TOKEN=env('TWILIO_AUTH_TOKEN')
-
-TWILIO_MESSAGING_SERVICE_SID = env('TWILIO_MESSAGING_SERVICE_SID')
+API_KEY = env("ROAMTECH_API_KEY")
+PARTNER_ID = env("ROAMTECH_PARTNER_ID")
+SHORTCODE = env("SHORTCODE")
 
 
 # For production: use real SMTP (example with Gmail)

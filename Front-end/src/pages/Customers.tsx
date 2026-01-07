@@ -623,6 +623,12 @@ const apiFetch = async <T,>(url: string, options: RequestInit = {}): Promise<T> 
         throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
     }
 
+    // FIX: Handle 204 No Content (usually returned by DELETE requests)
+    // Parsing JSON on a 204 response causes "Unexpected end of JSON input"
+    if (response.status === 204) {
+        return null as T;
+    }
+
     return response.json();
 };
 
@@ -868,7 +874,7 @@ export default function CustomersPage() {
         }
     }, [orders, pagination.pageSize, calculateCustomerStats]);
 
-    // SMS Sending Function - fetches ALL customers when sending
+    // SMS Sending Function - Corrected to send array in single request
     const sendBulkSMS = async (message: string) => {
         setIsSendingSMS(true);
         setError(null);
@@ -882,48 +888,52 @@ export default function CustomersPage() {
                 return;
             }
 
-            // Extract all customer phone numbers
-            const phoneNumbers = allCustomersData
-                .map(customer => customer.phone)
-                .filter(phone => phone && phone.trim() !== '');
+            // Extract unique phone numbers
+            const phoneNumbers = [...new Set(
+                allCustomersData
+                    .map(customer => customer.phone)
+                    .filter(phone => phone && phone.trim() !== '')
+            )];
             
             if (phoneNumbers.length === 0) {
                 alert("No valid phone numbers found among customers.");
                 return;
             }
 
-            // Send SMS to each customer
-            let successCount = 0;
-            let failCount = 0;
-
-            for (const phoneNumber of phoneNumbers) {
-                try {
-                    const response = await apiFetch<any>(API_SMS_URL, {
-                        method: 'POST',
-                        body: JSON.stringify({
-                            to_number: phoneNumber,
-                            message: message
-                        })
-                    });
-
-                    if (response.success || response.sid) {
-                        successCount++;
-                    } else {
-                        failCount++;
-                        console.error(`Failed to send SMS to ${phoneNumber}:`, response.error);
-                    }
-
-                    // Add a small delay between requests to avoid rate limiting
-                    await new Promise(resolve => setTimeout(resolve, 100));
-                } catch (err) {
-                    failCount++;
-                    console.error(`Error sending SMS to ${phoneNumber}:`, err);
-                }
+            // Confirm before sending
+            if (!confirm(`Are you sure you want to send SMS to ${phoneNumbers.length} customers?`)) {
+                setIsSendingSMS(false);
+                return;
             }
 
-            // Show results
-            alert(`SMS sending completed!\n\nTotal Customers: ${allCustomersData.length}\nPhone Numbers Found: ${phoneNumbers.length}\nSuccessfully Sent: ${successCount}\nFailed: ${failCount}`);
+            // Send bulk SMS in a single request
+            const token = localStorage.getItem('access_token');
+            if (!token) throw new Error('Unauthorized');
 
+            console.log('Sending bulk SMS to:', phoneNumbers.length, 'recipients');
+            
+            const res = await fetch(API_SMS_URL, {
+                method: 'POST',
+                headers: { 
+                    'Content-Type': 'application/json', 
+                    'Authorization': `Bearer ${token}` 
+                },
+                body: JSON.stringify({ 
+                    to_number: phoneNumbers, // Passing the array directly
+                    message: message 
+                })
+            });
+            
+            if (!res.ok) {
+                const errorText = await res.text();
+                console.error('SMS API Error:', errorText);
+                throw new Error(`Failed to send SMS: ${res.status}`);
+            }
+            
+            const result = await res.json();
+            console.log('SMS Result:', result);
+            alert(`SMS sent successfully to ${phoneNumbers.length} customer(s)!`);
+            
             // Close SMS modal after sending
             setIsSMSModalOpen(false);
 

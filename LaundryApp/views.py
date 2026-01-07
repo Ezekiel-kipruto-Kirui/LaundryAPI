@@ -24,6 +24,7 @@ from .sms_utility import send_sms
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter
 from django.db.models import Sum, Count, Q
+from django.utils.decorators import method_decorator
 
 class CurrentUserView(APIView):
     permission_classes = [IsAuthenticated]
@@ -53,6 +54,50 @@ class CustomerViewSet(viewsets.ModelViewSet):
     permission_classes = [AllowAny]  # change to IsAuthenticated for production
     pagination_class=CustomPageNumberPagination
 
+    @action(detail=False, methods=['get'])
+    def by_phone(self, request):
+        """Search customer by phone number (exact or normalized match)"""
+        phone = request.query_params.get('phone', '')
+        if not phone:
+            return Response({"error": "Phone parameter required"}, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Normalize the input phone for comparison
+        import re
+        cleaned = re.sub(r'\D', '', phone)
+        
+        # Try different formats
+        if cleaned.startswith('254') and len(cleaned) == 12:
+            search_phones = [f'+{cleaned}', cleaned]
+        elif cleaned.startswith('0') and len(cleaned) == 10:
+            normalized = '254' + cleaned[1:]
+            search_phones = [f'+{normalized}', normalized]
+        elif cleaned.startswith('7') and len(cleaned) == 9:
+            normalized = '254' + cleaned
+            search_phones = [f'+{normalized}', normalized]
+        else:
+            search_phones = [phone, f'+{phone}']
+        
+        # Search for customer with any matching phone format
+        customer = None
+        for search_phone in search_phones:
+            try:
+                # Try exact match first
+                customer = Customer.objects.filter(phone=search_phone).first()
+                if customer:
+                    break
+                # Try with E164 format
+                if not search_phone.startswith('+'):
+                    customer = Customer.objects.filter(phone=f'+{search_phone}').first()
+                    if customer:
+                        break
+            except Exception:
+                continue
+        
+        if customer:
+            serializer = self.get_serializer(customer)
+            return Response(serializer.data)
+        return Response({"error": "Customer not found"}, status=status.HTTP_404_NOT_FOUND)
+
 
 # ---------------------- ORDER + NESTED ITEMS CRUD ---------------------- #
 class OrderViewSet(viewsets.ModelViewSet):
@@ -65,12 +110,12 @@ class OrderViewSet(viewsets.ModelViewSet):
     permission_classes = [AllowAny]
     pagination_class=CustomPageNumberPagination
 
-    @transaction.atomic
-    def create(self, request, *args, **kwargs):
-        serializer = self.get_serializer(data=request.data, context={"request": request})
-        serializer.is_valid(raise_exception=True)
-        order = serializer.save()
-        return Response(OrderSerializer(order).data, status=status.HTTP_201_CREATED)
+    # @transaction.atomic
+    # def create(self, request, *args, **kwargs):
+    #     serializer = self.get_serializer(data=request.data, context={"request": request})
+    #     serializer.is_valid(raise_exception=True)
+    #     order = serializer.save()
+    #     return Response(OrderSerializer(order).data, status=status.HTTP_201_CREATED)
 
     @transaction.atomic
     def update(self, request, *args, **kwargs):
@@ -162,26 +207,61 @@ class PaymentViewSet(viewsets.ModelViewSet):
     queryset = Payment.objects.all()
     serializer_class = PaymentSerializer
     permission_classes = [IsAuthenticated]
+
+
 @api_view(['POST'])
-@permission_classes([IsAuthenticated])
+@permission_classes([AllowAny])
 def sendsms_view(request):
     to_number = request.data.get("to_number")
-    message = request.data.get('message')
-    if not to_number or not message:
+    message = request.data.get("message")
+
+    # -------------------------
+    # Validation
+    # -------------------------
+    if not to_number:
         return Response(
-            {"error": "to_number and message are required"},
+            {"error": "to_number is required"},
             status=status.HTTP_400_BAD_REQUEST
         )
 
+    if not message:
+        return Response(
+            {"error": "message is required"},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    if isinstance(to_number, list):
+        if not all(isinstance(num, str) for num in to_number):
+            return Response(
+                {"error": "All phone numbers must be strings"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+    elif not isinstance(to_number, str):
+        return Response(
+            {"error": "to_number must be a string or a list of strings"},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    # -------------------------
+    # Send SMS (auto-detect)
+    # -------------------------
     success, result = send_sms(to_number, message)
 
     if success:
         return Response(
-            {"success": True, "sid": result},
+            {
+                "success": True,
+                "type": "bulk" if isinstance(to_number, list) else "single",
+                "response": result
+            },
             status=status.HTTP_200_OK
         )
 
     return Response(
-         {"error": "Failed to send SMS"},
-            status=status.HTTP_400_BAD_REQUEST
+        {
+            "success": False,
+            "error": "Failed to send SMS",
+            "details": result
+        },
+        status=status.HTTP_400_BAD_REQUEST
     )

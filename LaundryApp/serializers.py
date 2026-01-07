@@ -102,27 +102,29 @@ class UserProfileSerializer(serializers.ModelSerializer):
 
 
 class CustomerSerializer(serializers.ModelSerializer):
-    created_by = UserProfileSerializer(read_only=True)
-
+    phone = serializers.SerializerMethodField()
+    
     class Meta:
         model = Customer
-        fields = [
-            'id', 'name', 'phone',
-            'created_by'
-        ]
+        fields = ['id', 'name', 'phone', 'created_by']
+    
+    def get_phone(self, obj):
+        """Convert PhoneNumberField to string format"""
+        return str(obj.phone) if obj.phone else None
 
-    def create(self, validated_data):
-        request = self.context.get("request")
-        if request and request.user.is_authenticated:
-            validated_data['created_by'] = request.user
-        return super().create(validated_data)
-
+   
 # --- CORRECTED OrderItem Serializer ---
 class OrderItemSerializer(serializers.ModelSerializer):
-    # 🎯 FIX 1: Explicitly define the field as MultipleChoiceField 
+    ITEM_TYPE_CHOICES = OrderItem.ITEMS_CATEGORY
+    
+    #  FIX 1: Explicitly define the field as MultipleChoiceField 
     # to accept the list input from the frontend.
     servicetype = serializers.MultipleChoiceField(
         choices=SERVICE_TYPE_CHOICES,
+        required=True
+    )
+    itemtype = serializers.MultipleChoiceField(
+        choices=ITEM_TYPE_CHOICES,
         required=True
     )
     
@@ -149,20 +151,21 @@ class OrderItemSerializer(serializers.ModelSerializer):
         if 'servicetype' in internal_value and isinstance(internal_value['servicetype'], list):
             # Convert the list back to a comma-separated string for model storage
             internal_value['servicetype'] = ','.join(internal_value['servicetype'])
+        
+        # 3. Check if itemtype exists and is a list (which it will be after validation)
+        if 'itemtype' in internal_value and isinstance(internal_value['itemtype'], list):
+            # Convert the list back to a comma-separated string for model storage
+            internal_value['itemtype'] = ','.join(internal_value['itemtype'])
             
         return internal_value
 
 # --- Order Serializer (Cleaned up create/update) ---
 class OrderSerializer(serializers.ModelSerializer):
+    items = OrderItemSerializer(many=True, required=False, default=[])
     customer = CustomerSerializer(read_only=True)
-    customer_id = serializers.PrimaryKeyRelatedField(
-        queryset=Customer.objects.all(), write_only=True
-    )
-    # This serializer now returns the servicetype as a comma-separated string
-    items = OrderItemSerializer(many=True) 
+    customer_id = serializers.PrimaryKeyRelatedField(queryset=Customer.objects.all(), source='customer', write_only=True, required=True)
     created_by = UserProfileSerializer(read_only=True)
-    updated_by = UserProfileSerializer(read_only=True)
-
+    
     class Meta:
         model = Order
         fields = [
@@ -178,13 +181,30 @@ class OrderSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = [
             'uniquecode', 'total_price', 'balance',
-            'created_at', 'updated_at'
+            'created_at', 'updated_at', 'customer', 'created_by'
         ]
 
+    def validate_customer(self, value):
+        """Handle both customer ID and customer object"""
+        if value is None:
+            raise serializers.ValidationError("Customer is required")
+        return value
+
     def create(self, validated_data):
-        items_data = validated_data.pop("items")
-        customer = validated_data.pop("customer_id")
-        validated_data["customer"] = customer
+        items_data = validated_data.pop("items", [])
+        # customer_id PrimaryKeyRelatedField auto-resolves to Customer object
+        customer_data = validated_data.pop("customer", None)
+        
+        # If customer_id resolved to None but customer_data exists (edge case)
+        if "customer" not in validated_data and customer_data is not None:
+            if isinstance(customer_data, int):
+                try:
+                    customer_obj = Customer.objects.get(id=customer_data)
+                    validated_data["customer"] = customer_obj
+                except Customer.DoesNotExist:
+                    raise serializers.ValidationError({"customer": "Customer not found"})
+            else:
+                validated_data["customer"] = customer_data
 
         request = self.context.get("request")
         if request and request.user.is_authenticated:
@@ -193,7 +213,6 @@ class OrderSerializer(serializers.ModelSerializer):
         order = Order.objects.create(**validated_data)
 
         for item_data in items_data:
-            # servicetype is now ALREADY a string due to OrderItemSerializer.to_internal_value
             OrderItem.objects.create(order=order, **item_data)
 
         return order
@@ -214,7 +233,6 @@ class OrderSerializer(serializers.ModelSerializer):
         if items_data is not None:
             instance.items.all().delete()
             for item_data in items_data:
-                # servicetype is already a string here too
                 OrderItem.objects.create(order=instance, **item_data)
 
         return instance

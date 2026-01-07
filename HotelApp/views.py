@@ -204,3 +204,37 @@ class HotelExpenseRecordViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
     filterset_fields = {"date": ["gte", "lte"]}
     #permission_classes = [AllowAny]
+
+from django.http import JsonResponse
+from django.db.models import Sum
+
+
+def update_food_items_view(request):
+    updated = []
+
+    for item in FoodItem.objects.all():
+        total_quantity = HotelOrderItem.objects.filter(
+            food_item=item,
+            oncredit=False
+        ).aggregate(total=Sum('quantity'))['total'] or 0
+
+        total_revenue = HotelOrderItem.objects.filter(
+            food_item=item,
+            oncredit=False
+        ).aggregate(total=Sum('price'))['total'] or 0
+
+        item.quantity = total_quantity
+        item.total_order_price = total_revenue
+        item.save()
+
+        updated.append({
+            "food_item": item.name,
+            "quantity": total_quantity,
+            "revenue": total_revenue
+        })
+
+    return JsonResponse({
+        "status": "success",
+        "message": "Food items updated successfully",
+        "updated_items": updated
+    })

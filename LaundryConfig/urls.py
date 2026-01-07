@@ -27,7 +27,7 @@ from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from LaundryApp.views import CurrentUserView,sendsms_view
 from django.conf.urls.static import static
 import os
-from HotelApp.views import update_food_revenue
+from HotelApp.views import update_food_revenue,update_food_items_view
 
 FRONTEND_BUILD_DIR = os.path.join(settings.BASE_DIR, 'Front-end', 'dist')
 
@@ -43,8 +43,10 @@ urlpatterns = [
     path('api/token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     path('api/me/',CurrentUserView.as_view()),
-    path('api/send-sms/', sendsms_view),
+   
     path('api/users/me/', CurrentUserView.as_view(), name='current_user'),
+    path('api/update-food-revenue/', update_food_revenue),
+    path("api/update-food-items/", update_food_items_view, name="update_food_items"),
     path('assets/<path:path>', serve, {'document_root': os.path.join(settings.BASE_DIR, 'Front-end', 'dist', 'assets')}),
     path('bg.png', lambda request: serve(request, 'bg.png', document_root=FRONTEND_BUILD_DIR)),
     path('Clean-page-logo.png', lambda request: serve(request, 'Clean-page-logo.png', document_root=FRONTEND_BUILD_DIR)),
@@ -52,7 +54,8 @@ urlpatterns = [
     path('placeholder.svg', lambda request: serve(request, 'placeholder.svg', document_root=FRONTEND_BUILD_DIR)),
     path('robots.txt', lambda request: serve(request, 'robots.txt', document_root=FRONTEND_BUILD_DIR)),
     re_path('', TemplateView.as_view(template_name="index.html")),
-    path('api/update-food-revenue/', update_food_revenue),
+ 
+
 
 
 

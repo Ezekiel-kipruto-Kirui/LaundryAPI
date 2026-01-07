@@ -387,35 +387,91 @@ export default function PerformanceReport() {
     const effectiveStartDate = fromDate || `${derivedYear}-01-01`;
     const effectiveEndDate = toDate || `${derivedYear}-12-31`;
 
-    const isDateInRange = (dateString: string | null | undefined): boolean => {
+    // DEBUG: Log date filter details
+    console.log('[DEBUG] Date Filter Details:', {
+      fromDate,
+      toDate,
+      derivedYear,
+      effectiveStartDate,
+      effectiveEndDate,
+      today
+    });
+
+    // Pre-filter totals for comparison
+    const rawHotelRevenue = hotelOrders.reduce((sum, order) => sum + parseMoney(order.total_amount || (order as any).total), 0);
+    const rawLaundryRevenue = laundryOrders.reduce((sum, order) => sum + parseMoney(order.total_price), 0);
+    
+    console.log('[DEBUG] Raw totals (no filter):', {
+      hotelRevenue: rawHotelRevenue,
+      laundryRevenue: rawLaundryRevenue,
+      hotelOrders: hotelOrders.length,
+      laundryOrders: laundryOrders.length
+    });
+
+    const isDateInRange = (dateString: string | null | undefined, source: string = 'unknown'): boolean => {
       if (!dateString) return false;
       const itemISO = getISODate(dateString);
-      if (!itemISO) return false;
-
-      return itemISO >= effectiveStartDate && itemISO <= effectiveEndDate;
+      if (!itemISO) {
+        console.log(`[DEBUG] isDateInRange: Failed to parse date "${dateString}" from ${source}`);
+        return false;
+      }
+      
+      const inRange = itemISO >= effectiveStartDate && itemISO <= effectiveEndDate;
+      // Only log if in range to avoid spam
+      if (inRange) {
+        console.log(`[DEBUG] isDateInRange: "${dateString}" -> "${itemISO}" is IN range [${effectiveStartDate} to ${effectiveEndDate}]`);
+      }
+      return inRange;
     };
 
-    const filteredHotelOrders = hotelOrders.filter(order => isDateInRange(order.created_at || order.date));
-    const filteredLaundryOrders = laundryOrders.filter(order => isDateInRange(order.created_at));
+    const filteredHotelOrders = hotelOrders.filter(order => isDateInRange(order.created_at || order.date, 'hotelOrder'));
+    const filteredLaundryOrders = laundryOrders.filter(order => isDateInRange(order.created_at, 'laundryOrder'));
 
     // Hotel Calcs
     const hotelRevenue = filteredHotelOrders.reduce((sum, order) => sum + parseMoney(order.total_amount || (order as any).total), 0);
     const hotelTotalOrders = filteredHotelOrders.length;
-    const hotelExpensesTotal = hotelExpenses.reduce((sum, expense) => isDateInRange(expense.date) ? sum + parseMoney(expense.amount) : sum, 0);
+    const hotelExpensesTotal = hotelExpenses.filter(e => isDateInRange(e.date, 'hotelExpense')).reduce((sum, expense) => sum + parseMoney(expense.amount), 0);
     const hotelNetProfit = hotelRevenue - hotelExpensesTotal;
+
+    // DEBUG: Sample of hotel order dates
+    console.log('[DEBUG] Sample Hotel Order Dates (first 5):', 
+      hotelOrders.slice(0, 5).map(o => ({
+        id: o.id,
+        created_at: o.created_at,
+        isoDate: getISODate(o.created_at || o.date),
+        total: o.total_amount
+      }))
+    );
 
     // Laundry Calcs
     const laundryRevenue = filteredLaundryOrders.reduce((sum, order) => sum + parseMoney(order.total_price), 0);
-    const laundryExpensesTotal = laundryExpenses.reduce((sum, expense) => isDateInRange(expense.date) ? sum + parseMoney(expense.amount) : sum, 0);
+    const laundryExpensesTotal = laundryExpenses.filter(e => isDateInRange(e.date, 'laundryExpense')).reduce((sum, expense) => sum + parseMoney(expense.amount), 0);
     const laundryNetProfit = laundryRevenue - laundryExpensesTotal;
+
+    // DEBUG: Sample of laundry order dates
+    console.log('[DEBUG] Sample Laundry Order Dates (first 5):', 
+      laundryOrders.slice(0, 5).map(o => ({
+        id: o.id,
+        created_at: o.created_at,
+        isoDate: getISODate(o.created_at),
+        total: o.total_price
+      }))
+    );
+
+    console.log('[DEBUG] Filtered totals (with date filter):', {
+      hotelRevenue,
+      laundryRevenue,
+      filteredHotelOrders: filteredHotelOrders.length,
+      filteredLaundryOrders: filteredLaundryOrders.length
+    });
 
     const totalBusinessRevenue = hotelRevenue + laundryRevenue;
     const totalBusinessExpenses = hotelExpensesTotal + laundryExpensesTotal;
     const totalNetProfit = totalBusinessRevenue - totalBusinessExpenses;
 
     // Shop Metrics
-    const shopA = calculateShopMetrics(laundryOrders, laundryExpenses, 'Shop A', isDateInRange);
-    const shopB = calculateShopMetrics(laundryOrders, laundryExpenses, 'Shop B', isDateInRange);
+    const shopA = calculateShopMetrics(filteredLaundryOrders, laundryExpenses.filter(e => isDateInRange(e.date, 'shopAExpense')), 'Shop A', isDateInRange);
+    const shopB = calculateShopMetrics(filteredLaundryOrders, laundryExpenses.filter(e => isDateInRange(e.date, 'shopBExpense')), 'Shop B', isDateInRange);
 
     // Payment Methods
     const paymentMethodsData: Record<string, { amount: number; count: number }> = {};
@@ -484,29 +540,49 @@ export default function PerformanceReport() {
     const monthlyHotelExpenses = Array(12).fill(0);
     const monthlyLaundryExpenses = Array(12).fill(0);
 
-    const processMonthly = (items: any[], dateKey: string, valKey: string, arr: number[]) => {
+    // DEBUG: Log date range and data counts
+    console.log('[DEBUG] Monthly Aggregation - Date Range:', { effectiveStartDate, effectiveEndDate, derivedYear });
+    console.log('[DEBUG] Raw data counts:', {
+      hotelOrders: hotelOrders.length,
+      laundryOrders: laundryOrders.length,
+      hotelExpenses: hotelExpenses.length,
+      laundryExpenses: laundryExpenses.length
+    });
+    console.log('[DEBUG] Filtered data counts:', {
+      filteredHotelOrders: filteredHotelOrders.length,
+      filteredLaundryOrders: filteredLaundryOrders.length
+    });
+
+    const processMonthly = (items: any[], dateKey: string, valKey: string, arr: number[], sourceName: string) => {
+      let processedCount = 0;
       items.forEach(item => {
         const dateVal = dateKey === 'created_at' ? (item.created_at || item.date) : item[dateKey];
         const itemISO = getISODate(dateVal);
-        // Plot data for the derived year only
+        // DEBUG: Log each date processing
         if (itemISO && itemISO.startsWith(String(derivedYear))) {
-            const monthIndex = parseInt(itemISO.split('-')[1], 10) - 1; // 0-11
-            if (monthIndex >= 0 && monthIndex <= 11) {
-                arr[monthIndex] += parseMoney(item[valKey] || (valKey === 'total_amount' ? (item as any).total : 0));
-            }
+          const monthIndex = parseInt(itemISO.split('-')[1], 10) - 1; // 0-11
+          if (monthIndex >= 0 && monthIndex <= 11) {
+            arr[monthIndex] += parseMoney(item[valKey] || (valKey === 'total_amount' ? (item as any).total : 0));
+            processedCount++;
+          }
         }
       });
+      console.log(`[DEBUG] ${sourceName}: processed ${processedCount} items out of ${items.length}`);
     };
 
-    processMonthly(hotelOrders, 'created_at', 'total_amount', monthlyHotelRevenue);
-    processMonthly(laundryOrders, 'created_at', 'total_price', monthlyLaundryRevenue);
-    processMonthly(hotelExpenses, 'date', 'amount', monthlyHotelExpenses);
-    processMonthly(laundryExpenses, 'date', 'amount', monthlyLaundryExpenses);
+    // FIX: Use filtered data instead of raw data for monthly aggregation
+    processMonthly(filteredHotelOrders, 'created_at', 'total_amount', monthlyHotelRevenue, 'Hotel Orders');
+    processMonthly(filteredLaundryOrders, 'created_at', 'total_price', monthlyLaundryRevenue, 'Laundry Orders');
+    // Filter expenses by date range for monthly aggregation
+    const filteredHotelExpenses = hotelExpenses.filter(e => isDateInRange(e.date));
+    const filteredLaundryExpenses = laundryExpenses.filter(e => isDateInRange(e.date));
+    processMonthly(filteredHotelExpenses, 'date', 'amount', monthlyHotelExpenses, 'Hotel Expenses');
+    processMonthly(filteredLaundryExpenses, 'date', 'amount', monthlyLaundryExpenses, 'Laundry Expenses');
 
     const monthlyData = months.map((m, i) => {
       const totalRevenue = monthlyHotelRevenue[i] + monthlyLaundryRevenue[i];
       const totalExpenses = monthlyHotelExpenses[i] + monthlyLaundryExpenses[i];
-      return {
+      const dataPoint = {
         month: m,
         year: derivedYear,
         hotelRevenue: monthlyHotelRevenue[i],
@@ -517,6 +593,19 @@ export default function PerformanceReport() {
         totalExpenses,
         netProfit: totalRevenue - totalExpenses
       };
+      return dataPoint;
+    });
+
+    // DEBUG: Log monthly data summary
+    console.log('[DEBUG] Monthly Data Summary:', {
+      year: derivedYear,
+      months: monthlyData.map(d => ({
+        month: d.month,
+        hotelRevenue: d.hotelRevenue,
+        laundryRevenue: d.laundryRevenue,
+        totalRevenue: d.totalRevenue,
+        netProfit: d.netProfit
+      }))
     });
 
     return {

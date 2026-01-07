@@ -246,7 +246,7 @@ class OrderItem(models.Model):
         ('Household items', 'Household items'),
         ('Footwares', 'Footwares'),
     )
-    itemtype = models.CharField(max_length=50, choices=ITEMS_CATEGORY,
+    itemtype = MultiSelectField(max_length=100, choices=ITEMS_CATEGORY,
                                 default='Clothing', db_index=True)
 
     itemname = models.TextField()
@@ -356,7 +356,7 @@ def handle_order_sms(sender, instance, created, **kwargs):
     if created:
         message_body = (
             f"Hello {customer.name}! "
-            f"Your order {order_code} has been received and is now pending."
+            f"Your order {order_code} has been received and is now being processed."
         )
 
     # ✅ ORDER COMPLETED (status change only)

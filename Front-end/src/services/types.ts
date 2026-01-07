@@ -9,10 +9,10 @@ export interface Customer {
 export interface OrderItem {
   id?: number;
   servicetype: string[];
-  itemtype: 'Clothing' | 'Bedding' | 'Household items' | 'Footwares';
+  itemtype: string[];
   itemname?: string;
   quantity?: number;
-  itemcondition?: 'New' | 'Old' | 'Torn';
+  itemcondition?: string;
   additional_info?: string;
   unit_price: string;
   total_item_price?: string;

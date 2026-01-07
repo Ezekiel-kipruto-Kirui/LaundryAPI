@@ -64,9 +64,13 @@ class HotelOrderItem(models.Model):
             food_item=self.food_item,
             oncredit=False  # Only cash sales
         ).aggregate(total=Sum('price'))['total'] or 0
-
+        total_quantity = HotelOrderItem.objects.filter(
+            food_item=self.food_item,
+            oncredit=False  # Only cash sales
+        ).aggregate(total=Sum('quantity'))['total'] or 0
         # Update the related FoodItem
         self.food_item.total_order_price = total_revenue
+        self.food_item.quantity = total_quantity
         
         self.food_item.save()
     
