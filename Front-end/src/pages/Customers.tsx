@@ -28,7 +28,8 @@ import { API_BASE_URL } from '@/services/url';
 // --- API Endpoints ---
 const API_CUSTOMERS_URL = `${API_BASE_URL}/Laundry/customers/`;
 const API_ORDERS_URL = `${API_BASE_URL}/Laundry/orders/`;
-const API_SMS_URL = `${API_BASE_URL}/send-sms/`;
+// FIX: Ensure the URL matches the working implementation (include /Laundry/)
+const API_SMS_URL = `${API_BASE_URL}/Laundry/send_sms/`;
 
 // --- Types for Pagination ---
 interface PaginatedResponse<T> {
@@ -692,6 +693,9 @@ const fetchAllOrdersWithPagination = async (): Promise<Order[]> => {
     return allOrders;
 };
 
+// Helper to match the reference implementation's token retrieval
+const getAuthToken = (): string | null => localStorage.getItem("accessToken");
+
 export default function CustomersPage() {
     const [customers, setCustomers] = useState<Customer[]>([]);
     const [allCustomers, setAllCustomers] = useState<Customer[]>([]);
@@ -875,6 +879,7 @@ export default function CustomersPage() {
     }, [orders, pagination.pageSize, calculateCustomerStats]);
 
     // SMS Sending Function - Corrected to send array in single request
+    // This logic matches the working reference implementation exactly
     const sendBulkSMS = async (message: string) => {
         setIsSendingSMS(true);
         setError(null);
@@ -884,11 +889,12 @@ export default function CustomersPage() {
             const allCustomersData = await fetchAllCustomers();
             
             if (allCustomersData.length === 0) {
-                alert("No customers found in the database.");
+                alert("No customers found in database.");
                 return;
             }
 
-            // Extract unique phone numbers
+            // Collect unique phone numbers
+            // Matching the working reference logic: map, filter, then Set
             const phoneNumbers = [...new Set(
                 allCustomersData
                     .map(customer => customer.phone)
@@ -907,11 +913,13 @@ export default function CustomersPage() {
             }
 
             // Send bulk SMS in a single request
-            const token = localStorage.getItem('access_token');
+            // Using getAuthToken() to match reference implementation
+            const token = getAuthToken();
             if (!token) throw new Error('Unauthorized');
 
             console.log('Sending bulk SMS to:', phoneNumbers.length, 'recipients');
             
+            // Direct fetch used in reference implementation
             const res = await fetch(API_SMS_URL, {
                 method: 'POST',
                 headers: { 
@@ -919,7 +927,7 @@ export default function CustomersPage() {
                     'Authorization': `Bearer ${token}` 
                 },
                 body: JSON.stringify({ 
-                    to_number: phoneNumbers, // Passing the array directly
+                    to_number: phoneNumbers, // Passing the array
                     message: message 
                 })
             });
