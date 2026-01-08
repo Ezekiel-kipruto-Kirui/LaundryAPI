@@ -224,23 +224,44 @@ const parseMoney = (val: any): number => {
   return isNaN(parsed) ? 0 : parsed;
 };
 
-// FIXED: Improved Date Extraction to avoid Timezone shifting
-const getISODate = (dateString: string | null | undefined): string | null => {
+// --- Date Helper Functions ---
+
+const resolveDate = (item: any): Date | null => {
+  // Try created_at first (primary date field for both hotel and laundry)
+  const dateString = item.created_at || item.date;
   if (!dateString) return null;
-  // Check if it's an ISO string (YYYY-MM-DDTHH:mm:ss...)
-  // We extract the date part directly to preserve the business day.
-  // Example: "2026-01-02T17:58:38.708259+03:00" -> "2026-01-02"
-  if (dateString.includes('T')) {
-    return dateString.split('T')[0];
-  }
-  // Fallback for other formats
+
   try {
-    const d = new Date(dateString);
-    if (isNaN(d.getTime())) return null;
-    return d.toISOString().split('T')[0];
+    const date = new Date(dateString);
+    return isNaN(date.getTime()) ? null : date;
   } catch (e) {
     return null;
   }
+};
+
+const getDatePortion = (date: Date): string => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const isDateInRange = (date: Date | null, startDate: Date | null, endDate: Date | null): boolean => {
+  if (!date) return false;
+  if (!startDate || !endDate) return true;
+
+  const datePortion = getDatePortion(date);
+  const startPortion = getDatePortion(startDate);
+  const endPortion = getDatePortion(endDate);
+
+  return datePortion >= startPortion && datePortion <= endPortion;
+};
+
+const getMonthYear = (date: Date): { year: number; month: number } => {
+  return {
+    year: date.getFullYear(),
+    month: date.getMonth() + 1 // 1-12
+  };
 };
 
 // --- Main Component ---
@@ -248,7 +269,7 @@ const getISODate = (dateString: string | null | undefined): string | null => {
 export default function PerformanceReport() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  
+
   const [rawData, setRawData] = useState<{
     hotelOrders: HotelOrder[];
     hotelExpenses: HotelExpense[];
@@ -280,20 +301,48 @@ export default function PerformanceReport() {
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (token) headers['Authorization'] = `Bearer ${token}`;
 
-      const simpleFetch = async (url: string) => {
-        const response = await fetch(url, { headers });
-        if (!response.ok) throw new Error(`Failed to fetch ${url}`);
-        const data = await response.json();
-        return Array.isArray(data) ? data : (data.results || []);
+      const fetchAllPages = async (url: string): Promise<any[]> => {
+        let allResults: any[] = [];
+        let nextUrl: string | null = url;
+
+        while (nextUrl) {
+          const response = await fetch(nextUrl, { headers });
+          if (!response.ok) throw new Error(`Failed to fetch ${nextUrl}`);
+
+          const data = await response.json();
+
+          if (Array.isArray(data)) {
+            allResults = [...allResults, ...data];
+            nextUrl = null;
+          } else if (data.results && Array.isArray(data.results)) {
+            allResults = [...allResults, ...data.results];
+            nextUrl = data.next;
+          } else {
+            allResults = [...allResults, data];
+            nextUrl = null;
+          }
+
+          if (allResults.length > 10000) break;
+        }
+
+        return allResults;
       };
 
       const [hotelOrders, hotelExpenses, laundryOrders, laundryExpenses, customers] = await Promise.all([
-        simpleFetch(`${API_BASE_URL}/Hotel/orders/`),
-        simpleFetch(`${API_BASE_URL}/Hotel/Hotelexpense-records/`),
-        simpleFetch(`${API_BASE_URL}/Laundry/orders/`),
-        simpleFetch(`${API_BASE_URL}/Laundry/expense-records/`),
-        simpleFetch(`${API_BASE_URL}/Laundry/customers/`)
+        fetchAllPages(`${API_BASE_URL}/Hotel/orders/`),
+        fetchAllPages(`${API_BASE_URL}/Hotel/Hotelexpense-records/`),
+        fetchAllPages(`${API_BASE_URL}/Laundry/orders/`),
+        fetchAllPages(`${API_BASE_URL}/Laundry/expense-records/`),
+        fetchAllPages(`${API_BASE_URL}/Laundry/customers/`)
       ]);
+
+      console.log('[DEBUG] Total records fetched:', {
+        hotelOrders: hotelOrders.length,
+        hotelExpenses: hotelExpenses.length,
+        laundryOrders: laundryOrders.length,
+        laundryExpenses: laundryExpenses.length,
+        customers: customers.length
+      });
 
       setRawData({ hotelOrders, hotelExpenses, laundryOrders, laundryExpenses, customers });
     } catch (err: any) {
@@ -305,7 +354,7 @@ export default function PerformanceReport() {
 
   useEffect(() => {
     fetchData();
-    const interval = setInterval(fetchData, 60000); 
+    const interval = setInterval(fetchData, 60000);
     updateIntervalRef.current = interval;
 
     return () => {
@@ -314,20 +363,20 @@ export default function PerformanceReport() {
   }, [fetchData]);
 
   const calculateShopMetrics = useCallback((
-    orders: LaundryOrder[], 
-    expenses: LaundryExpense[], 
+    orders: LaundryOrder[],
+    expenses: LaundryExpense[],
     shopName: "Shop A" | "Shop B",
-    isDateInRange: (dateStr: string) => boolean
+    isDateInRange: (date: Date | null) => boolean
   ): ShopMetrics => {
-    const shopOrders = orders.filter(o => o.shop === shopName && isDateInRange(o.created_at));
+    const shopOrders = orders.filter(o => o.shop === shopName && isDateInRange(resolveDate(o)));
     const revenue = shopOrders.reduce((sum, order) => sum + parseMoney(order.total_price), 0);
     const totalOrders = shopOrders.length;
-    
+
     const pendingOrders = shopOrders.filter(o => o.payment_status === 'pending');
     const partialOrders = shopOrders.filter(o => o.payment_status === 'partial');
     const completeOrders = shopOrders.filter(o => o.payment_status === 'complete');
 
-    const shopExpenses = expenses.filter(e => e.shop === shopName && isDateInRange(e.date))
+    const shopExpenses = expenses.filter(e => e.shop === shopName && isDateInRange(resolveDate(e)))
       .reduce((sum, expense) => sum + parseMoney(expense.amount), 0);
 
     return {
@@ -349,134 +398,105 @@ export default function PerformanceReport() {
 
     const { hotelOrders, hotelExpenses, laundryOrders, laundryExpenses, customers } = rawData;
 
-    // --- LOGIC FIX: Determine Display Year ---
-    // If a date range is selected by user, use that year.
-    // Otherwise, default to the latest year found in the data (to avoid showing 2025 when data is 2026).
-    // Fallback to current system year if no data exists.
-    let derivedYear = new Date().getFullYear();
-    
-    if (fromDate) {
-      derivedYear = new Date(fromDate).getFullYear();
-    } else {
-      // Auto-detect latest year from available data
-      const years: number[] = [];
-      hotelOrders.forEach(o => {
-         const d = getISODate(o.created_at || o.date);
-         if(d) years.push(parseInt(d.split('-')[0], 10));
-      });
-      laundryOrders.forEach(o => {
-         const d = getISODate(o.created_at);
-         if(d) years.push(parseInt(d.split('-')[0], 10));
-      });
-      hotelExpenses.forEach(e => {
-         const d = getISODate(e.date);
-         if(d) years.push(parseInt(d.split('-')[0], 10));
-      });
-      laundryExpenses.forEach(e => {
-         const d = getISODate(e.date);
-         if(d) years.push(parseInt(d.split('-')[0], 10));
-      });
+    // Parse filter dates
+    const filterStartDate = fromDate ? new Date(fromDate) : null;
+    const filterEndDate = toDate ? new Date(toDate) : null;
 
-      if (years.length > 0) {
-        derivedYear = Math.max(...years);
+    // Determine display year based on filter or data
+    let displayYear = new Date().getFullYear();
+    if (filterStartDate) {
+      displayYear = filterStartDate.getFullYear();
+    } else {
+      // Find latest year in data
+      const allDates = [
+        ...hotelOrders.map(o => resolveDate(o)),
+        ...laundryOrders.map(o => resolveDate(o)),
+        ...hotelExpenses.map(e => resolveDate(e)),
+        ...laundryExpenses.map(e => resolveDate(e))
+      ].filter(Boolean) as Date[];
+
+      if (allDates.length > 0) {
+        const latestDate = new Date(Math.max(...allDates.map(d => d.getTime())));
+        displayYear = latestDate.getFullYear();
       }
     }
 
-    // FILTERING LOGIC
-    // If no range is selected, we default to the full derived year (Jan 1 to Dec 31)
-    const effectiveStartDate = fromDate || `${derivedYear}-01-01`;
-    const effectiveEndDate = toDate || `${derivedYear}-12-31`;
-
-    // DEBUG: Log date filter details
-    console.log('[DEBUG] Date Filter Details:', {
+    console.log('[DEBUG] Filter settings:', {
       fromDate,
       toDate,
-      derivedYear,
-      effectiveStartDate,
-      effectiveEndDate,
-      today
+      filterStartDate: filterStartDate?.toISOString(),
+      filterEndDate: filterEndDate?.toISOString(),
+      displayYear
     });
 
-    // Pre-filter totals for comparison
-    const rawHotelRevenue = hotelOrders.reduce((sum, order) => sum + parseMoney(order.total_amount || (order as any).total), 0);
-    const rawLaundryRevenue = laundryOrders.reduce((sum, order) => sum + parseMoney(order.total_price), 0);
-    
-    console.log('[DEBUG] Raw totals (no filter):', {
-      hotelRevenue: rawHotelRevenue,
-      laundryRevenue: rawLaundryRevenue,
-      hotelOrders: hotelOrders.length,
-      laundryOrders: laundryOrders.length
-    });
-
-    const isDateInRange = (dateString: string | null | undefined, source: string = 'unknown'): boolean => {
-      if (!dateString) return false;
-      const itemISO = getISODate(dateString);
-      if (!itemISO) {
-        console.log(`[DEBUG] isDateInRange: Failed to parse date "${dateString}" from ${source}`);
-        return false;
-      }
-      
-      const inRange = itemISO >= effectiveStartDate && itemISO <= effectiveEndDate;
-      // Only log if in range to avoid spam
-      if (inRange) {
-        console.log(`[DEBUG] isDateInRange: "${dateString}" -> "${itemISO}" is IN range [${effectiveStartDate} to ${effectiveEndDate}]`);
-      }
-      return inRange;
+    // Create date filter function
+    const dateFilterFn = (date: Date | null): boolean => {
+      return isDateInRange(date, filterStartDate, filterEndDate);
     };
 
-    const filteredHotelOrders = hotelOrders.filter(order => isDateInRange(order.created_at || order.date, 'hotelOrder'));
-    const filteredLaundryOrders = laundryOrders.filter(order => isDateInRange(order.created_at, 'laundryOrder'));
+    // Filter ALL data using the same filter function
+    const filteredHotelOrders = hotelOrders.filter(order => dateFilterFn(resolveDate(order)));
+    const filteredLaundryOrders = laundryOrders.filter(order => dateFilterFn(resolveDate(order)));
+    const filteredHotelExpenses = hotelExpenses.filter(expense => dateFilterFn(resolveDate(expense)));
+    const filteredLaundryExpenses = laundryExpenses.filter(expense => dateFilterFn(resolveDate(expense)));
 
-    // Hotel Calcs
-    const hotelRevenue = filteredHotelOrders.reduce((sum, order) => sum + parseMoney(order.total_amount || (order as any).total), 0);
-    const hotelTotalOrders = filteredHotelOrders.length;
-    const hotelExpensesTotal = hotelExpenses.filter(e => isDateInRange(e.date, 'hotelExpense')).reduce((sum, expense) => sum + parseMoney(expense.amount), 0);
-    const hotelNetProfit = hotelRevenue - hotelExpensesTotal;
-
-    // DEBUG: Sample of hotel order dates
-    console.log('[DEBUG] Sample Hotel Order Dates (first 5):', 
-      hotelOrders.slice(0, 5).map(o => ({
-        id: o.id,
-        created_at: o.created_at,
-        isoDate: getISODate(o.created_at || o.date),
-        total: o.total_amount
-      }))
-    );
-
-    // Laundry Calcs
-    const laundryRevenue = filteredLaundryOrders.reduce((sum, order) => sum + parseMoney(order.total_price), 0);
-    const laundryExpensesTotal = laundryExpenses.filter(e => isDateInRange(e.date, 'laundryExpense')).reduce((sum, expense) => sum + parseMoney(expense.amount), 0);
-    const laundryNetProfit = laundryRevenue - laundryExpensesTotal;
-
-    // DEBUG: Sample of laundry order dates
-    console.log('[DEBUG] Sample Laundry Order Dates (first 5):', 
-      laundryOrders.slice(0, 5).map(o => ({
-        id: o.id,
-        created_at: o.created_at,
-        isoDate: getISODate(o.created_at),
-        total: o.total_price
-      }))
-    );
-
-    console.log('[DEBUG] Filtered totals (with date filter):', {
-      hotelRevenue,
-      laundryRevenue,
-      filteredHotelOrders: filteredHotelOrders.length,
-      filteredLaundryOrders: filteredLaundryOrders.length
+    console.log('[DEBUG] Filtered counts:', {
+      hotelOrders: filteredHotelOrders.length,
+      laundryOrders: filteredLaundryOrders.length,
+      hotelExpenses: filteredHotelExpenses.length,
+      laundryExpenses: filteredLaundryExpenses.length
     });
 
+    // Calculate hotel metrics using filtered data
+    const hotelRevenue = filteredHotelOrders.reduce((sum, order) => {
+      return sum + parseMoney(order.total_amount);
+    }, 0);
+
+    const hotelTotalOrders = filteredHotelOrders.length;
+    const hotelExpensesTotal = filteredHotelExpenses.reduce((sum, expense) => sum + parseMoney(expense.amount), 0);
+    const hotelNetProfit = hotelRevenue - hotelExpensesTotal;
+
+    console.log('[DEBUG] Hotel calculations:', {
+      hotelRevenue,
+      hotelTotalOrders,
+      hotelExpensesTotal,
+      hotelNetProfit,
+      sample: filteredHotelOrders.slice(0, 3).map(o => ({
+        id: o.id,
+        total_amount: o.total_amount,
+        created_at: o.created_at,
+        parsed: parseMoney(o.total_amount)
+      }))
+    });
+
+    // Calculate laundry metrics using filtered data
+    const laundryRevenue = filteredLaundryOrders.reduce((sum, order) => {
+      return sum + parseMoney(order.total_price);
+    }, 0);
+
+    const laundryExpensesTotal = filteredLaundryExpenses.reduce((sum, expense) => sum + parseMoney(expense.amount), 0);
+    const laundryNetProfit = laundryRevenue - laundryExpensesTotal;
+
+    // Calculate totals
     const totalBusinessRevenue = hotelRevenue + laundryRevenue;
     const totalBusinessExpenses = hotelExpensesTotal + laundryExpensesTotal;
     const totalNetProfit = totalBusinessRevenue - totalBusinessExpenses;
 
-    // Shop Metrics
-    const shopA = calculateShopMetrics(filteredLaundryOrders, laundryExpenses.filter(e => isDateInRange(e.date, 'shopAExpense')), 'Shop A', isDateInRange);
-    const shopB = calculateShopMetrics(filteredLaundryOrders, laundryExpenses.filter(e => isDateInRange(e.date, 'shopBExpense')), 'Shop B', isDateInRange);
+    console.log('[DEBUG] Total calculations:', {
+      totalBusinessRevenue,
+      totalBusinessExpenses,
+      totalNetProfit,
+      hotelRevenue,
+      laundryRevenue
+    });
 
-    // Payment Methods
+    // Calculate shop metrics using filtered data
+    const shopA = calculateShopMetrics(filteredLaundryOrders, filteredLaundryExpenses, 'Shop A', dateFilterFn);
+    const shopB = calculateShopMetrics(filteredLaundryOrders, filteredLaundryExpenses, 'Shop B', dateFilterFn);
+
+    // Payment methods from filtered laundry orders
     const paymentMethodsData: Record<string, { amount: number; count: number }> = {};
     filteredLaundryOrders.forEach(order => {
-      // Ensure we handle the string "None" or other cases correctly
       const type = (order.payment_type || 'none').toString().toLowerCase();
       if (!paymentMethodsData[type]) paymentMethodsData[type] = { amount: 0, count: 0 };
       paymentMethodsData[type].amount += parseMoney(order.total_price);
@@ -490,20 +510,22 @@ export default function PerformanceReport() {
     }));
 
     const getPaymentAmount = (key: string) => paymentMethodsData[key]?.amount || 0;
-    
+
+    // Payment status stats from filtered data
     const getStatsByStatus = (status: string) => {
       const subset = filteredLaundryOrders.filter(o => o.payment_status === status);
-      return { 
-        count: subset.length, 
-        amount: subset.reduce((sum, o) => sum + parseMoney(o.total_price), 0) 
+      return {
+        count: subset.length,
+        amount: subset.reduce((sum, o) => sum + parseMoney(o.total_price), 0)
       };
     };
+
     const pendingStats = getStatsByStatus('pending');
     const partialStats = getStatsByStatus('partial');
     const completeStats = getStatsByStatus('complete');
     const totalBalanceAmount = filteredLaundryOrders.reduce((sum, order) => sum + parseMoney(order.balance), 0);
 
-    // Top Customers
+    // Top customers from filtered data
     const customerMap = new Map<string, { count: number; total: number }>();
     filteredLaundryOrders.forEach(order => {
       if (order.customer?.name) {
@@ -513,12 +535,13 @@ export default function PerformanceReport() {
         customerMap.set(order.customer.name, curr);
       }
     });
-    
+
     const commonCustomers = Array.from(customerMap.entries())
       .sort((a, b) => b[1].total - a[1].total)
       .slice(0, 10)
       .map(([name, stats]) => ({ customerName: name, orderCount: stats.count, totalSpent: stats.total }));
 
+    // Top services and items from filtered data
     const tallyItems = (keyExtractor: (item: any) => string) => {
       const counts: Record<string, number> = {};
       filteredLaundryOrders.forEach(order => {
@@ -533,58 +556,47 @@ export default function PerformanceReport() {
     const topServices = tallyItems(item => Array.isArray(item.servicetype) ? item.servicetype[0] : '');
     const topItems = tallyItems(item => item.itemname);
 
-    // Monthly Trend - Always plots the derivedYear context
+    // Monthly data - use ONLY filtered data for the selected year
     const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     const monthlyHotelRevenue = Array(12).fill(0);
     const monthlyLaundryRevenue = Array(12).fill(0);
     const monthlyHotelExpenses = Array(12).fill(0);
     const monthlyLaundryExpenses = Array(12).fill(0);
 
-    // DEBUG: Log date range and data counts
-    console.log('[DEBUG] Monthly Aggregation - Date Range:', { effectiveStartDate, effectiveEndDate, derivedYear });
-    console.log('[DEBUG] Raw data counts:', {
-      hotelOrders: hotelOrders.length,
-      laundryOrders: laundryOrders.length,
-      hotelExpenses: hotelExpenses.length,
-      laundryExpenses: laundryExpenses.length
-    });
-    console.log('[DEBUG] Filtered data counts:', {
-      filteredHotelOrders: filteredHotelOrders.length,
-      filteredLaundryOrders: filteredLaundryOrders.length
-    });
-
-    const processMonthly = (items: any[], dateKey: string, valKey: string, arr: number[], sourceName: string) => {
+    // Process monthly data from filtered datasets
+    const processMonthly = (items: any[], valKey: string, arr: number[], sourceName: string) => {
       let processedCount = 0;
       items.forEach(item => {
-        const dateVal = dateKey === 'created_at' ? (item.created_at || item.date) : item[dateKey];
-        const itemISO = getISODate(dateVal);
-        // DEBUG: Log each date processing
-        if (itemISO && itemISO.startsWith(String(derivedYear))) {
-          const monthIndex = parseInt(itemISO.split('-')[1], 10) - 1; // 0-11
+        const dateObj = resolveDate(item);
+        if (dateObj && dateObj.getFullYear() === displayYear) {
+          const monthIndex = dateObj.getMonth(); // 0-11
           if (monthIndex >= 0 && monthIndex <= 11) {
-            arr[monthIndex] += parseMoney(item[valKey] || (valKey === 'total_amount' ? (item as any).total : 0));
+            const value = parseMoney(item[valKey] || item.total_amount || item.total_price || 0);
+            arr[monthIndex] += value;
             processedCount++;
           }
         }
       });
-      console.log(`[DEBUG] ${sourceName}: processed ${processedCount} items out of ${items.length}`);
+      console.log(`[DEBUG] ${sourceName} monthly: processed ${processedCount} items for year ${displayYear}`);
     };
 
-    // FIX: Use filtered data instead of raw data for monthly aggregation
-    processMonthly(filteredHotelOrders, 'created_at', 'total_amount', monthlyHotelRevenue, 'Hotel Orders');
-    processMonthly(filteredLaundryOrders, 'created_at', 'total_price', monthlyLaundryRevenue, 'Laundry Orders');
-    // Filter expenses by date range for monthly aggregation
-    const filteredHotelExpenses = hotelExpenses.filter(e => isDateInRange(e.date));
-    const filteredLaundryExpenses = laundryExpenses.filter(e => isDateInRange(e.date));
-    processMonthly(filteredHotelExpenses, 'date', 'amount', monthlyHotelExpenses, 'Hotel Expenses');
-    processMonthly(filteredLaundryExpenses, 'date', 'amount', monthlyLaundryExpenses, 'Laundry Expenses');
+    processMonthly(filteredHotelOrders, 'total_amount', monthlyHotelRevenue, 'Hotel Orders');
+    processMonthly(filteredLaundryOrders, 'total_price', monthlyLaundryRevenue, 'Laundry Orders');
+    processMonthly(filteredHotelExpenses, 'amount', monthlyHotelExpenses, 'Hotel Expenses');
+    processMonthly(filteredLaundryExpenses, 'amount', monthlyLaundryExpenses, 'Laundry Expenses');
+
+    console.log('[DEBUG] Monthly Revenue Arrays:', {
+      hotel: monthlyHotelRevenue,
+      laundry: monthlyLaundryRevenue,
+      displayYear
+    });
 
     const monthlyData = months.map((m, i) => {
       const totalRevenue = monthlyHotelRevenue[i] + monthlyLaundryRevenue[i];
       const totalExpenses = monthlyHotelExpenses[i] + monthlyLaundryExpenses[i];
-      const dataPoint = {
+      return {
         month: m,
-        year: derivedYear,
+        year: displayYear,
         hotelRevenue: monthlyHotelRevenue[i],
         laundryRevenue: monthlyLaundryRevenue[i],
         totalRevenue,
@@ -593,19 +605,6 @@ export default function PerformanceReport() {
         totalExpenses,
         netProfit: totalRevenue - totalExpenses
       };
-      return dataPoint;
-    });
-
-    // DEBUG: Log monthly data summary
-    console.log('[DEBUG] Monthly Data Summary:', {
-      year: derivedYear,
-      months: monthlyData.map(d => ({
-        month: d.month,
-        hotelRevenue: d.hotelRevenue,
-        laundryRevenue: d.laundryRevenue,
-        totalRevenue: d.totalRevenue,
-        netProfit: d.netProfit
-      }))
     });
 
     return {
@@ -651,7 +650,7 @@ export default function PerformanceReport() {
       commonCustomers,
       monthlyData,
       paymentMethods,
-      displayYear: derivedYear
+      displayYear
     };
   }, [rawData, fromDate, toDate, calculateShopMetrics]);
 
@@ -723,11 +722,6 @@ export default function PerformanceReport() {
         },
         options: { ...CHART_COMMON_OPTIONS, indexAxis: 'y', plugins: { legend: { display: false } }, scales: { x: { display: false }, y: { grid: { display: false } } } }
       });
-    } else {
-       if (servicesChartRef.current) {
-          const chart = chartInstances.current.get(servicesChartRef.current);
-          if(chart) chart.destroy();
-       }
     }
 
     if (data.itemLabels.length > 0) {
@@ -739,11 +733,6 @@ export default function PerformanceReport() {
         },
         options: { ...CHART_COMMON_OPTIONS, indexAxis: 'y', plugins: { legend: { display: false } }, scales: { x: { display: false }, y: { grid: { display: false } } } }
       });
-    } else {
-       if (productsChartRef.current) {
-          const chart = chartInstances.current.get(productsChartRef.current);
-          if(chart) chart.destroy();
-       }
     }
 
     return () => {
@@ -787,8 +776,8 @@ export default function PerformanceReport() {
           <div>
             <h1 className="text-2xl md:text-3xl font-bold text-gray-900">Business Performance Dashboard</h1>
             <p className="text-gray-500 text-sm mt-1">
-              {(fromDate || toDate) ? `Range: ${fromDate || '...'} to ${toDate || '...'}` : 
-               `Year Overview - ${data?.displayYear}`}
+              {(fromDate || toDate) ? `Range: ${fromDate || '...'} to ${toDate || '...'}` :
+                `Year Overview - ${data?.displayYear}`}
             </p>
           </div>
         </div>
@@ -884,7 +873,7 @@ export default function PerformanceReport() {
           <div className="w-1 h-6 bg-gradient-to-b from-blue-500 to-cyan-600 rounded-full"></div>
           <h2 className="text-xl font-bold text-gray-900">Laundry Business</h2>
         </div>
-        
+
         <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mb-6">
           <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
             <div className="flex items-center gap-3 mb-4">
@@ -908,7 +897,7 @@ export default function PerformanceReport() {
           </div>
 
           <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
-             <div className="flex items-center gap-3 mb-4">
+            <div className="flex items-center gap-3 mb-4">
               <div className="w-10 h-10 rounded-lg bg-yellow-50 flex items-center justify-center"><CreditCard className="h-5 w-5 text-yellow-600" /></div>
               <div>
                 <h3 className="text-sm font-medium text-gray-500 uppercase tracking-wider">Payments</h3>
@@ -922,8 +911,8 @@ export default function PerformanceReport() {
             </div>
           </div>
 
-           <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
-             <div className="flex items-center justify-between mb-4">
+          <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
+            <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-lg bg-red-50 flex items-center justify-center"><Wallet className="h-5 w-5 text-red-600" /></div>
                 <div>
@@ -967,7 +956,7 @@ export default function PerformanceReport() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <ChartCard title="Top Services" color="green" icon={<Bath />} canvasRef={servicesChartRef} dataAvailable={!!data?.servicesLabels.length} />
         <ChartCard title="Common Items" color="yellow" icon={<Box />} canvasRef={productsChartRef} dataAvailable={!!data?.itemLabels.length} />
-        
+
         <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
           <div className="flex justify-between items-center mb-6">
             <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2"><Crown className="h-5 w-5 text-yellow-500" /> Top Customers</h2>
@@ -999,12 +988,12 @@ export default function PerformanceReport() {
 
 // --- Optimized Sub-Components ---
 
-const StatCard = memo(({ icon, bg, title, value, subtitle }: { 
-  icon: React.ReactNode, 
-  bg: 'blue' | 'purple' | 'red', 
-  title: string, 
-  value: string, 
-  subtitle: string 
+const StatCard = memo(({ icon, bg, title, value, subtitle }: {
+  icon: React.ReactNode,
+  bg: 'blue' | 'purple' | 'red',
+  title: string,
+  value: string,
+  subtitle: string
 }) => {
   const classes = STYLE_MAPS.card[bg];
   return (
@@ -1020,12 +1009,12 @@ const StatCard = memo(({ icon, bg, title, value, subtitle }: {
   );
 });
 
-const MetricBox = memo(({ label, value, sub, color, icon }: { 
-  label: string; 
-  value: string; 
-  sub?: string; 
-  color: string; 
-  icon: React.ReactNode 
+const MetricBox = memo(({ label, value, sub, color, icon }: {
+  label: string;
+  value: string;
+  sub?: string;
+  color: string;
+  icon: React.ReactNode
 }) => {
   const classes = STYLE_MAPS.metric[color as keyof typeof STYLE_MAPS.metric] || STYLE_MAPS.metric.blue;
 
@@ -1041,11 +1030,11 @@ const MetricBox = memo(({ label, value, sub, color, icon }: {
   );
 });
 
-const PaymentBadge = memo(({ label, count, amount, color }: { 
-  label: string; 
-  count?: number; 
-  amount?: number; 
-  color: 'yellow' | 'blue' | 'green' 
+const PaymentBadge = memo(({ label, count, amount, color }: {
+  label: string;
+  count?: number;
+  amount?: number;
+  color: 'yellow' | 'blue' | 'green'
 }) => {
   const classes = STYLE_MAPS.badge[color];
 
@@ -1100,10 +1089,10 @@ const ShopPerformanceCard = memo(({ title, metrics }: { title: string, metrics?:
   );
 });
 
-const ChartCard = memo(({ title, icon, canvasRef, dataAvailable, color = "gray" }: { 
-  title: string, 
-  icon: React.ReactNode, 
-  canvasRef: React.RefObject<HTMLCanvasElement>, 
+const ChartCard = memo(({ title, icon, canvasRef, dataAvailable, color = "gray" }: {
+  title: string,
+  icon: React.ReactNode,
+  canvasRef: React.RefObject<HTMLCanvasElement>,
   dataAvailable: boolean,
   color?: 'green' | 'yellow' | 'gray' | 'blue' | 'red'
 }) => {
