@@ -24,10 +24,13 @@ from rest_framework_simplejwt.views import TokenRefreshView
 from django.views.generic import TemplateView
 from .authentication import EmailTokenObtainPairView
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
-from LaundryApp.views import CurrentUserView,sendsms_view
+from LaundryApp.views import CurrentUserView
+# from LaundryApp.sms_utility import sendsms_view
 from django.conf.urls.static import static
 import os
 from HotelApp.views import update_food_revenue,update_food_items_view
+
+
 
 FRONTEND_BUILD_DIR = os.path.join(settings.BASE_DIR, 'Front-end', 'dist')
 
@@ -42,8 +45,9 @@ urlpatterns = [
     path('api/Hotel/', include('HotelApp.urls')),
     path('api/token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
+    path('api/Report/', include('perfomancereport.urls')),
     path('api/me/',CurrentUserView.as_view()),
-   
+    # path('api/send-sms/', sendsms_view), 
     path('api/users/me/', CurrentUserView.as_view(), name='current_user'),
     path('api/update-food-revenue/', update_food_revenue),
     path("api/update-food-items/", update_food_items_view, name="update_food_items"),

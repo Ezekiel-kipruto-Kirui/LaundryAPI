@@ -10,7 +10,11 @@ import {
   RefreshCw,
   Crown,
   Box,
-  Bath
+  Bath,
+  Users,
+  Clock,
+  CheckCircle,
+  AlertCircle
 } from "lucide-react";
 import Chart from 'chart.js/auto';
 import { getAccessToken } from "@/services/api";
@@ -20,137 +24,123 @@ import type { Chart as ChartType } from 'chart.js/auto';
 
 // --- Types & Interfaces ---
 
-interface HotelOrderItem {
-  id: number;
-  total_price: number;
-  created_at: string | null;
-}
-
-interface HotelOrder {
-  id: number;
-  order_items: HotelOrderItem[];
-  total_amount: number | string;
-  created_at: string;
-  date?: string;
-}
-
-interface HotelExpense {
-  id: number;
-  amount: string;
-  date: string;
-}
-
-interface LaundryOrderItem {
-  id: number;
-  servicetype: string[];
-  itemname: string;
-  created_at: string;
-}
-
-interface LaundryOrder {
-  id: number;
-  uniquecode: string;
-  customer: {
-    id: number;
-    name: string;
+// Matching structure returned by our Backend DashboardAnalytics
+interface DashboardResponse {
+  success?: boolean;
+  data?: {
+    order_stats?: {
+      total_orders: number;
+      pending_orders: number;
+      completed_orders: number;
+      delivered_orders: number;
+      total_revenue: number;
+      avg_order_value: number;
+      total_balance: number;
+      total_amount_paid: number;
+    };
+    payment_stats?: {
+      pending_payments: number;
+      partial_payments: number;
+      complete_payments: number;
+      total_pending_amount: number;
+      total_partial_amount: number;
+      total_complete_amount: number;
+      total_collected_amount: number;
+      total_balance_amount: number;
+      overdue_payments?: number;
+      total_overdue_amount?: number;
+    };
+    payment_type_stats?: {
+      [key: string]: {
+        count: number;
+        total_amount: number;
+        amount_collected: number;
+      }
+    };
+    expense_stats?: {
+      total_expenses: number;
+      shop_a_expenses: number;
+      shop_b_expenses: number;
+      average_expense: number;
+    };
+    hotel_stats?: {
+      total_orders: number;
+      total_revenue: number;
+      avg_order_value: number;
+      total_expenses: number;
+      net_profit: number;
+    };
+    business_growth?: {
+      total_revenue: number;
+      total_orders: number;
+      total_expenses: number;
+      net_profit: number;
+    };
+    revenue_by_shop?: Array<{ shop: string; total_revenue: number; paid: number; bal: number }>;
+    balance_by_shop?: Array<{ shop: string; total_balance: number }>;
+    common_customers?: Array<{ customer__name: string; customer__phone: string; count: number; spent: number }>;
+    top_services?: Array<{ servicetype: string; count: number }>;
+    common_items?: Array<{ itemname: string; count: number }>;
+    monthly_business_growth?: Array<{
+      label: string;
+      data: number[];
+      borderColor: string;
+      fill?: boolean;
+      borderDash?: number[];
+    }>;
+    shop_a_stats?: {
+      revenue: number;
+      total_orders: number;
+      pending_orders: number;
+      completed_orders: number;
+      pending_payments: number;
+      partial_payments: number;
+      complete_payments: number;
+      total_pending_amount: number;
+      total_partial_amount: number;
+      total_complete_amount: number;
+      total_balance: number;
+      total_amount_paid: number;
+      total_expenses: number;
+      net_profit: number;
+    };
+    shop_b_stats?: {
+      revenue: number;
+      total_orders: number;
+      pending_orders: number;
+      completed_orders: number;
+      pending_payments: number;
+      partial_payments: number;
+      complete_payments: number;
+      total_pending_amount: number;
+      total_partial_amount: number;
+      total_complete_amount: number;
+      total_balance: number;
+      total_amount_paid: number;
+      total_expenses: number;
+      net_profit: number;
+    };
+    shop_a_orders?: {
+      pending: any[];
+      partial: any[];
+      complete: any[];
+      overdue: any[];
+    };
+    shop_b_orders?: {
+      pending: any[];
+      partial: any[];
+      complete: any[];
+      overdue: any[];
+    };
+    orders_by_payment_status?: {
+      pending: any[];
+      partial: any[];
+      complete: any[];
+      overdue: any[];
+    };
   };
-  payment_type: string;
-  payment_status: "pending" | "partial" | "complete";
-  shop: "Shop A" | "Shop B";
-  total_price: string | number;
-  balance: string | number;
-  created_at: string;
-  items: LaundryOrderItem[];
-}
-
-interface LaundryExpense {
-  id: number;
-  shop: "Shop A" | "Shop B";
-  amount: string;
-  date: string;
-}
-
-interface Customer {
-  id: number;
-  name: string;
-}
-
-interface TopCustomer {
-  customerName: string;
-  orderCount: number;
-  totalSpent: number;
-}
-
-interface ShopMetrics {
-  revenue: number;
-  totalOrders: number;
-  pendingPayments: number;
-  pendingAmount: number;
-  partialPayments: number;
-  partialAmount: number;
-  completePayments: number;
-  completeAmount: number;
-  netProfit: number;
-  totalExpenses: number;
-}
-
-interface ProcessedData {
-  totalBusinessRevenue: number;
-  totalNetProfit: number;
-  totalBusinessExpenses: number;
-  hotelRevenue: number;
-  hotelTotalOrders: number;
-  hotelNetProfit: number;
-  hotelTotalExpenses: number;
-  laundryRevenue: number;
-  cashPaymentsAmount: number;
-  mpesaPaymentsAmount: number;
-  cardPaymentsAmount: number;
-  bankTransferPaymentsAmount: number;
-  otherPaymentsAmount: number;
-  nonePaymentsAmount: number;
-  totalBalanceAmount: number;
-  pendingPayments: number;
-  totalPendingAmount: number;
-  partialPayments: number;
-  totalPartialAmount: number;
-  completePayments: number;
-  totalCompleteAmount: number;
-  totalExpenses: number;
-  shopA: ShopMetrics;
-  shopB: ShopMetrics;
-  revenueComparisonLabels: string[];
-  revenueComparisonData: number[];
-  revenueComparisonColors: string[];
-  pieChartLabels: string[];
-  pieChartValues: number[];
-  lineChartData: Array<{
-    label: string;
-    months: string[];
-    data: number[];
-  }>;
-  servicesLabels: string[];
-  servicesCounts: number[];
-  itemLabels: string[];
-  itemCounts: number[];
-  commonCustomers: TopCustomer[];
-  monthlyData: Array<{
-    month: string;
-    year: number;
-    hotelRevenue: number;
-    laundryRevenue: number;
-    totalRevenue: number;
-    hotelExpenses: number;
-    laundryExpenses: number;
-    totalExpenses: number;
-    netProfit: number;
-  }>;
-  paymentMethods: Array<{
-    name: string;
-    amount: number;
-    count: number;
-  }>;
-  displayYear: number;
+  message?: string;
+  error?: string;
 }
 
 // --- Constants & Helpers ---
@@ -167,38 +157,54 @@ const COLOR_PALETTE = {
   info: '#3B82F6',
   blue: '#36A2EB',
   red: '#FF6384',
-  teal: '#4BC0C0'
+  teal: '#4BC0C0',
+  purple: '#9C27B0',
+  indigo: '#3F51B5',
+  green: '#4CAF50'
 };
 
 const STYLE_MAPS = {
   card: {
     blue: 'bg-blue-50 text-blue-800',
     purple: 'bg-purple-50 text-purple-800',
-    red: 'bg-red-50 text-red-800'
+    red: 'bg-red-50 text-red-800',
+    green: 'bg-green-50 text-green-800',
+    orange: 'bg-orange-50 text-orange-800'
   },
   metric: {
     red: 'from-red-50 to-red-100 border-red-100',
     orange: 'from-orange-50 to-orange-100 border-orange-100',
     blue: 'from-blue-50 to-blue-100 border-blue-100',
     pink: 'from-pink-50 to-pink-100 border-pink-100',
-    green: 'from-green-50 to-emerald-100 border-green-100'
+    green: 'from-green-50 to-emerald-100 border-green-100',
+    purple: 'from-purple-50 to-purple-100 border-purple-100'
   },
   badge: {
     yellow: 'bg-yellow-100 text-yellow-800',
     blue: 'bg-blue-100 text-blue-800',
-    green: 'bg-green-100 text-green-800'
+    green: 'bg-green-100 text-green-800',
+    red: 'bg-red-100 text-red-800',
+    gray: 'bg-gray-100 text-gray-800'
+  },
+  status: {
+    pending: 'bg-yellow-100 text-yellow-800',
+    partial: 'bg-blue-100 text-blue-800',
+    complete: 'bg-green-100 text-green-800',
+    overdue: 'bg-red-100 text-red-800'
   },
   chartTitle: {
     green: 'text-green-500',
     yellow: 'text-yellow-500',
     gray: 'text-gray-500',
     blue: 'text-blue-500',
-    red: 'text-red-500'
+    red: 'text-red-500',
+    purple: 'text-purple-500'
   }
 };
 
-const formatCurrency = (amount: number) => new Intl.NumberFormat('en-KE', { minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(amount);
-const formatCurrencyFull = (amount: number) => new Intl.NumberFormat('en-KE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount);
+const formatCurrency = (amount: number) => new Intl.NumberFormat('en-KE', { minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(amount || 0);
+const formatCurrencyFull = (amount: number) => new Intl.NumberFormat('en-KE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount || 0);
+const formatNumber = (num: number) => new Intl.NumberFormat('en-US').format(num || 0);
 
 const CHART_COMMON_OPTIONS = {
   maintainAspectRatio: false,
@@ -211,83 +217,40 @@ const CHART_COMMON_OPTIONS = {
       borderWidth: 1,
       titleColor: '#1E293B',
       bodyColor: '#1E293B',
-      callbacks: { label: (ctx: any) => `Ksh ${ctx.raw.toLocaleString('en-US')}` }
+      callbacks: { 
+        label: (ctx: any) => {
+          const value = ctx.raw || 0;
+          return `Ksh ${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        }
+      }
     }
   }
 };
 
-const parseMoney = (val: any): number => {
-  if (typeof val === 'number') return val;
-  if (!val) return 0;
-  const cleanStr = String(val).replace(/[^0-9.-]+/g, "");
-  const parsed = parseFloat(cleanStr);
-  return isNaN(parsed) ? 0 : parsed;
-};
-
-// --- Date Helper Functions ---
-
-const resolveDate = (item: any): Date | null => {
-  // Try created_at first (primary date field for both hotel and laundry)
-  const dateString = item.created_at || item.date;
-  if (!dateString) return null;
-
-  try {
-    const date = new Date(dateString);
-    return isNaN(date.getTime()) ? null : date;
-  } catch (e) {
-    return null;
-  }
-};
-
-const getDatePortion = (date: Date): string => {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-};
-
-const isDateInRange = (date: Date | null, startDate: Date | null, endDate: Date | null): boolean => {
-  if (!date) return false;
-  if (!startDate || !endDate) return true;
-
-  const datePortion = getDatePortion(date);
-  const startPortion = getDatePortion(startDate);
-  const endPortion = getDatePortion(endDate);
-
-  return datePortion >= startPortion && datePortion <= endPortion;
-};
-
-const getMonthYear = (date: Date): { year: number; month: number } => {
-  return {
-    year: date.getFullYear(),
-    month: date.getMonth() + 1 // 1-12
-  };
-};
+// Payment types in the correct order
+const PAYMENT_TYPES = ['cash', 'mpesa', 'card', 'bank_transfer', 'other', 'None'];
 
 // --- Main Component ---
 
 export default function PerformanceReport() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
-  const [rawData, setRawData] = useState<{
-    hotelOrders: HotelOrder[];
-    hotelExpenses: HotelExpense[];
-    laundryOrders: LaundryOrder[];
-    laundryExpenses: LaundryExpense[];
-    customers: Customer[];
-  } | null>(null);
+  
+  // State to hold full dashboard response
+  const [dashboardData, setDashboardData] = useState<DashboardResponse | null>(null);
 
   // State for Date Range Filtering
-  const [fromDate, setFromDate] = useState("");
-  const [toDate, setToDate] = useState("");
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
   const [today] = useState(new Date().toISOString().split('T')[0]);
 
+  // Chart Refs
   const revenueComparisonChartRef = useRef<HTMLCanvasElement>(null);
   const revenueChartRef = useRef<HTMLCanvasElement>(null);
   const trendChartRef = useRef<HTMLCanvasElement>(null);
   const servicesChartRef = useRef<HTMLCanvasElement>(null);
   const productsChartRef = useRef<HTMLCanvasElement>(null);
+  const paymentTypeChartRef = useRef<HTMLCanvasElement>(null);
 
   const chartInstances = useRef<Map<HTMLCanvasElement, ChartType>>(new Map());
   const updateIntervalRef = useRef<NodeJS.Timeout>();
@@ -301,60 +264,42 @@ export default function PerformanceReport() {
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (token) headers['Authorization'] = `Bearer ${token}`;
 
-      const fetchAllPages = async (url: string): Promise<any[]> => {
-        let allResults: any[] = [];
-        let nextUrl: string | null = url;
+      // Build query parameters
+      const params = new URLSearchParams();
+      if (startDate) params.append('start_date', startDate);
+      if (endDate) params.append('end_date', endDate);
+      
+      const queryString = params.toString();
+      const url = `${API_BASE_URL}/Report/${queryString ? '?' + queryString : ''}`;
 
-        while (nextUrl) {
-          const response = await fetch(nextUrl, { headers });
-          if (!response.ok) throw new Error(`Failed to fetch ${nextUrl}`);
+      console.log('[Dashboard] Fetching from:', url);
+      
+      const response = await fetch(url, { headers });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: Failed to fetch dashboard data`);
+      }
 
-          const data = await response.json();
-
-          if (Array.isArray(data)) {
-            allResults = [...allResults, ...data];
-            nextUrl = null;
-          } else if (data.results && Array.isArray(data.results)) {
-            allResults = [...allResults, ...data.results];
-            nextUrl = data.next;
-          } else {
-            allResults = [...allResults, data];
-            nextUrl = null;
-          }
-
-          if (allResults.length > 10000) break;
-        }
-
-        return allResults;
-      };
-
-      const [hotelOrders, hotelExpenses, laundryOrders, laundryExpenses, customers] = await Promise.all([
-        fetchAllPages(`${API_BASE_URL}/Hotel/orders/`),
-        fetchAllPages(`${API_BASE_URL}/Hotel/Hotelexpense-records/`),
-        fetchAllPages(`${API_BASE_URL}/Laundry/orders/`),
-        fetchAllPages(`${API_BASE_URL}/Laundry/expense-records/`),
-        fetchAllPages(`${API_BASE_URL}/Laundry/customers/`)
-      ]);
-
-      console.log('[DEBUG] Total records fetched:', {
-        hotelOrders: hotelOrders.length,
-        hotelExpenses: hotelExpenses.length,
-        laundryOrders: laundryOrders.length,
-        laundryExpenses: laundryExpenses.length,
-        customers: customers.length
-      });
-
-      setRawData({ hotelOrders, hotelExpenses, laundryOrders, laundryExpenses, customers });
+      const json: DashboardResponse = await response.json();
+      console.log('[Dashboard] Response:', json);
+      
+      // Backend wraps response with success/data/message
+      if (json.success && json.data) {
+        setDashboardData(json);
+      } else {
+        throw new Error(json.error || json.message || 'Failed to fetch dashboard data');
+      }
     } catch (err: any) {
+      console.error('[Dashboard] Fetch error:', err);
       setError(err.message || "Failed to fetch data");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [startDate, endDate]);
 
   useEffect(() => {
     fetchData();
-    const interval = setInterval(fetchData, 60000);
+    const interval = setInterval(fetchData, 60000); // Refresh every minute
     updateIntervalRef.current = interval;
 
     return () => {
@@ -362,400 +307,412 @@ export default function PerformanceReport() {
     };
   }, [fetchData]);
 
-  const calculateShopMetrics = useCallback((
-    orders: LaundryOrder[],
-    expenses: LaundryExpense[],
-    shopName: "Shop A" | "Shop B",
-    isDateInRange: (date: Date | null) => boolean
-  ): ShopMetrics => {
-    const shopOrders = orders.filter(o => o.shop === shopName && isDateInRange(resolveDate(o)));
-    const revenue = shopOrders.reduce((sum, order) => sum + parseMoney(order.total_price), 0);
-    const totalOrders = shopOrders.length;
+  // --- Data Processing ---
+  
+  const processedData = useMemo(() => {
+    if (!dashboardData?.data) return null;
 
-    const pendingOrders = shopOrders.filter(o => o.payment_status === 'pending');
-    const partialOrders = shopOrders.filter(o => o.payment_status === 'partial');
-    const completeOrders = shopOrders.filter(o => o.payment_status === 'complete');
+    const data = dashboardData.data;
+    const { order_stats, payment_stats, expense_stats, hotel_stats, business_growth, payment_type_stats } = data;
 
-    const shopExpenses = expenses.filter(e => e.shop === shopName && isDateInRange(resolveDate(e)))
-      .reduce((sum, expense) => sum + parseMoney(expense.amount), 0);
+    // Basic metrics with safe access
+    const totalBusinessRevenue = business_growth?.total_revenue || 0;
+    const totalNetProfit = business_growth?.net_profit || 0;
+    const totalBusinessExpenses = business_growth?.total_expenses || 0;
+    
+    const hotelRevenue = hotel_stats?.total_revenue || 0;
+    const laundryRevenue = order_stats?.total_revenue || 0;
+    const hotelTotalOrders = hotel_stats?.total_orders || 0;
+    const hotelNetProfit = hotel_stats?.net_profit || 0;
+    const hotelTotalExpenses = hotel_stats?.total_expenses || 0;
 
-    return {
-      revenue,
-      totalOrders,
-      pendingPayments: pendingOrders.length,
-      pendingAmount: pendingOrders.reduce((sum, o) => sum + parseMoney(o.total_price), 0),
-      partialPayments: partialOrders.length,
-      partialAmount: partialOrders.reduce((sum, o) => sum + parseMoney(o.total_price), 0),
-      completePayments: completeOrders.length,
-      completeAmount: completeOrders.reduce((sum, o) => sum + parseMoney(o.total_price), 0),
-      netProfit: revenue - shopExpenses,
-      totalExpenses: shopExpenses
-    };
-  }, []);
+    // Payment methods from payment_type_stats
+    const paymentMethods = PAYMENT_TYPES.map(type => ({
+      name: type === 'None' ? 'Not Paid' : type.charAt(0).toUpperCase() + type.slice(1),
+      amount: payment_type_stats?.[type]?.amount_collected || 0,
+      count: payment_type_stats?.[type]?.count || 0,
+      totalAmount: payment_type_stats?.[type]?.total_amount || 0
+    })).filter(p => p.count > 0); // Only show payment methods with data
 
-  const data = useMemo<ProcessedData | null>(() => {
-    if (!rawData) return null;
+    // Shop metrics
+    const shopA = data.shop_a_stats;
+    const shopB = data.shop_b_stats;
 
-    const { hotelOrders, hotelExpenses, laundryOrders, laundryExpenses, customers } = rawData;
+    // Revenue Comparison Chart Data
+    const revenueComparisonLabels = ['Laundry Business', 'Hotel Business'];
+    const revenueComparisonData = [laundryRevenue, hotelRevenue];
+    const revenueComparisonColors = [COLOR_PALETTE.blue, COLOR_PALETTE.red];
 
-    // Parse filter dates
-    const filterStartDate = fromDate ? new Date(fromDate) : null;
-    const filterEndDate = toDate ? new Date(toDate) : null;
+    // Revenue by Shop (Pie Chart)
+    const pieChartLabels = (data.revenue_by_shop || []).map(s => s.shop);
+    const pieChartValues = (data.revenue_by_shop || []).map(s => s.total_revenue);
 
-    // Determine display year based on filter or data
-    let displayYear = new Date().getFullYear();
-    if (filterStartDate) {
-      displayYear = filterStartDate.getFullYear();
-    } else {
-      // Find latest year in data
-      const allDates = [
-        ...hotelOrders.map(o => resolveDate(o)),
-        ...laundryOrders.map(o => resolveDate(o)),
-        ...hotelExpenses.map(e => resolveDate(e)),
-        ...laundryExpenses.map(e => resolveDate(e))
-      ].filter(Boolean) as Date[];
+    // Services & Items
+    const servicesLabels = (data.top_services || []).map(s => s.servicetype);
+    const servicesCounts = (data.top_services || []).map(s => s.count);
+    
+    const itemLabels = (data.common_items || []).map(i => i.itemname);
+    const itemCounts = (data.common_items || []).map(i => i.count);
 
-      if (allDates.length > 0) {
-        const latestDate = new Date(Math.max(...allDates.map(d => d.getTime())));
-        displayYear = latestDate.getFullYear();
-      }
-    }
-
-    console.log('[DEBUG] Filter settings:', {
-      fromDate,
-      toDate,
-      filterStartDate: filterStartDate?.toISOString(),
-      filterEndDate: filterEndDate?.toISOString(),
-      displayYear
-    });
-
-    // Create date filter function
-    const dateFilterFn = (date: Date | null): boolean => {
-      return isDateInRange(date, filterStartDate, filterEndDate);
-    };
-
-    // Filter ALL data using the same filter function
-    const filteredHotelOrders = hotelOrders.filter(order => dateFilterFn(resolveDate(order)));
-    const filteredLaundryOrders = laundryOrders.filter(order => dateFilterFn(resolveDate(order)));
-    const filteredHotelExpenses = hotelExpenses.filter(expense => dateFilterFn(resolveDate(expense)));
-    const filteredLaundryExpenses = laundryExpenses.filter(expense => dateFilterFn(resolveDate(expense)));
-
-    console.log('[DEBUG] Filtered counts:', {
-      hotelOrders: filteredHotelOrders.length,
-      laundryOrders: filteredLaundryOrders.length,
-      hotelExpenses: filteredHotelExpenses.length,
-      laundryExpenses: filteredLaundryExpenses.length
-    });
-
-    // Calculate hotel metrics using filtered data
-    const hotelRevenue = filteredHotelOrders.reduce((sum, order) => {
-      return sum + parseMoney(order.total_amount);
-    }, 0);
-
-    const hotelTotalOrders = filteredHotelOrders.length;
-    const hotelExpensesTotal = filteredHotelExpenses.reduce((sum, expense) => sum + parseMoney(expense.amount), 0);
-    const hotelNetProfit = hotelRevenue - hotelExpensesTotal;
-
-    console.log('[DEBUG] Hotel calculations:', {
-      hotelRevenue,
-      hotelTotalOrders,
-      hotelExpensesTotal,
-      hotelNetProfit,
-      sample: filteredHotelOrders.slice(0, 3).map(o => ({
-        id: o.id,
-        total_amount: o.total_amount,
-        created_at: o.created_at,
-        parsed: parseMoney(o.total_amount)
-      }))
-    });
-
-    // Calculate laundry metrics using filtered data
-    const laundryRevenue = filteredLaundryOrders.reduce((sum, order) => {
-      return sum + parseMoney(order.total_price);
-    }, 0);
-
-    const laundryExpensesTotal = filteredLaundryExpenses.reduce((sum, expense) => sum + parseMoney(expense.amount), 0);
-    const laundryNetProfit = laundryRevenue - laundryExpensesTotal;
-
-    // Calculate totals
-    const totalBusinessRevenue = hotelRevenue + laundryRevenue;
-    const totalBusinessExpenses = hotelExpensesTotal + laundryExpensesTotal;
-    const totalNetProfit = totalBusinessRevenue - totalBusinessExpenses;
-
-    console.log('[DEBUG] Total calculations:', {
-      totalBusinessRevenue,
-      totalBusinessExpenses,
-      totalNetProfit,
-      hotelRevenue,
-      laundryRevenue
-    });
-
-    // Calculate shop metrics using filtered data
-    const shopA = calculateShopMetrics(filteredLaundryOrders, filteredLaundryExpenses, 'Shop A', dateFilterFn);
-    const shopB = calculateShopMetrics(filteredLaundryOrders, filteredLaundryExpenses, 'Shop B', dateFilterFn);
-
-    // Payment methods from filtered laundry orders
-    const paymentMethodsData: Record<string, { amount: number; count: number }> = {};
-    filteredLaundryOrders.forEach(order => {
-      const type = (order.payment_type || 'none').toString().toLowerCase();
-      if (!paymentMethodsData[type]) paymentMethodsData[type] = { amount: 0, count: 0 };
-      paymentMethodsData[type].amount += parseMoney(order.total_price);
-      paymentMethodsData[type].count += 1;
-    });
-
-    const paymentMethods = Object.entries(paymentMethodsData).map(([name, data]) => ({
-      name: name.charAt(0).toUpperCase() + name.slice(1),
-      amount: data.amount,
-      count: data.count
+    // Top Customers
+    const topCustomersList = (data.common_customers || []).map(c => ({
+      name: c.customer__name || 'Unknown Customer',
+      phone: c.customer__phone || '',
+      orders: c.count || 0,
+      spent: c.spent || 0
     }));
 
-    const getPaymentAmount = (key: string) => paymentMethodsData[key]?.amount || 0;
-
-    // Payment status stats from filtered data
-    const getStatsByStatus = (status: string) => {
-      const subset = filteredLaundryOrders.filter(o => o.payment_status === status);
-      return {
-        count: subset.length,
-        amount: subset.reduce((sum, o) => sum + parseMoney(o.total_price), 0)
-      };
-    };
-
-    const pendingStats = getStatsByStatus('pending');
-    const partialStats = getStatsByStatus('partial');
-    const completeStats = getStatsByStatus('complete');
-    const totalBalanceAmount = filteredLaundryOrders.reduce((sum, order) => sum + parseMoney(order.balance), 0);
-
-    // Top customers from filtered data
-    const customerMap = new Map<string, { count: number; total: number }>();
-    filteredLaundryOrders.forEach(order => {
-      if (order.customer?.name) {
-        const curr = customerMap.get(order.customer.name) || { count: 0, total: 0 };
-        curr.count++;
-        curr.total += parseMoney(order.total_price);
-        customerMap.set(order.customer.name, curr);
-      }
-    });
-
-    const commonCustomers = Array.from(customerMap.entries())
-      .sort((a, b) => b[1].total - a[1].total)
-      .slice(0, 10)
-      .map(([name, stats]) => ({ customerName: name, orderCount: stats.count, totalSpent: stats.total }));
-
-    // Top services and items from filtered data
-    const tallyItems = (keyExtractor: (item: any) => string) => {
-      const counts: Record<string, number> = {};
-      filteredLaundryOrders.forEach(order => {
-        order.items?.forEach(item => {
-          const key = keyExtractor(item);
-          if (key) counts[key] = (counts[key] || 0) + 1;
-        });
-      });
-      return Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 10);
-    };
-
-    const topServices = tallyItems(item => Array.isArray(item.servicetype) ? item.servicetype[0] : '');
-    const topItems = tallyItems(item => item.itemname);
-
-    // Monthly data - use ONLY filtered data for the selected year
-    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    const monthlyHotelRevenue = Array(12).fill(0);
-    const monthlyLaundryRevenue = Array(12).fill(0);
-    const monthlyHotelExpenses = Array(12).fill(0);
-    const monthlyLaundryExpenses = Array(12).fill(0);
-
-    // Process monthly data from filtered datasets
-    const processMonthly = (items: any[], valKey: string, arr: number[], sourceName: string) => {
-      let processedCount = 0;
-      items.forEach(item => {
-        const dateObj = resolveDate(item);
-        if (dateObj && dateObj.getFullYear() === displayYear) {
-          const monthIndex = dateObj.getMonth(); // 0-11
-          if (monthIndex >= 0 && monthIndex <= 11) {
-            const value = parseMoney(item[valKey] || item.total_amount || item.total_price || 0);
-            arr[monthIndex] += value;
-            processedCount++;
-          }
-        }
-      });
-      console.log(`[DEBUG] ${sourceName} monthly: processed ${processedCount} items for year ${displayYear}`);
-    };
-
-    processMonthly(filteredHotelOrders, 'total_amount', monthlyHotelRevenue, 'Hotel Orders');
-    processMonthly(filteredLaundryOrders, 'total_price', monthlyLaundryRevenue, 'Laundry Orders');
-    processMonthly(filteredHotelExpenses, 'amount', monthlyHotelExpenses, 'Hotel Expenses');
-    processMonthly(filteredLaundryExpenses, 'amount', monthlyLaundryExpenses, 'Laundry Expenses');
-
-    console.log('[DEBUG] Monthly Revenue Arrays:', {
-      hotel: monthlyHotelRevenue,
-      laundry: monthlyLaundryRevenue,
-      displayYear
-    });
-
-    const monthlyData = months.map((m, i) => {
-      const totalRevenue = monthlyHotelRevenue[i] + monthlyLaundryRevenue[i];
-      const totalExpenses = monthlyHotelExpenses[i] + monthlyLaundryExpenses[i];
-      return {
-        month: m,
-        year: displayYear,
-        hotelRevenue: monthlyHotelRevenue[i],
-        laundryRevenue: monthlyLaundryRevenue[i],
-        totalRevenue,
-        hotelExpenses: monthlyHotelExpenses[i],
-        laundryExpenses: monthlyLaundryExpenses[i],
-        totalExpenses,
-        netProfit: totalRevenue - totalExpenses
-      };
-    });
+    // Payment type chart data
+    const paymentTypeChartLabels = PAYMENT_TYPES.map(type => 
+      type === 'None' ? 'Not Paid' : type.charAt(0).toUpperCase() + type.slice(1)
+    );
+    const paymentTypeChartData = PAYMENT_TYPES.map(type => 
+      payment_type_stats?.[type]?.amount_collected || 0
+    );
+    const paymentTypeChartColors = [
+      COLOR_PALETTE.green,   // cash
+      COLOR_PALETTE.blue,    // mpesa
+      COLOR_PALETTE.purple,  // card
+      COLOR_PALETTE.teal,    // bank transfer
+      COLOR_PALETTE.orangeYellow, // other
+      COLOR_PALETTE.danger   // none
+    ];
 
     return {
+      // Core business metrics
       totalBusinessRevenue,
       totalNetProfit,
       totalBusinessExpenses,
+      
+      // Hotel specific
       hotelRevenue,
       hotelTotalOrders,
       hotelNetProfit,
-      hotelTotalExpenses: hotelExpensesTotal,
+      hotelTotalExpenses,
+      
+      // Laundry specific
       laundryRevenue,
-      cashPaymentsAmount: getPaymentAmount('cash'),
-      mpesaPaymentsAmount: getPaymentAmount('mpesa'),
-      cardPaymentsAmount: getPaymentAmount('card'),
-      bankTransferPaymentsAmount: getPaymentAmount('bank'),
-      otherPaymentsAmount: Object.entries(paymentMethodsData)
-        .filter(([k]) => !['cash', 'mpesa', 'card', 'bank', 'none'].includes(k))
-        .reduce((sum, [, data]) => sum + data.amount, 0),
-      nonePaymentsAmount: getPaymentAmount('none'),
-      totalBalanceAmount,
-      pendingPayments: pendingStats.count,
-      totalPendingAmount: pendingStats.amount,
-      partialPayments: partialStats.count,
-      totalPartialAmount: partialStats.amount,
-      completePayments: completeStats.count,
-      totalCompleteAmount: completeStats.amount,
-      totalExpenses: laundryExpensesTotal,
+      totalBalanceAmount: order_stats?.total_balance || 0,
+      
+      // Payment stats
+      pendingPayments: payment_stats?.pending_payments || 0,
+      totalPendingAmount: payment_stats?.total_pending_amount || 0,
+      partialPayments: payment_stats?.partial_payments || 0,
+      totalPartialAmount: payment_stats?.total_partial_amount || 0,
+      completePayments: payment_stats?.complete_payments || 0,
+      totalCompleteAmount: payment_stats?.total_complete_amount || 0,
+      overduePayments: payment_stats?.overdue_payments || 0,
+      totalOverdueAmount: payment_stats?.total_overdue_amount || 0,
+      totalCollectedAmount: payment_stats?.total_collected_amount || 0,
+      
+      // Expense stats
+      totalExpenses: expense_stats?.total_expenses || 0,
+      shopAExpenses: expense_stats?.shop_a_expenses || 0,
+      shopBExpenses: expense_stats?.shop_b_expenses || 0,
+      
+      // Shop performance
       shopA,
       shopB,
-      revenueComparisonLabels: ['Laundry', 'Hotel'],
-      revenueComparisonData: [laundryRevenue, hotelRevenue],
-      revenueComparisonColors: [COLOR_PALETTE.blue, COLOR_PALETTE.red],
-      pieChartLabels: ['Shop A', 'Shop B', 'Hotel'],
-      pieChartValues: [shopA.revenue, shopB.revenue, hotelRevenue],
-      lineChartData: [
-        { label: 'Laundry Revenue', months, data: monthlyLaundryRevenue },
-        { label: 'Hotel Revenue', months, data: monthlyHotelRevenue }
-      ],
-      servicesLabels: topServices.map(([k]) => k),
-      servicesCounts: topServices.map(([, v]) => v),
-      itemLabels: topItems.map(([k]) => k),
-      itemCounts: topItems.map(([, v]) => v),
-      commonCustomers,
-      monthlyData,
+      
+      // Chart data
+      revenueComparisonLabels,
+      revenueComparisonData,
+      revenueComparisonColors,
+      pieChartLabels,
+      pieChartValues,
+      servicesLabels,
+      servicesCounts,
+      itemLabels,
+      itemCounts,
+      paymentTypeChartLabels,
+      paymentTypeChartData,
+      paymentTypeChartColors,
+      
+      // Lists
+      commonCustomers: topCustomersList,
       paymentMethods,
-      displayYear
+      monthlyBusinessGrowth: data.monthly_business_growth || [],
+      
+      // Raw data for debugging
+      rawData: data
     };
-  }, [rawData, fromDate, toDate, calculateShopMetrics]);
+  }, [dashboardData]);
 
   // --- Chart Rendering ---
   useEffect(() => {
-    if (!data) return;
+    if (!processedData) return;
 
-    const createChart = (ref: React.RefObject<HTMLCanvasElement>, config: any) => {
-      if (!ref.current) return;
-
-      const existingChart = chartInstances.current.get(ref.current);
-      if (existingChart) {
-        existingChart.destroy();
-        chartInstances.current.delete(ref.current);
+    const destroyChart = (ref: React.RefObject<HTMLCanvasElement>) => {
+      const canvas = ref.current;
+      if (canvas && chartInstances.current.has(canvas)) {
+        const existingChart = chartInstances.current.get(canvas);
+        if (existingChart) {
+          existingChart.destroy();
+          chartInstances.current.delete(canvas);
+        }
       }
-
-      const ctx = ref.current.getContext('2d');
-      if (!ctx) return;
-      const chart = new Chart(ctx, config);
-      chartInstances.current.set(ref.current, chart);
     };
 
-    createChart(revenueComparisonChartRef, {
-      type: 'doughnut',
-      data: {
-        labels: data.revenueComparisonLabels,
-        datasets: [{ data: data.revenueComparisonData, backgroundColor: data.revenueComparisonColors, borderWidth: 0, hoverOffset: 4 }]
-      },
-      options: { ...CHART_COMMON_OPTIONS, cutout: '70%', plugins: { ...CHART_COMMON_OPTIONS.plugins, legend: { position: 'bottom' } } }
-    });
+    // 1. Revenue Comparison (Doughnut)
+    if (revenueComparisonChartRef.current) {
+      destroyChart(revenueComparisonChartRef);
+      const ctx = revenueComparisonChartRef.current.getContext('2d');
+      if (ctx) {
+        const chart = new Chart(ctx, {
+          type: 'doughnut',
+          data: {
+            labels: processedData.revenueComparisonLabels,
+            datasets: [{
+              data: processedData.revenueComparisonData,
+              backgroundColor: processedData.revenueComparisonColors,
+              borderWidth: 0,
+              hoverOffset: 4
+            }]
+          },
+          options: {
+            ...CHART_COMMON_OPTIONS,
+            cutout: '70%',
+            plugins: {
+              ...CHART_COMMON_OPTIONS.plugins,
+              legend: { 
+                position: 'bottom',
+                labels: {
+                  padding: 20,
+                  usePointStyle: true
+                }
+              }
+            }
+          }
+        });
+        chartInstances.current.set(revenueComparisonChartRef.current, chart);
+      }
+    }
 
-    createChart(revenueChartRef, {
-      type: 'doughnut',
-      data: {
-        labels: data.pieChartLabels,
-        datasets: [{ data: data.pieChartValues, backgroundColor: [COLOR_PALETTE.navyBlue, COLOR_PALETTE.orangeYellow, COLOR_PALETTE.lightOrange], borderWidth: 0, hoverOffset: 4 }]
-      },
-      options: { ...CHART_COMMON_OPTIONS, cutout: '70%', plugins: { ...CHART_COMMON_OPTIONS.plugins, legend: { position: 'bottom' } } }
-    });
+    // 2. Shop Revenue (Doughnut)
+    if (revenueChartRef.current && processedData.pieChartLabels.length > 0) {
+      destroyChart(revenueChartRef);
+      const ctx = revenueChartRef.current.getContext('2d');
+      if (ctx) {
+        const chart = new Chart(ctx, {
+          type: 'doughnut',
+          data: {
+            labels: processedData.pieChartLabels,
+            datasets: [{
+              data: processedData.pieChartValues,
+              backgroundColor: [COLOR_PALETTE.navyBlue, COLOR_PALETTE.orangeYellow, COLOR_PALETTE.lightOrange],
+              borderWidth: 0,
+              hoverOffset: 4
+            }]
+          },
+          options: {
+            ...CHART_COMMON_OPTIONS,
+            cutout: '70%',
+            plugins: {
+              ...CHART_COMMON_OPTIONS.plugins,
+              legend: { position: 'bottom' }
+            }
+          }
+        });
+        chartInstances.current.set(revenueChartRef.current, chart);
+      }
+    }
 
-    createChart(trendChartRef, {
-      type: 'line',
-      data: {
-        labels: data.lineChartData[0].months,
-        datasets: data.lineChartData.map((series, i) => ({
-          label: series.label,
-          data: series.data,
-          borderColor: [COLOR_PALETTE.pink, COLOR_PALETTE.orangeYellow][i],
-          backgroundColor: 'transparent',
+    // 3. Monthly Trend (Line Chart)
+    if (trendChartRef.current && processedData.monthlyBusinessGrowth.length > 0) {
+      destroyChart(trendChartRef);
+      const ctx = trendChartRef.current.getContext('2d');
+      if (ctx) {
+        const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+        
+        // Ensure all datasets have 12 data points
+        const datasets = processedData.monthlyBusinessGrowth.map(dataset => ({
+          ...dataset,
+          data: dataset.data.length === 12 ? dataset.data : [...dataset.data, ...Array(12 - dataset.data.length).fill(0)],
           borderWidth: 2,
           tension: 0.4,
           pointRadius: 0,
           pointHoverRadius: 6
-        }))
-      },
-      options: {
-        ...CHART_COMMON_OPTIONS,
-        scales: { x: { grid: { display: false }, ticks: { color: '#1E293B' } }, y: { display: false, grid: { display: false } } },
-        interaction: { mode: 'index', intersect: false }
-      }
-    });
+        }));
 
-    if (data.servicesLabels.length > 0) {
-      createChart(servicesChartRef, {
-        type: 'bar',
-        data: {
-          labels: data.servicesLabels,
-          datasets: [{ data: data.servicesCounts, backgroundColor: [COLOR_PALETTE.navyBlue, COLOR_PALETTE.orangeYellow, COLOR_PALETTE.pink, COLOR_PALETTE.success], borderRadius: 4, barThickness: 10 }]
-        },
-        options: { ...CHART_COMMON_OPTIONS, indexAxis: 'y', plugins: { legend: { display: false } }, scales: { x: { display: false }, y: { grid: { display: false } } } }
-      });
+        const chart = new Chart(ctx, {
+          type: 'line',
+          data: {
+            labels: months,
+            datasets
+          },
+          options: {
+            ...CHART_COMMON_OPTIONS,
+            scales: {
+              x: { 
+                grid: { display: false }, 
+                ticks: { color: '#1E293B' } 
+              },
+              y: { 
+                ticks: { 
+                  color: '#1E293B',
+                  callback: function(value) {
+                    return 'Ksh ' + formatNumber(Number(value));
+                  }
+                },
+                grid: { color: '#F1F5F9' }
+              }
+            },
+            interaction: { mode: 'index', intersect: false }
+          }
+        });
+        chartInstances.current.set(trendChartRef.current, chart);
+      }
     }
 
-    if (data.itemLabels.length > 0) {
-      createChart(productsChartRef, {
-        type: 'bar',
-        data: {
-          labels: data.itemLabels,
-          datasets: [{ data: data.itemCounts, backgroundColor: [COLOR_PALETTE.navyBlue, COLOR_PALETTE.orangeYellow, COLOR_PALETTE.pink, COLOR_PALETTE.success], borderRadius: 4, barThickness: 10 }]
-        },
-        options: { ...CHART_COMMON_OPTIONS, indexAxis: 'y', plugins: { legend: { display: false } }, scales: { x: { display: false }, y: { grid: { display: false } } } }
-      });
+    // 4. Top Services (Bar)
+    if (servicesChartRef.current && processedData.servicesLabels.length > 0) {
+      destroyChart(servicesChartRef);
+      const ctx = servicesChartRef.current.getContext('2d');
+      if (ctx) {
+        const chart = new Chart(ctx, {
+          type: 'bar',
+          data: {
+            labels: processedData.servicesLabels,
+            datasets: [{
+              data: processedData.servicesCounts,
+              backgroundColor: COLOR_PALETTE.navyBlue,
+              borderRadius: 4,
+              barThickness: 12
+            }]
+          },
+          options: {
+            ...CHART_COMMON_OPTIONS,
+            indexAxis: 'y',
+            plugins: { 
+              legend: { display: false },
+              tooltip: {
+                callbacks: {
+                  label: (ctx) => `Count: ${ctx.raw}`
+                }
+              }
+            },
+            scales: {
+              x: { 
+                display: false,
+                grid: { display: false }
+              },
+              y: { 
+                grid: { display: false },
+                ticks: { 
+                  color: '#1E293B',
+                  font: { size: 11 }
+                }
+              }
+            }
+          }
+        });
+        chartInstances.current.set(servicesChartRef.current, chart);
+      }
+    }
+
+    // 5. Top Items (Bar)
+    if (productsChartRef.current && processedData.itemLabels.length > 0) {
+      destroyChart(productsChartRef);
+      const ctx = productsChartRef.current.getContext('2d');
+      if (ctx) {
+        const chart = new Chart(ctx, {
+          type: 'bar',
+          data: {
+            labels: processedData.itemLabels,
+            datasets: [{
+              data: processedData.itemCounts,
+              backgroundColor: COLOR_PALETTE.orangeYellow,
+              borderRadius: 4,
+              barThickness: 12
+            }]
+          },
+          options: {
+            ...CHART_COMMON_OPTIONS,
+            indexAxis: 'y',
+            plugins: { 
+              legend: { display: false },
+              tooltip: {
+                callbacks: {
+                  label: (ctx) => `Count: ${ctx.raw}`
+                }
+              }
+            },
+            scales: {
+              x: { 
+                display: false,
+                grid: { display: false }
+              },
+              y: { 
+                grid: { display: false },
+                ticks: { 
+                  color: '#1E293B',
+                  font: { size: 11 }
+                }
+              }
+            }
+          }
+        });
+        chartInstances.current.set(productsChartRef.current, chart);
+      }
+    }
+
+    // 6. Payment Type Chart (Doughnut)
+    if (paymentTypeChartRef.current) {
+      destroyChart(paymentTypeChartRef);
+      const ctx = paymentTypeChartRef.current.getContext('2d');
+      if (ctx && processedData.paymentTypeChartData.some(v => v > 0)) {
+        const chart = new Chart(ctx, {
+          type: 'doughnut',
+          data: {
+            labels: processedData.paymentTypeChartLabels,
+            datasets: [{
+              data: processedData.paymentTypeChartData,
+              backgroundColor: processedData.paymentTypeChartColors,
+              borderWidth: 0,
+              hoverOffset: 4
+            }]
+          },
+          options: {
+            ...CHART_COMMON_OPTIONS,
+            cutout: '60%',
+            plugins: {
+              ...CHART_COMMON_OPTIONS.plugins,
+              legend: { 
+                position: 'right',
+                labels: {
+                  padding: 15,
+                  usePointStyle: true,
+                  boxWidth: 8
+                }
+              }
+            }
+          }
+        });
+        chartInstances.current.set(paymentTypeChartRef.current, chart);
+      }
     }
 
     return () => {
       chartInstances.current.forEach(chart => chart.destroy());
       chartInstances.current.clear();
     };
-  }, [data]);
+  }, [processedData]);
 
   // --- Handlers ---
-
-  const handleFromDateChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    setFromDate(e.target.value);
+  const handleStartDateChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    setStartDate(e.target.value);
   }, []);
 
-  const handleToDateChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    setToDate(e.target.value);
+  const handleEndDateChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    setEndDate(e.target.value);
   }, []);
 
   const handleReset = useCallback(() => {
-    setFromDate("");
-    setToDate("");
+    setStartDate("");
+    setEndDate("");
   }, []);
 
+  // --- Render ---
   if (loading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 p-4 md:p-6 flex items-center justify-center">
@@ -776,14 +733,17 @@ export default function PerformanceReport() {
           <div>
             <h1 className="text-2xl md:text-3xl font-bold text-gray-900">Business Performance Dashboard</h1>
             <p className="text-gray-500 text-sm mt-1">
-              {(fromDate || toDate) ? `Range: ${fromDate || '...'} to ${toDate || '...'}` :
-                `Year Overview - ${data?.displayYear}`}
+              {startDate || endDate 
+                ? `Date Range: ${startDate || 'Start'} to ${endDate || 'End'}`
+                : 'Real-time business analytics'}
             </p>
           </div>
         </div>
         <div className="flex items-center gap-3 bg-white rounded-xl px-4 py-3 shadow-sm border border-gray-100">
           <Filter className="h-5 w-5 text-blue-500" />
-          <span className="font-semibold text-gray-700">{data?.displayYear}</span>
+          <span className="font-semibold text-gray-700">
+            {startDate || endDate ? 'Custom Range' : 'All Time'}
+          </span>
         </div>
       </div>
 
@@ -792,29 +752,72 @@ export default function PerformanceReport() {
         <h2 className="text-lg font-semibold text-gray-900 mb-4">Filter Data</h2>
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">From Date</label>
-            <input type="date" value={fromDate} onChange={handleFromDateChange} max={today} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-4 py-2.5 outline-none" />
+            <label className="block text-sm font-medium text-gray-700 mb-2">Start Date</label>
+            <input 
+              type="date" 
+              value={startDate} 
+              onChange={handleStartDateChange} 
+              max={today} 
+              className="w-full bg-gray-50 border border-gray-200 rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-blue-500"
+            />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">To Date</label>
-            <input type="date" value={toDate} onChange={handleToDateChange} max={today} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-blue-500 outline-none" />
+            <label className="block text-sm font-medium text-gray-700 mb-2">End Date</label>
+            <input 
+              type="date" 
+              value={endDate} 
+              onChange={handleEndDateChange} 
+              max={today} 
+              className="w-full bg-gray-50 border border-gray-200 rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-blue-500"
+            />
           </div>
-          <div className="flex gap-3">
-            <button onClick={fetchData} className="flex-1 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-lg font-medium transition flex items-center justify-center gap-2">
-              <RefreshCw className="h-5 w-5" /> Refresh
+          <div className="flex gap-3 md:col-span-2">
+            <button 
+              onClick={() => fetchData()} 
+              className="flex-1 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-lg font-medium transition flex items-center justify-center gap-2"
+            >
+              <RefreshCw className="h-5 w-5" /> Apply Filters
             </button>
-            <button onClick={handleReset} className="flex-1 bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 px-4 py-2.5 rounded-lg font-medium transition flex items-center justify-center gap-2">
-              <Filter className="h-5 w-5" /> Reset
+            <button 
+              onClick={handleReset} 
+              className="flex-1 bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 px-4 py-2.5 rounded-lg font-medium transition flex items-center justify-center gap-2"
+            >
+              <Filter className="h-5 w-5" /> Clear
             </button>
           </div>
         </div>
       </div>
 
       {/* Business Overview Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mb-8">
-        <StatCard icon={<Wallet className="h-5 w-5 text-blue-600" />} bg="blue" title="Total Revenue" value={`Ksh ${formatCurrencyFull(data?.totalBusinessRevenue || 0)}`} subtitle="Combined earnings" />
-        <StatCard icon={<ChartLine className="h-5 w-5 text-purple-600" />} bg="purple" title="Net Profit" value={`Ksh ${formatCurrencyFull(data?.totalNetProfit || 0)}`} subtitle="After expenses" />
-        <StatCard icon={<Wallet className="h-5 w-5 text-red-600" />} bg="red" title="Total Expenses" value={`Ksh ${formatCurrencyFull(data?.totalBusinessExpenses || 0)}`} subtitle="Combined expenses" />
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-5 mb-8">
+        <StatCard 
+          icon={<Wallet className="h-5 w-5 text-blue-600" />} 
+          bg="blue" 
+          title="Total Revenue" 
+          value={`Ksh ${formatCurrencyFull(processedData?.totalBusinessRevenue || 0)}`} 
+          subtitle="Combined earnings" 
+        />
+        <StatCard 
+          icon={<ChartLine className="h-5 w-5 text-green-600" />} 
+          bg="green" 
+          title="Net Profit" 
+          value={`Ksh ${formatCurrencyFull(processedData?.totalNetProfit || 0)}`} 
+          subtitle="After expenses" 
+        />
+        <StatCard 
+          icon={<Wallet className="h-5 w-5 text-red-600" />} 
+          bg="red" 
+          title="Total Expenses" 
+          value={`Ksh ${formatCurrencyFull(processedData?.totalBusinessExpenses || 0)}`} 
+          subtitle="Combined expenses" 
+        />
+        <StatCard 
+          icon={<ShoppingBag className="h-5 w-5 text-purple-600" />} 
+          bg="purple" 
+          title="Total Orders" 
+          value={formatNumber((processedData?.shopA?.total_orders || 0) + (processedData?.shopB?.total_orders || 0) + (processedData?.hotelTotalOrders || 0))} 
+          subtitle="All businesses" 
+        />
       </div>
 
       {/* Revenue Comparison & Hotel Stats */}
@@ -822,17 +825,27 @@ export default function PerformanceReport() {
         <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100 lg:col-span-2">
           <div className="flex justify-between items-center mb-6">
             <h2 className="text-lg font-bold text-gray-900">Revenue Comparison</h2>
-            <span className="bg-purple-100 text-purple-800 px-3 py-1 rounded-full text-sm font-semibold">{data?.displayYear}</span>
+            <span className="bg-purple-100 text-purple-800 px-3 py-1 rounded-full text-sm font-semibold">
+              Total: Ksh {formatCurrencyFull(processedData?.totalBusinessRevenue || 0)}
+            </span>
           </div>
-          <div className="h-64"><canvas ref={revenueComparisonChartRef} /></div>
+          <div className="h-64">
+            <canvas ref={revenueComparisonChartRef} />
+          </div>
           <div className="grid grid-cols-2 gap-4 mt-6">
             <div className="text-center p-3 bg-blue-50 rounded-lg">
               <div className="text-sm font-semibold text-blue-700">Laundry Business</div>
-              <div className="text-lg font-bold text-blue-900">Ksh {formatCurrencyFull(data?.laundryRevenue || 0)}</div>
+              <div className="text-lg font-bold text-blue-900">Ksh {formatCurrencyFull(processedData?.laundryRevenue || 0)}</div>
+              <div className="text-xs text-blue-600 mt-1">
+                {formatNumber(processedData?.shopA?.total_orders || 0 + processedData?.shopB?.total_orders || 0)} orders
+              </div>
             </div>
             <div className="text-center p-3 bg-red-50 rounded-lg">
               <div className="text-sm font-semibold text-red-700">Hotel Business</div>
-              <div className="text-lg font-bold text-red-900">Ksh {formatCurrencyFull(data?.hotelRevenue || 0)}</div>
+              <div className="text-lg font-bold text-red-900">Ksh {formatCurrencyFull(processedData?.hotelRevenue || 0)}</div>
+              <div className="text-xs text-red-600 mt-1">
+                {formatNumber(processedData?.hotelTotalOrders || 0)} orders
+              </div>
             </div>
           </div>
         </div>
@@ -843,10 +856,23 @@ export default function PerformanceReport() {
               <div className="w-2 h-6 bg-gradient-to-b from-red-500 to-orange-600 rounded-full"></div>
               <h2 className="text-lg font-bold text-gray-900">Hotel Business</h2>
             </div>
+            <Utensils className="h-5 w-5 text-orange-500" />
           </div>
           <div className="space-y-4">
-            <MetricBox label="Revenue" value={`Ksh ${formatCurrencyFull(data?.hotelRevenue || 0)}`} sub={`${data?.hotelTotalOrders} orders`} color="red" icon={<Wallet />} />
-            <MetricBox label="Orders" value={`${data?.hotelTotalOrders}`} color="orange" icon={<Utensils />} />
+            <MetricBox 
+              label="Revenue" 
+              value={`Ksh ${formatCurrencyFull(processedData?.hotelRevenue || 0)}`} 
+              sub={`${formatNumber(processedData?.hotelTotalOrders || 0)} orders`} 
+              color="red" 
+              icon={<Wallet className="h-5 w-5" />} 
+            />
+            <MetricBox 
+              label="Orders" 
+              value={formatNumber(processedData?.hotelTotalOrders || 0)} 
+              sub="Total hotel orders" 
+              color="orange" 
+              icon={<ShoppingBag className="h-5 w-5" />} 
+            />
             <div className="bg-gradient-to-br from-green-50 to-emerald-50 rounded-lg p-4 border border-green-100">
               <div className="flex items-center gap-3 mb-2">
                 <ChartLine className="h-5 w-5 text-green-600" />
@@ -854,11 +880,11 @@ export default function PerformanceReport() {
               </div>
               <div className="flex gap-4">
                 <div>
-                  <div className="text-lg font-bold text-green-600">Ksh {formatCurrencyFull(data?.hotelNetProfit || 0)}</div>
-                  <div className="text-xs text-gray-500">Net Profit</div>
+                  <div className="text-lg font-bold text-green-600">Ksh {formatCurrencyFull(processedData?.hotelNetProfit || 0)}</div>
+                  <div className="text-xs text-gray-500">Profit</div>
                 </div>
                 <div>
-                  <div className="text-lg font-bold text-blue-600">Ksh {formatCurrencyFull(data?.hotelTotalExpenses || 0)}</div>
+                  <div className="text-lg font-bold text-blue-600">Ksh {formatCurrencyFull(processedData?.hotelTotalExpenses || 0)}</div>
                   <div className="text-xs text-gray-500">Expenses</div>
                 </div>
               </div>
@@ -877,107 +903,240 @@ export default function PerformanceReport() {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mb-6">
           <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
             <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center"><Wallet className="h-5 w-5 text-blue-600" /></div>
+              <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center">
+                <Wallet className="h-5 w-5 text-blue-600" />
+              </div>
               <div>
                 <h3 className="text-sm font-medium text-gray-500 uppercase tracking-wider">Revenue</h3>
-                <div className="text-xl font-bold text-gray-900">Ksh {formatCurrencyFull(data?.laundryRevenue || 0)}</div>
+                <div className="text-xl font-bold text-gray-900">
+                  Ksh {formatCurrencyFull(processedData?.laundryRevenue || 0)}
+                </div>
               </div>
             </div>
             <div className="border-t border-gray-100 pt-4">
-              <h4 className="text-sm font-medium text-gray-700 mb-3">Payment Methods</h4>
-              <div className="space-y-2">
-                {data?.paymentMethods.map((method, i) => (
-                  <div key={i} className="flex justify-between text-sm">
-                    <span className="text-gray-700">{method.name} <span className="text-xs text-gray-500">({method.count})</span></span>
-                    <span className="font-bold text-gray-900">Ksh {formatCurrency(method.amount)}</span>
-                  </div>
-                ))}
+              <h4 className="text-sm font-medium text-gray-700 mb-3">Payment Breakdown</h4>
+              <div className="h-48">
+                <canvas ref={paymentTypeChartRef} />
               </div>
             </div>
           </div>
 
           <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
             <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 rounded-lg bg-yellow-50 flex items-center justify-center"><CreditCard className="h-5 w-5 text-yellow-600" /></div>
+              <div className="w-10 h-10 rounded-lg bg-yellow-50 flex items-center justify-center">
+                <CreditCard className="h-5 w-5 text-yellow-600" />
+              </div>
               <div>
-                <h3 className="text-sm font-medium text-gray-500 uppercase tracking-wider">Payments</h3>
-                <div className="text-xl font-bold text-gray-900">Ksh {formatCurrency(data?.totalBalanceAmount || 0)}</div>
+                <h3 className="text-sm font-medium text-gray-500 uppercase tracking-wider">Payments Status</h3>
+                <div className="text-xl font-bold text-gray-900">
+                  Ksh {formatCurrencyFull(processedData?.totalCollectedAmount || 0)}
+                </div>
+                <div className="text-xs text-gray-500">Collected</div>
               </div>
             </div>
-            <div className="space-y-3">
-              <PaymentBadge label="Pending" count={data?.pendingPayments} amount={data?.totalPendingAmount} color="yellow" />
-              <PaymentBadge label="Partial" count={data?.partialPayments} amount={data?.totalPartialAmount} color="blue" />
-              <PaymentBadge label="Complete" count={data?.completePayments} amount={data?.totalCompleteAmount} color="green" />
+            <div className="space-y-3 mt-4">
+              <PaymentStatusBadge 
+                label="Pending" 
+                count={processedData?.pendingPayments} 
+                amount={processedData?.totalPendingAmount} 
+                status="pending" 
+                icon={<Clock className="h-3 w-3" />}
+              />
+              <PaymentStatusBadge 
+                label="Partial" 
+                count={processedData?.partialPayments} 
+                amount={processedData?.totalPartialAmount} 
+                status="partial" 
+                icon={<AlertCircle className="h-3 w-3" />}
+              />
+              <PaymentStatusBadge 
+                label="Complete" 
+                count={processedData?.completePayments} 
+                amount={processedData?.totalCompleteAmount} 
+                status="complete" 
+                icon={<CheckCircle className="h-3 w-3" />}
+              />
+              <PaymentStatusBadge 
+                label="Overdue" 
+                count={processedData?.overduePayments} 
+                amount={processedData?.totalOverdueAmount} 
+                status="overdue" 
+                icon={<AlertCircle className="h-3 w-3" />}
+              />
             </div>
           </div>
 
           <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-lg bg-red-50 flex items-center justify-center"><Wallet className="h-5 w-5 text-red-600" /></div>
+                <div className="w-10 h-10 rounded-lg bg-red-50 flex items-center justify-center">
+                  <Wallet className="h-5 w-5 text-red-600" />
+                </div>
                 <div>
                   <h3 className="text-sm font-medium text-gray-500 uppercase tracking-wider">Expenses</h3>
-                  <div className="text-xl font-bold text-gray-900">Ksh {formatCurrencyFull(data?.totalExpenses || 0)}</div>
+                  <div className="text-xl font-bold text-gray-900">
+                    Ksh {formatCurrencyFull(processedData?.totalExpenses || 0)}
+                  </div>
                 </div>
               </div>
             </div>
+            <div className="space-y-3">
+              <div className="flex justify-between items-center p-2 bg-blue-50 rounded">
+                <span className="text-sm text-blue-700">Shop A</span>
+                <span className="font-bold text-blue-900">Ksh {formatCurrencyFull(processedData?.shopAExpenses || 0)}</span>
+              </div>
+              <div className="flex justify-between items-center p-2 bg-orange-50 rounded">
+                <span className="text-sm text-orange-700">Shop B</span>
+                <span className="font-bold text-orange-900">Ksh {formatCurrencyFull(processedData?.shopBExpenses || 0)}</span>
+              </div>
+            </div>
             <div className="flex items-center text-sm text-gray-500 mt-4">
-              <ChartLine className="h-3 w-3 text-red-500 mr-1" /> <span>Operational costs</span>
+              <ChartLine className="h-3 w-3 text-red-500 mr-1" /> 
+              <span>Operational costs breakdown</span>
             </div>
           </div>
         </div>
 
         {/* Shop Performance Grid */}
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-          <ShopPerformanceCard title="Shop A" metrics={data?.shopA} />
-          <ShopPerformanceCard title="Shop B" metrics={data?.shopB} />
+          <ShopPerformanceCard title="Shop A" metrics={processedData?.shopA} />
+          <ShopPerformanceCard title="Shop B" metrics={processedData?.shopB} />
         </div>
       </div>
 
       {/* Charts Section */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-        <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+        <div className="bg-white rounded-xl p-6 shadow-sm border-gray-100">
           <div className="flex justify-between items-center mb-6">
-            <h2 className="text-lg font-bold text-gray-900">Revenue Distribution</h2>
-            <span className="bg-yellow-100 text-yellow-800 px-3 py-1 rounded-full text-sm font-semibold">Total</span>
+            <h2 className="text-lg font-bold text-gray-900">Revenue Distribution by Shop</h2>
+            <span className="bg-yellow-100 text-yellow-800 px-3 py-1 rounded-full text-sm font-semibold">Laundry Only</span>
           </div>
-          <div className="h-64"><canvas ref={revenueChartRef} /></div>
+          <div className="h-64">
+            {processedData?.pieChartLabels.length > 0 ? (
+              <canvas ref={revenueChartRef} />
+            ) : (
+              <div className="h-full flex items-center justify-center text-gray-500">
+                No revenue data available
+              </div>
+            )}
+          </div>
         </div>
-        <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+        <div className="bg-white rounded-xl p-6 shadow-sm border-gray-100">
           <div className="flex justify-between items-center mb-6">
-            <h2 className="text-lg font-bold text-gray-900">Revenue Trend - {data?.displayYear}</h2>
+            <h2 className="text-lg font-bold text-gray-900">Revenue Trend</h2>
             <span className="bg-pink-100 text-pink-800 px-3 py-1 rounded-full text-sm font-semibold">Monthly</span>
           </div>
-          <div className="h-64"><canvas ref={trendChartRef} /></div>
+          <div className="h-64">
+            {processedData?.monthlyBusinessGrowth?.length > 0 ? (
+              <canvas ref={trendChartRef} />
+            ) : (
+              <div className="h-full flex items-center justify-center text-gray-500">
+                No trend data available
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
       {/* Analytics Section */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <ChartCard title="Top Services" color="green" icon={<Bath />} canvasRef={servicesChartRef} dataAvailable={!!data?.servicesLabels.length} />
-        <ChartCard title="Common Items" color="yellow" icon={<Box />} canvasRef={productsChartRef} dataAvailable={!!data?.itemLabels.length} />
+        <ChartCard 
+          title="Top Services" 
+          color="green" 
+          icon={<Bath className="h-5 w-5" />} 
+          canvasRef={servicesChartRef} 
+          dataAvailable={!!processedData?.servicesLabels.length} 
+        />
+        <ChartCard 
+          title="Common Items" 
+          color="yellow" 
+          icon={<Box className="h-5 w-5" />} 
+          canvasRef={productsChartRef} 
+          dataAvailable={!!processedData?.itemLabels.length} 
+        />
 
-        <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+        <div className="bg-white rounded-xl p-6 shadow-sm border-gray-100">
           <div className="flex justify-between items-center mb-6">
-            <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2"><Crown className="h-5 w-5 text-yellow-500" /> Top Customers</h2>
+            <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+              <Users className="h-5 w-5 text-yellow-500" /> 
+              Top Customers
+            </h2>
+            <span className="bg-yellow-100 text-yellow-800 px-2 py-1 rounded text-xs font-semibold">
+              {processedData?.commonCustomers.length || 0} customers
+            </span>
           </div>
           <div className="h-72 overflow-y-auto pr-2">
-            {data?.commonCustomers.length ? data.commonCustomers.map((c, i) => (
-              <div key={i} className="flex items-center p-4 bg-gray-50 rounded-lg mb-3">
-                <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-pink-500 to-purple-600 flex items-center justify-center text-white font-bold mr-4">{i + 1}</div>
-                <div className="flex-1">
-                  <div className="font-semibold text-gray-900 truncate">{c.customerName}</div>
-                  <div className="text-xs text-gray-500">{c.orderCount} orders</div>
+            {processedData?.commonCustomers.length ? processedData.commonCustomers.map((c, i) => (
+              <div key={i} className="flex items-center p-4 bg-gray-50 rounded-lg mb-3 hover:bg-gray-100 transition">
+                <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white font-bold mr-4">
+                  {i + 1}
                 </div>
-                <div className="font-bold text-pink-600">Ksh {formatCurrency(c.totalSpent)}</div>
+                <div className="flex-1 min-w-0">
+                  <div className="font-semibold text-gray-900 truncate">{c.name}</div>
+                  <div className="text-xs text-gray-500 truncate">{c.phone}</div>
+                </div>
+                <div className="text-right">
+                  <div className="font-bold text-pink-600">Ksh {formatCurrency(c.spent)}</div>
+                  <div className="text-xs text-gray-500">{c.orders} orders</div>
+                </div>
               </div>
-            )) : <div className="text-center text-gray-500 mt-10">No data available</div>}
+            )) : (
+              <div className="h-full flex flex-col items-center justify-center text-gray-500">
+                <Users className="h-12 w-12 mb-2 opacity-50" />
+                <p>No customer data available</p>
+              </div>
+            )}
           </div>
         </div>
       </div>
 
+      {/* Payment Methods Table */}
+      {processedData?.paymentMethods.length > 0 && (
+        <div className="mt-8 bg-white rounded-xl p-6 shadow-sm border-gray-100">
+          <h2 className="text-lg font-bold text-gray-900 mb-6">Payment Methods Summary</h2>
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-gray-200">
+                  <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Payment Method</th>
+                  <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Transactions</th>
+                  <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Amount Collected</th>
+                  <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Total Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                {processedData.paymentMethods.map((method, i) => (
+                  <tr key={i} className="border-b border-gray-100 hover:bg-gray-50">
+                    <td className="py-3 px-4">
+                      <span className={`px-2 py-1 rounded text-xs font-medium ${
+                        method.name === 'Cash' ? 'bg-green-100 text-green-800' :
+                        method.name === 'Mpesa' ? 'bg-blue-100 text-blue-800' :
+                        method.name === 'Card' ? 'bg-purple-100 text-purple-800' :
+                        method.name === 'Not Paid' ? 'bg-red-100 text-red-800' :
+                        'bg-gray-100 text-gray-800'
+                      }`}>
+                        {method.name}
+                      </span>
+                    </td>
+                    <td className="py-3 px-4">
+                      <span className="font-medium text-gray-900">{formatNumber(method.count)}</span>
+                    </td>
+                    <td className="py-3 px-4">
+                      <span className="font-bold text-green-600">Ksh {formatCurrencyFull(method.amount)}</span>
+                    </td>
+                    <td className="py-3 px-4">
+                      <span className="font-medium text-gray-700">Ksh {formatCurrencyFull(method.totalAmount)}</span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       {error && (
-        <div className="fixed bottom-4 right-4 bg-red-100 text-red-700 p-4 rounded-lg shadow-lg flex justify-between items-center z-50">
+        <div className="fixed bottom-4 right-4 bg-red-100 text-red-700 p-4 rounded-lg shadow-lg flex justify-between items-center z-50 max-w-md">
           <span>{error}</span>
           <button onClick={() => setError(null)} className="text-red-900 font-bold ml-4">✕</button>
         </div>
@@ -990,21 +1149,28 @@ export default function PerformanceReport() {
 
 const StatCard = memo(({ icon, bg, title, value, subtitle }: {
   icon: React.ReactNode,
-  bg: 'blue' | 'purple' | 'red',
+  bg: 'blue' | 'purple' | 'red' | 'green' | 'orange',
   title: string,
   value: string,
   subtitle: string
 }) => {
   const classes = STYLE_MAPS.card[bg];
   return (
-    <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
+    <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100 hover:shadow-md transition">
       <div className="flex items-center justify-between mb-4">
-        <div className={`w-10 h-10 rounded-lg ${classes.split(' ')[0]} flex items-center justify-center`}>{icon}</div>
-        <span className={`${classes} text-xs font-semibold px-2 py-1 rounded-full capitalize`}>Total</span>
+        <div className={`w-10 h-10 rounded-lg ${classes.split(' ')[0]} flex items-center justify-center`}>
+          {icon}
+        </div>
+        <span className={`${classes} text-xs font-semibold px-2 py-1 rounded-full capitalize`}>
+          Total
+        </span>
       </div>
       <h3 className="text-sm font-medium text-gray-500 uppercase tracking-wider mb-1">{title}</h3>
       <div className="text-xl font-bold text-gray-900 mb-1">{value}</div>
-      <div className="flex items-center text-xs text-gray-500"><TrendingUp className="h-3 w-3 text-green-500 mr-1" /> <span>{subtitle}</span></div>
+      <div className="flex items-center text-xs text-gray-500">
+        <TrendingUp className="h-3 w-3 text-green-500 mr-1" /> 
+        <span>{subtitle}</span>
+      </div>
     </div>
   );
 });
@@ -1019,9 +1185,11 @@ const MetricBox = memo(({ label, value, sub, color, icon }: {
   const classes = STYLE_MAPS.metric[color as keyof typeof STYLE_MAPS.metric] || STYLE_MAPS.metric.blue;
 
   return (
-    <div className={`bg-gradient-to-br ${classes} rounded-lg p-4 border`}>
+    <div className={`bg-gradient-to-br ${classes} rounded-lg p-4 border hover:shadow-sm transition`}>
       <div className="flex items-center gap-3 mb-2">
-        <div className={`w-8 h-8 rounded-lg bg-white flex items-center justify-center shadow-sm`}>{icon}</div>
+        <div className={`w-8 h-8 rounded-lg bg-white flex items-center justify-center shadow-sm`}>
+          {icon}
+        </div>
         <span className="text-sm font-semibold text-gray-700">{label}</span>
       </div>
       <div className="text-xl font-bold text-gray-900 mb-1">{value}</div>
@@ -1030,56 +1198,95 @@ const MetricBox = memo(({ label, value, sub, color, icon }: {
   );
 });
 
-const PaymentBadge = memo(({ label, count, amount, color }: {
+const PaymentStatusBadge = memo(({ label, count, amount, status, icon }: {
   label: string;
   count?: number;
   amount?: number;
-  color: 'yellow' | 'blue' | 'green'
+  status: 'pending' | 'partial' | 'complete' | 'overdue';
+  icon: React.ReactNode;
 }) => {
-  const classes = STYLE_MAPS.badge[color];
+  const classes = STYLE_MAPS.status[status];
 
   return (
-    <div className="flex justify-between items-center">
-      <div>
-        <span className={`${classes} px-2 py-1 rounded-full text-xs font-medium mr-2`}>{count}</span>
-        <span className="text-sm text-gray-700">{label} Payment</span>
+    <div className="flex justify-between items-center p-2 hover:bg-gray-50 rounded">
+      <div className="flex items-center gap-2">
+        <span className={`${classes} px-2 py-1 rounded-full text-xs font-medium flex items-center gap-1`}>
+          {icon}
+          <span>{count || 0}</span>
+        </span>
+        <span className="text-sm text-gray-700">{label}</span>
       </div>
-      <span className={`${classes} px-2 py-1 rounded-full text-xs font-medium`}>{amount ? formatCurrency(amount) : 'Ksh 0'}</span>
+      <span className={`text-xs font-medium ${amount ? 'text-gray-900' : 'text-gray-500'}`}>
+        {amount ? `Ksh ${formatCurrency(amount)}` : 'Ksh 0'}
+      </span>
     </div>
   );
 });
 
-const ShopPerformanceCard = memo(({ title, metrics }: { title: string, metrics?: ShopMetrics }) => {
+const ShopPerformanceCard = memo(({ title, metrics }: { title: string, metrics?: any }) => {
   if (!metrics) return null;
+  
+  // Helper to safely access metrics
+  const getMetric = (key: string, defaultVal = 0) => metrics?.[key] !== undefined ? metrics[key] : defaultVal;
+
   return (
-    <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+    <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100 hover:shadow-md transition">
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
           <div className="w-2 h-6 bg-gradient-to-b from-indigo-500 to-purple-600 rounded-full"></div>
           <h2 className="text-lg font-bold text-gray-900">{title} Performance</h2>
         </div>
-        <span className="bg-indigo-100 text-indigo-800 px-3 py-1 rounded-full text-sm font-semibold">Active</span>
+        <span className="bg-indigo-100 text-indigo-800 px-3 py-1 rounded-full text-sm font-semibold">
+          Ksh {formatCurrencyFull(getMetric('revenue'))}
+        </span>
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <MetricBox label="Revenue" value={`Ksh ${formatCurrencyFull(metrics.revenue)}`} sub={`${title} earnings`} color="blue" icon={<Wallet className="h-5 w-5 text-gray-600" />} />
-        <MetricBox label="Orders" value={`${metrics.totalOrders}`} color="blue" icon={<ShoppingBag className="h-5 w-5 text-blue-600" />} />
+        <MetricBox 
+          label="Revenue" 
+          value={`Ksh ${formatCurrencyFull(getMetric('revenue'))}`} 
+          sub={`${title} earnings`} 
+          color="blue" 
+          icon={<Wallet className="h-5 w-5 text-gray-600" />} 
+        />
+        <MetricBox 
+          label="Orders" 
+          value={`${formatNumber(getMetric('total_orders'))}`} 
+          sub="Total orders" 
+          color="blue" 
+          icon={<ShoppingBag className="h-5 w-5 text-blue-600" />} 
+        />
         <div className="bg-gradient-to-br from-purple-50 to-indigo-50 rounded-lg p-4 border border-purple-100">
-          <div className="flex items-center gap-3 mb-2"><CreditCard className="h-5 w-5 text-purple-600" /><span className="text-sm font-semibold text-gray-700">Payments</span></div>
+          <div className="flex items-center gap-3 mb-2">
+            <CreditCard className="h-5 w-5 text-purple-600" />
+            <span className="text-sm font-semibold text-gray-700">Payments</span>
+          </div>
           <div className="flex flex-col gap-1 text-xs">
-            <div className="flex justify-between"><span className="text-yellow-600">{metrics.pendingPayments} pending</span><span className="text-yellow-600">Ksh {formatCurrency(metrics.pendingAmount)}</span></div>
-            <div className="flex justify-between"><span className="text-blue-600">{metrics.partialPayments} partial</span><span className="text-blue-600">Ksh {formatCurrency(metrics.partialAmount)}</span></div>
-            <div className="flex justify-between"><span className="text-green-600">{metrics.completePayments} complete</span><span className="text-green-600">Ksh {formatCurrency(metrics.completeAmount)}</span></div>
+            <div className="flex justify-between">
+              <span className="text-yellow-600">{getMetric('pending_payments')} pending</span>
+              <span className="text-yellow-600">Ksh {formatCurrency(getMetric('total_pending_amount'))}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-blue-600">{getMetric('partial_payments')} partial</span>
+              <span className="text-blue-600">Ksh {formatCurrency(getMetric('total_partial_amount'))}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-green-600">{getMetric('complete_payments')} complete</span>
+              <span className="text-green-600">Ksh {formatCurrency(getMetric('total_complete_amount'))}</span>
+            </div>
           </div>
         </div>
         <div className="bg-gradient-to-br from-green-50 to-emerald-50 rounded-lg p-4 border border-green-100">
-          <div className="flex items-center gap-3 mb-2"><ChartLine className="h-5 w-5 text-green-600" /><span className="text-sm font-semibold text-gray-700">Profit & Expenses</span></div>
+          <div className="flex items-center gap-3 mb-2">
+            <ChartLine className="h-5 w-5 text-green-600" />
+            <span className="text-sm font-semibold text-gray-700">Profit & Expenses</span>
+          </div>
           <div className="flex flex-col gap-2">
             <div>
-              <div className="text-md font-bold text-green-600">Ksh {formatCurrencyFull(metrics.netProfit)}</div>
+              <div className="text-md font-bold text-green-600">Ksh {formatCurrencyFull(getMetric('net_profit'))}</div>
               <div className="text-xs text-gray-500">Profit</div>
             </div>
             <div>
-              <div className="text-md font-bold text-blue-600">Ksh {formatCurrencyFull(metrics.totalExpenses)}</div>
+              <div className="text-md font-bold text-blue-600">Ksh {formatCurrencyFull(getMetric('total_expenses'))}</div>
               <div className="text-xs text-gray-500">Expenses</div>
             </div>
           </div>
@@ -1094,12 +1301,12 @@ const ChartCard = memo(({ title, icon, canvasRef, dataAvailable, color = "gray" 
   icon: React.ReactNode,
   canvasRef: React.RefObject<HTMLCanvasElement>,
   dataAvailable: boolean,
-  color?: 'green' | 'yellow' | 'gray' | 'blue' | 'red'
+  color?: 'green' | 'yellow' | 'gray' | 'blue' | 'red' | 'purple'
 }) => {
   const titleColorClass = STYLE_MAPS.chartTitle[color] || STYLE_MAPS.chartTitle.gray;
 
   return (
-    <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+    <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100 hover:shadow-md transition">
       <div className="flex justify-between items-center mb-6">
         <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
           {icon}

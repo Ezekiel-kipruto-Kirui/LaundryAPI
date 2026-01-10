@@ -14,7 +14,7 @@ import { Order, OrderItem } from "@/services/types";
 import { ROUTES } from "@/services/Routes";
 
 export const ORDERS_URL = `${API_BASE_URL}/Laundry/orders/`;
-export const SEND_SMS_URL = `${API_BASE_URL}/Laundry/send_sms/`;
+export const SEND_SMS_URL = `${API_BASE_URL}/Laundry/send-sms/`;
 
 // --- Constants & Types ---
 

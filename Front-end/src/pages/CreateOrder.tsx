@@ -10,7 +10,6 @@ import { Plus, Trash, ChevronLeft, ChevronRight, ChevronDown, ChevronUp } from "
 import { Customer, createorderpayload, OrderItem } from '@/services/types'
 import { API_BASE_URL } from '../services/url'
 import { getAccessToken } from "@/services/api";
-import { get } from "https";
 
 // --- API Endpoints ---
 const ORDERS_URL = `${API_BASE_URL}/Laundry/orders/`;
@@ -52,6 +51,14 @@ const PAYMENT_STATUSES = [
   { value: 'partial', label: 'Partial' },
   { value: 'paid', label: 'Paid' }
 ];
+
+// --- Types ---
+interface ApiErrorResponse {
+  phone?: string[];
+  name?: string[];
+  detail?: string;
+  error?: string;
+}
 
 interface FormOrderItem {
   servicetype: string[];
@@ -174,12 +181,10 @@ export default function CreateOrder() {
   }]);
 
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
-  const [isCustomerModalOpen, setIsCustomerModalOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [currentStep, setCurrentStep] = useState(1);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
-  const [foundCustomers, setFoundCustomers] = useState<Customer[]>([]);
 
   useEffect(() => {
     console.log("API Endpoints:", { CUSTOMERS_URL, ORDERS_URL });
@@ -215,14 +220,12 @@ export default function CreateOrder() {
     if (items.length > 1) setItems(prev => prev.filter((_, i) => i !== index));
   }, [items.length]);
 
-  // Strict Normalization for Kenya Phone Numbers
-  // Converts 07..., +254..., 7... -> +254...
   const normalizePhoneNumber = (phone: string): string => {
     if (!phone) return "";
     const cleaned = phone.replace(/\D/g, ''); // Remove non-digits
 
     if (cleaned.startsWith('254') && cleaned.length === 12) {
-      return '+' + cleaned; // Already normalized, add +
+      return '+' + cleaned; 
     }
     
     if (cleaned.startsWith('0') && cleaned.length === 10) {
@@ -233,114 +236,16 @@ export default function CreateOrder() {
       return '+254' + cleaned;
     }
 
-    // Fallback: if it's already normalized but missing + or other edge cases
     if (cleaned.length === 12 && cleaned.startsWith('254')) {
         return '+' + cleaned;
     }
 
-    return ""; // Invalid format logic
+    return ""; 
   };
 
-  const findCustomerByPhone = async (phone: string): Promise<Customer | null> => {
-    try {
-      console.log("=== DEBUG: findCustomerByPhone ===");
-      console.log("Searching customer with phone:", phone);
-      
-      // Use the dedicated by_phone endpoint for efficient lookup
-      const searchUrl = `${CUSTOMERS_URL}by_phone/?phone=${encodeURIComponent(phone)}`;
-      console.log("Search URL:", searchUrl);
-      
-      const response = await fetch(searchUrl, {
-        headers: { 
-          'Accept': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        }
-      });
-      
-      console.log("Response status:", response.status);
-      
-      if (response.status === 404) {
-        console.log("Customer not found via by_phone endpoint");
-        return null;
-      }
-      
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error("API Error:", errorText);
-        throw new Error(`Failed to search customer: ${response.status}`);
-      }
-      
-      const customer = await response.json();
-      console.log("Customer found:", customer);
-      return customer as Customer;
-      
-    } catch (err: any) {
-      console.error("Customer search failed:", err);
-      return null;
-    }
-  };
-
-  const createNewCustomer = async (name: string, phone: string): Promise<Customer | null> => {
-    try {
-      // Use the formatted phone for creation (usually +254...)
-      const formattedPhone = formatPhoneNumber(phone); 
-      console.log("=== DEBUG: createNewCustomer ===");
-      console.log("Input phone:", phone);
-      console.log("Formatted phone for API:", formattedPhone);
-      console.log("API endpoint:", CUSTOMERS_URL);
-      
-      const response = await fetch(CUSTOMERS_URL, {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify({ name, phone: formattedPhone }),
-      });
-
-      const responseText = await response.text();
-      console.log("=== DEBUG: Create Customer Response ===");
-      console.log("Status:", response.status);
-      console.log("Raw response:", responseText);
-
-      if (responseText.trim().startsWith('<!DOCTYPE') || responseText.trim().startsWith('<')) {
-        throw new Error('Server returned HTML. Check API endpoint.');
-      }
-
-      let data;
-      try { data = JSON.parse(responseText); } 
-      catch (e) { throw new Error('Invalid JSON response: ' + responseText.substring(0, 100)); }
-
-      if (!response.ok) {
-        console.log("=== DEBUG: Error Response Details ===");
-        console.log("Data type:", typeof data);
-        console.log("Data content:", JSON.stringify(data, null, 2));
-        
-        // SPECIAL CASE: Handle 400 "Phone already exists"
-        const errorObj = (typeof data === 'string' ? {} : data);
-        const errorMsg = (errorObj.phone?.[0] || errorObj.name?.[0] || errorObj.detail || "").toString().toLowerCase();
-        console.log("Extracted error message:", errorMsg);
-        console.log("Checking for 'phone' and 'exist':", errorMsg.includes('phone'), errorMsg.includes('exist'));
-        
-        if (errorMsg.includes('phone') && errorMsg.includes('exist')) {
-          console.warn("API says phone exists. Re-scanning locally...");
-          const existing = await findCustomerByPhone(phone);
-          console.log("Re-scan result:", existing);
-          if (existing) return existing;
-        }
-        
-        throw new Error(errorObj.phone?.[0] || errorObj.name?.[0] || errorObj.detail || `Failed to create customer: ${response.status}`);
-      }
-      
-      return data as Customer;
-    } catch (err: any) {
-      console.error("=== DEBUG: Customer creation failed ===");
-      console.error("Error:", err.message);
-      throw err;
-    }
-  };
-
+  /**
+   * Logic to search customer by phone using the by_phone endpoint.
+   */
   const handleCustomerLookup = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!customerPhone) {
@@ -350,59 +255,103 @@ export default function CreateOrder() {
 
     setIsLoading(true);
     setError(null);
-    console.log("=== DEBUG: handleCustomerLookup ===");
-    console.log("Phone:", customerPhone);
-    console.log("Name:", customerName);
-    
+
     const normalizedPhone = normalizePhoneNumber(customerPhone);
-    console.log("Normalized phone:", normalizedPhone);
-
-    // 1. PRIMARY CHECK: Try to find existing customer first
-    // Use normalized phone for consistent lookup
-    const searchPhone = normalizePhoneNumber(customerPhone) || customerPhone;
-    const existingCustomer = await findCustomerByPhone(searchPhone);
-    console.log("=== DEBUG: Customer Lookup Result ===");
-    console.log("Found customer:", existingCustomer);
-
-    if (existingCustomer) {
-      // SUCCESS CASE A: Customer exists locally
-      console.log("Customer found, setting selectedCustomer:", existingCustomer.id);
-      setSelectedCustomer(existingCustomer);
-      setCustomerName(existingCustomer.name);
-      showToast("Existing customer found and selected!");
-      showStep(2);
+    if (!normalizedPhone) {
+      setError("Invalid phone number format. Use 07... or 254...");
       setIsLoading(false);
-    } else {
-      // FAILURE CASE A: Not found locally. Try to create.
-      if (!customerName.trim()) {
-        setError("Customer not found. Please enter a name to create a new customer.");
+      return;
+    }
+
+    console.log("=== Step 1: Searching customer by phone ===");
+    try {
+      const searchResponse = await fetch(`${CUSTOMERS_URL}by_phone/?phone=${encodeURIComponent(normalizedPhone)}`, {
+        headers: {
+          'Accept': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        }
+      });
+
+      if (searchResponse.ok) {
+        const existingCustomer = await searchResponse.json() as Customer;
+        console.log("Customer found:", existingCustomer);
+        setSelectedCustomer(existingCustomer);
+        setCustomerName(existingCustomer.name);
+        showToast("Existing customer found and selected!");
+        showStep(2);
         setIsLoading(false);
         return;
       }
-      
-      console.log("Customer not found, attempting to create new customer...");
-      try {
-        // Use the NORMALIZED phone for both lookup and creation to ensure consistency
-        const normalizedPhoneForAPI = normalizePhoneNumber(customerPhone);
-        console.log("Normalized phone for API:", normalizedPhoneForAPI);
-        const newCustomer = await createNewCustomer(customerName.trim(), normalizedPhoneForAPI);
-        
-        // SUCCESS CASE B: Customer created successfully
-        if (newCustomer) {
-          console.log("Customer created successfully, ID:", newCustomer.id);
-          setSelectedCustomer(newCustomer);
-          showToast("Customer created successfully!");
-          showStep(2);
+
+      if (searchResponse.status === 404) {
+        // Customer not found, try to create
+        if (!customerName.trim()) {
+          setError("Customer not found. Please enter a name to create a new customer.");
+          setIsLoading(false);
+          return;
         }
-      } catch (err: any) {
-        // FAILURE CASE B: Creation failed. 
-        // Note: createNewCustomer might have already handled the "exists" error internally.
-        // If we are here, it's a real error.
-        console.error("=== DEBUG: handleCustomerLookup catch ===");
-        console.error("Error:", err.message);
-        setError(err.message || "Failed to create customer.");
+
+        console.log("=== Step 2: Customer not found. Creating new one... ===");
+
+        const createResponse = await fetch(CUSTOMERS_URL, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify({ name: customerName.trim(), phone: normalizedPhone }),
+        });
+
+        const responseText = await createResponse.text();
+
+        if (!createResponse.ok) {
+          let data: ApiErrorResponse = {};
+          try { data = JSON.parse(responseText) as ApiErrorResponse; }
+          catch (e) { /* ignore parse error */ }
+
+          const errorObj = data;
+          const detail = (errorObj.phone?.[0] || errorObj.detail || "").toString().toLowerCase();
+
+          // If duplicate error occurred (race condition), try searching again
+          if (detail.includes('phone') && (detail.includes('exist') || detail.includes('unique'))) {
+             console.warn("Creation failed due to duplicate. Re-checking...");
+             const retryResponse = await fetch(`${CUSTOMERS_URL}by_phone/?phone=${encodeURIComponent(normalizedPhone)}`, {
+               headers: {
+                 'Accept': 'application/json',
+                 ...(token ? { Authorization: `Bearer ${token}` } : {}),
+               }
+             });
+
+             if(retryResponse.ok) {
+               const reCheckCustomer = await retryResponse.json() as Customer;
+               setSelectedCustomer(reCheckCustomer);
+               setCustomerName(reCheckCustomer.name);
+               showToast("Customer selected!");
+               showStep(2);
+               setIsLoading(false);
+               return;
+             }
+          }
+
+          // If we reach here, it's a real error
+          throw new Error(errorObj.phone?.[0] || errorObj.name?.[0] || errorObj.detail || `Failed to create customer (${createResponse.status})`);
+        }
+
+        // Success: Parse the text we already read
+        const newCustomer = JSON.parse(responseText) as Customer;
+        console.log("Customer created successfully:", newCustomer);
+        setSelectedCustomer(newCustomer);
+        showToast("Customer created successfully!");
+        showStep(2);
+      } else {
+        throw new Error(`Failed to search customer (${searchResponse.status})`);
       }
-      
+
+    } catch (err: any) {
+      console.error("Error in handleCustomerLookup:", err);
+      setError(err.message || "Failed to process customer.");
+    } finally {
       setIsLoading(false);
     }
   };
@@ -499,28 +448,6 @@ export default function CreateOrder() {
     setCurrentStep(stepNumber);
     setError(null);
   }, []);
-
-  const formatPhoneNumber = (phone: string) => {
-    if (!phone) return phone;
-    const cleaned = phone.replace(/\D/g, '');
-    console.log("=== DEBUG: formatPhoneNumber ===");
-    console.log("Input:", phone);
-    console.log("Cleaned:", cleaned);
-    
-    let formatted = phone;
-    if (cleaned.startsWith('254') && cleaned.length === 12) {
-      formatted = `+${cleaned}`;
-    } else if (cleaned.startsWith('0') && cleaned.length === 10) {
-      formatted = `+254${cleaned.substring(1)}`;
-    } else if (cleaned.startsWith('7') && cleaned.length === 9) {
-      formatted = `+254${cleaned}`;
-    } else if (cleaned.length === 9) {
-      formatted = `+254${cleaned}`;
-    }
-    
-    console.log("Formatted (with +):", formatted);
-    return formatted;
-  };
 
   const getTomorrowDate = () => {
     const tomorrow = new Date();

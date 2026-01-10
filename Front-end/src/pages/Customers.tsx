@@ -29,7 +29,7 @@ import { API_BASE_URL } from '@/services/url';
 const API_CUSTOMERS_URL = `${API_BASE_URL}/Laundry/customers/`;
 const API_ORDERS_URL = `${API_BASE_URL}/Laundry/orders/`;
 // Ensure URL includes /Laundry/ to avoid 405 errors
-const API_SMS_URL = `${API_BASE_URL}/Laundry/send_sms/`;
+const API_SMS_URL = `${API_BASE_URL}/Laundry/send-sms/`;
 
 // --- Types for Pagination ---
 interface PaginatedResponse<T> {
@@ -726,7 +726,22 @@ export default function CustomersPage() {
                 return;
             }
 
-            if (!confirm(`Are you sure you want to send SMS to ${phoneNumbers.length} customers?`)) {
+            // --- UPDATE: Limit to 100 customers ---
+            const SMS_LIMIT = 100;
+            let finalPhoneNumbers = phoneNumbers;
+            
+            // If there are more than 100 numbers, slice the array
+            if (phoneNumbers.length > SMS_LIMIT) {
+                finalPhoneNumbers = phoneNumbers.slice(0, SMS_LIMIT);
+            }
+
+            // Update confirmation message to reflect the limit
+            const isTruncated = phoneNumbers.length > SMS_LIMIT;
+            const countText = isTruncated
+                ? `the first ${SMS_LIMIT} customers (Total available: ${phoneNumbers.length}).`
+                : `${finalPhoneNumbers.length} customer(s).`;
+
+            if (!confirm(`Are you sure you want to send SMS to ${countText}`)) {
                 setIsSendingSMS(false);
                 return;
             }
@@ -741,7 +756,7 @@ export default function CustomersPage() {
                     'Authorization': `Bearer ${token}`
                 },
                 body: JSON.stringify({
-                    to_number: phoneNumbers,
+                    to_number: finalPhoneNumbers, // Send the limited array
                     message: message
                 })
             });
@@ -754,7 +769,7 @@ export default function CustomersPage() {
 
             const result = await res.json();
             console.log('SMS Result:', result);
-            alert(`SMS sent successfully to ${phoneNumbers.length} customer(s)!`);
+            alert(`SMS sent successfully to ${finalPhoneNumbers.length} customer(s)!`);
 
             setIsSMSModalOpen(false);
 

@@ -1,26 +1,28 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from .views import (
-    CustomerViewSet, OrderViewSet, OrderItemViewSet,
-    ExpenseFieldViewSet, ExpenseRecordViewSet, PaymentViewSet,
-    UserProfileViewset,sendsms_view
+    CustomerViewSet,
+    OrderViewSet,
+    OrderItemViewSet,
+    ExpenseFieldViewSet,
+    ExpenseRecordViewSet,
+    PaymentViewSet,
+    UserProfileViewSet,
+    sendsms_view,
+    by_phone_view,
 )
 
 router = DefaultRouter()
-router.register(r'users', UserProfileViewset)
-router.register(r'customers', CustomerViewSet)
-router.register(r'orders', OrderViewSet)
-router.register(r'order-items', OrderItemViewSet)
-router.register(r'expense-fields', ExpenseFieldViewSet)
-router.register(r'expense-records', ExpenseRecordViewSet)
-router.register(r'payments', PaymentViewSet)
-
-
-
+router.register(r'users', UserProfileViewSet, basename='users')
+router.register(r'customers', CustomerViewSet, basename='customers')
+router.register(r'orders', OrderViewSet, basename='orders')
+router.register(r'order-items', OrderItemViewSet, basename='order-items')
+router.register(r'expense-fields', ExpenseFieldViewSet, basename='expense-fields')
+router.register(r'expense-records', ExpenseRecordViewSet, basename='expense-records')
+router.register(r'payments', PaymentViewSet, basename='payments')
 
 urlpatterns = [
     path('', include(router.urls)),
+    path('customers/by_phone/', by_phone_view),
     path('send-sms/', sendsms_view),
-    path('send_sms/', sendsms_view),
-    
 ]

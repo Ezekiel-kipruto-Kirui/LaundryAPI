@@ -101,9 +101,7 @@ class UserProfileSerializer(serializers.ModelSerializer):
         return instance
 
 
-class CustomerSerializer(serializers.ModelSerializer):
-    phone = serializers.SerializerMethodField()
-    
+class CustomerSerializer(serializers.ModelSerializer):    
     class Meta:
         model = Customer
         fields = ['id', 'name', 'phone', 'created_by']

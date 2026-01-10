@@ -185,3 +185,4 @@ def get_account_balance():
     except Exception as e:
         logger.exception("❌ Failed to fetch account balance")
         return False, str(e)
+        

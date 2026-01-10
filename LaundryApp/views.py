@@ -1,5 +1,6 @@
 from django.db import transaction
-
+from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_POST
 from rest_framework import viewsets, status
 from rest_framework.views import APIView
 from rest_framework.decorators import api_view, permission_classes, action
@@ -24,7 +25,6 @@ from .sms_utility import send_sms
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter
 from django.db.models import Sum, Count, Q
-from django.utils.decorators import method_decorator
 
 class CurrentUserView(APIView):
     permission_classes = [IsAuthenticated]
@@ -33,8 +33,8 @@ class CurrentUserView(APIView):
         serializer = UserProfileSerializer(request.user)
         return Response(serializer.data)
 
-# Update your UserProfileViewset
-class UserProfileViewset(viewsets.ModelViewSet):
+# Update your UserProfileViewSet
+class UserProfileViewSet(viewsets.ModelViewSet):
     queryset = UserProfile.objects.all()
     serializer_class = UserProfileSerializer
     permission_classes = [IsAuthenticated]  # CHANGE THIS from AllowAny
@@ -51,7 +51,7 @@ class CustomerViewSet(viewsets.ModelViewSet):
     """
     queryset = Customer.objects.all().order_by("-id")
     serializer_class = CustomerSerializer
-    permission_classes = [AllowAny]  # change to IsAuthenticated for production
+    permission_classes = [AllowAny]
     pagination_class=CustomPageNumberPagination
 
     @action(detail=False, methods=['get'])
@@ -209,8 +209,54 @@ class PaymentViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
 
 
-@api_view(['POST'])
+@csrf_exempt
+@api_view(['GET'])
 @permission_classes([AllowAny])
+def by_phone_view(request):
+    """Search customer by phone number (exact or normalized match)"""
+    phone = request.query_params.get('phone', '')
+    if not phone:
+        return Response({"error": "Phone parameter required"}, status=status.HTTP_400_BAD_REQUEST)
+    
+    # Normalize the input phone for comparison
+    import re
+    cleaned = re.sub(r'\D', '', phone)
+    
+    # Try different formats
+    if cleaned.startswith('254') and len(cleaned) == 12:
+        search_phones = [f'+{cleaned}', cleaned]
+    elif cleaned.startswith('0') and len(cleaned) == 10:
+        normalized = '254' + cleaned[1:]
+        search_phones = [f'+{normalized}', normalized]
+    elif cleaned.startswith('7') and len(cleaned) == 9:
+        normalized = '254' + cleaned
+        search_phones = [f'+{normalized}', normalized]
+    else:
+        search_phones = [phone, f'+{phone}']
+    
+    # Search for customer with any matching phone format
+    customer = None
+    for search_phone in search_phones:
+        try:
+            customer = Customer.objects.filter(phone=search_phone).first()
+            if customer:
+                break
+            if not search_phone.startswith('+'):
+                customer = Customer.objects.filter(phone=f'+{search_phone}').first()
+                if customer:
+                    break
+        except Exception:
+            continue
+    
+    if customer:
+        serializer = CustomerSerializer(customer)
+        return Response(serializer.data)
+    return Response({"error": "Customer not found"}, status=status.HTTP_404_NOT_FOUND)
+
+
+@csrf_exempt
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
 def sendsms_view(request):
     to_number = request.data.get("to_number")
     message = request.data.get("message")
