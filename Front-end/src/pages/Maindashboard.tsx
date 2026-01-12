@@ -57,11 +57,14 @@ const getCurrentMonthParams = () => {
     // Logic to get the last day of the current month safely
     // This prevents accidentally going into the next year when calculating December
     const lastDayOfMonth = new Date(year, month + 1 ,0).getDate();
-    const lastDay = new Date(year, month, lastDayOfMonth);
+
+    // Format dates as YYYY-MM-DD in local time
+    const start_date = `${year}-${String(month + 1).padStart(2, '0')}-01`;
+    const end_date = `${year}-${String(month + 1).padStart(2, '0')}-${String(lastDayOfMonth).padStart(2, '0')}`;
 
     return {
-        start_date: firstDay.toISOString().split('T')[0],
-        end_date: lastDay.toISOString().split('T')[0]
+        start_date,
+        end_date
     };
 };
 

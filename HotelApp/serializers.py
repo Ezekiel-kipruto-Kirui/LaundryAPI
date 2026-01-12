@@ -32,12 +32,15 @@ class FoodItemSerializer(serializers.ModelSerializer):
 class HotelOrderItemSerializer(serializers.ModelSerializer):
     food_item_name = serializers.CharField(source='food_item.name', read_only=True)
     total_price = serializers.SerializerMethodField()
-    
+    order_id = serializers.IntegerField(source='order.id', read_only=True)
+    created_by = UserProfileSerializer(source='order.created_by', read_only=True)
+    order_created_at = serializers.DateTimeField(source='order.created_at', read_only=True)
+
     class Meta:
         model = HotelOrderItem
         fields = '__all__'
         read_only_fields = ['created_at']
-    
+
     def get_total_price(self, obj):
         return obj.get_total_price()
 

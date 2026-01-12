@@ -95,9 +95,9 @@ interface CreatedByUser {
 }
 
 interface ExtendedHotelOrderItem extends Omit<HotelOrderItem, 'created_at' | 'total_price'> {
-  _order?: HotelOrder;
-  _created_by?: CreatedByUser;
-  _created_at?: string;
+  order_id?: number;
+  created_by?: CreatedByUser;
+  order_created_at?: string;
   total_price?: any;
   created_at?: any;
 }
@@ -124,12 +124,13 @@ const createOrder = async (): Promise<HotelOrder> => {
   return response.json();
 };
 
-const fetchOrders = async (pageNumber: number, dateFilter?: DateRange): Promise<{
-  items: HotelOrder[],
+const fetchOrderItems = async (pageNumber: number, dateFilter?: DateRange): Promise<{
+  items: ExtendedHotelOrderItem[],
   count: number,
-  flattenedOrderItems: ExtendedHotelOrderItem[]
+  totalPages: number,
+  pageSize: number
 }> => {
-  let url = `${ORDERS_URL}?page=${pageNumber}`;
+  let url = `${ORDER_ITEMS_URL}?page=${pageNumber}`;
 
   if (dateFilter?.start_date) {
     url += `&start_date=${dateFilter.start_date}`;
@@ -146,44 +147,31 @@ const fetchOrders = async (pageNumber: number, dateFilter?: DateRange): Promise<
   }
 
   if (!response.ok) {
-    throw new Error(`Failed to fetch orders: ${response.status}`);
+    throw new Error(`Failed to fetch order items: ${response.status}`);
   }
 
   const apiData = await response.json();
 
-  let orders: HotelOrder[] = [];
+  let items: ExtendedHotelOrderItem[] = [];
   let totalCount = 0;
+  let totalPages = 1;
+  let pageSize = 10;
 
   if (apiData.results) {
-    orders = apiData.results as HotelOrder[];
-    totalCount = apiData.count || 0;
-  } else if (apiData.data) {
-    orders = apiData.data as HotelOrder[];
-    totalCount = apiData.totalItems || apiData.data.length;
+    items = apiData.results as ExtendedHotelOrderItem[];
+    totalCount = apiData.total_items || 0;
+    totalPages = apiData.total_pages || 1;
+    pageSize = apiData.page_size || 10;
   } else if (Array.isArray(apiData)) {
-    orders = apiData as HotelOrder[];
+    items = apiData as ExtendedHotelOrderItem[];
     totalCount = apiData.length;
   }
 
-  const flattenedOrderItems: ExtendedHotelOrderItem[] = [];
-  orders.forEach(order => {
-    if (order.order_items && Array.isArray(order.order_items)) {
-      order.order_items.forEach(item => {
-        const enrichedItem: ExtendedHotelOrderItem = {
-          ...item,
-          _order: order,
-          _created_by: order.created_by as CreatedByUser,
-          _created_at: order.created_at
-        };
-        flattenedOrderItems.push(enrichedItem);
-      });
-    }
-  });
-
   return {
-    items: orders,
+    items,
     count: totalCount,
-    flattenedOrderItems
+    totalPages,
+    pageSize
   };
 };
 
@@ -324,8 +312,8 @@ const fetchOrderSummary = async (dateFilter?: DateRange) => {
 };
 
 const getCreatedByName = (item: ExtendedHotelOrderItem): string => {
-  if (item._created_by && typeof item._created_by === 'object') {
-    const createdBy = item._created_by as CreatedByUser;
+  if (item.created_by && typeof item.created_by === 'object') {
+    const createdBy = item.created_by as CreatedByUser;
     if (createdBy.first_name && createdBy.last_name) {
       return `${createdBy.first_name} ${createdBy.last_name}`;
     } else if (createdBy.first_name) {
@@ -425,6 +413,7 @@ export default function HotelOrderItems() {
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalItems, setTotalItems] = useState(0);
+  const [pageSize, setPageSize] = useState(10);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [showDeleteOrderModal, setShowDeleteOrderModal] = useState(false);
   const [showCreateEditModal, setShowCreateEditModal] = useState(false);
@@ -484,17 +473,16 @@ export default function HotelOrderItems() {
     setError(null);
 
     try {
-      const [ordersData, foodItemsData, summaryData] = await Promise.all([
-        fetchOrders(page, dateRange),
+      const [orderItemsData, foodItemsData, summaryData] = await Promise.all([
+        fetchOrderItems(page, dateRange),
         fetchFoodItems(),
         fetchOrderSummary(dateRange),
       ]);
 
-      setOrders(ordersData.items);
-      setOrderItems(ordersData.flattenedOrderItems);
+      setOrderItems(orderItemsData.items);
       setFoodItems(foodItemsData);
 
-      const creditOrders = ordersData.flattenedOrderItems.filter(item => item.oncredit);
+      const creditOrders = orderItemsData.items.filter(item => item.oncredit);
       const creditValue = creditOrders.reduce((sum, item) => {
         const price = item.price ? parseFloat(item.price.toString()) : 0;
         return sum + price;
@@ -507,15 +495,9 @@ export default function HotelOrderItems() {
         credit_orders_value: creditValue
       });
 
-      // Dynamic Pagination: Calculate based on actual data returned
-      const totalCount = ordersData.count || ordersData.flattenedOrderItems.length;
-
-      // Determine page size dynamically
-      const pageSize = ordersData.items.length > 0 ? ordersData.items.length : 10;
-      const calculatedTotalPages = pageSize > 0 ? Math.ceil(totalCount / pageSize) : 1;
-
-      setTotalPages(calculatedTotalPages);
-      setTotalItems(totalCount);
+      setTotalPages(orderItemsData.totalPages);
+      setTotalItems(orderItemsData.count);
+      setPageSize(orderItemsData.pageSize);
 
     } catch (err: any) {
       console.error('Error fetching data:', err);
@@ -814,9 +796,9 @@ export default function HotelOrderItems() {
   }, []);
 
   const formatDateTime = useCallback((item: ExtendedHotelOrderItem): string => {
-    if (item.created_at) {
+    if (item.order_created_at) {
       try {
-        const date = new Date(item.created_at);
+        const date = new Date(item.order_created_at);
         return date.toLocaleString('en-US', {
           month: 'short',
           day: 'numeric',
@@ -828,9 +810,9 @@ export default function HotelOrderItems() {
       } catch (e) { console.error('Date parsing error:', e); }
     }
 
-    if (item._created_at) {
+    if (item.created_at) {
       try {
-        const date = new Date(item._created_at);
+        const date = new Date(item.created_at);
         return date.toLocaleString('en-US', {
           month: 'short',
           day: 'numeric',
@@ -869,7 +851,7 @@ export default function HotelOrderItems() {
 
   const handleExportCSV = useCallback(() => {
     const exportData = orderItems.map(item => ({
-      'Order ID': typeof item.order === 'object' ? (item.order as any)?.id || 'N/A' : item.order || 'N/A',
+      'Order ID': item.order_id || 'N/A',
       'Date/Time': formatDateTime(item),
       'Created By': getCreatedByName(item),
       'Food Item': getFoodItemName(item),
@@ -902,10 +884,10 @@ export default function HotelOrderItems() {
   const handleNextPage = useCallback(() => handlePageChange(page + 1), [handlePageChange, page]);
 
   const paginationDisplay = useMemo(() => {
-    const startIndex = Math.min((page - 1) * 10 + 1, totalItems);
-    const endIndex = Math.min(page * 10, totalItems);
+    const startIndex = Math.min((page - 1) * pageSize + 1, totalItems);
+    const endIndex = Math.min(page * pageSize, totalItems);
     return { startIndex, endIndex };
-  }, [page, totalItems]);
+  }, [page, totalItems, pageSize]);
 
   const pageNumbers = useMemo(() => {
     const numbers = [];
@@ -975,7 +957,7 @@ export default function HotelOrderItems() {
         {/* Header */}
         <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
           <button
-            onClick={() => window.location.href = ROUTES.dashboard}
+            onClick={() => window.location.href = ROUTES.dashboard} 
             className="inline-flex items-center px-4 py-2 bg-white rounded-lg shadow-sm border border-gray-200 text-gray-700 hover:text-blue-600 hover:shadow-md transition-all"
           >
             <Home className="w-4 h-4 mr-2 text-blue-500" />
