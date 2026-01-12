@@ -11,7 +11,8 @@ import {
     Bath,
     User
 } from "lucide-react";
-import { fetchApi } from "@/services/api";
+import { getAccessToken } from "@/services/api";
+import { API_BASE_URL } from "@/services/url";
 import { Link } from "react-router-dom";
 import { ROUTES } from "@/services/Routes";
 
@@ -29,7 +30,7 @@ interface ProcessedData {
     currentMonthName: string;
 }
 
-// Helper functions
+// Helper to safely convert API response values to numbers
 const toNumber = (value: any): number => {
     if (value === null || value === undefined) return 0;
     const num = Number(value);
@@ -43,46 +44,25 @@ const getCurrentMonthName = () => {
     });
 };
 
-const getCurrentMonthRange = () => {
+// Updated Helper to get date range for current month
+// Ensures start date is exactly the 1st of the current month
+const getCurrentMonthParams = () => {
     const now = new Date();
     const year = now.getFullYear();
     const month = now.getMonth();
 
+    // First day is explicitly the 1st of the current month
     const firstDay = new Date(year, month, 1);
-    const lastDay = new Date(year, month + 1, 0);
+
+    // Logic to get the last day of the current month safely
+    // This prevents accidentally going into the next year when calculating December
+    const lastDayOfMonth = new Date(year, month + 1 ,0).getDate();
+    const lastDay = new Date(year, month, lastDayOfMonth);
 
     return {
-        fromDate: firstDay.toISOString().split('T')[0],
-        toDate: lastDay.toISOString().split('T')[0],
-        startTimestamp: firstDay.getTime(),
-        endTimestamp: lastDay.getTime() + 86399999 // End of day
+        start_date: firstDay.toISOString().split('T')[0],
+        end_date: lastDay.toISOString().split('T')[0]
     };
-};
-
-const ensureArray = <T,>(data: any): T[] => {
-    if (!data) return [];
-    if (Array.isArray(data)) return data;
-    if (typeof data === 'object') {
-        if (Array.isArray(data.results)) return data.results;
-        if (Array.isArray(data.data)) return data.data;
-        if (Array.isArray(data.items)) return data.items;
-    }
-    console.warn("Data is not an array:", data);
-    return [];
-};
-
-// Check if date is within current month
-const isInCurrentMonth = (dateString: string | undefined, monthRange: ReturnType<typeof getCurrentMonthRange>): boolean => {
-    if (!dateString) return false;
-
-    try {
-        const date = new Date(dateString);
-        const timestamp = date.getTime();
-        return timestamp >= monthRange.startTimestamp && timestamp <= monthRange.endTimestamp;
-    } catch (error) {
-        console.warn('Error parsing date:', dateString, error);
-        return false;
-    }
 };
 
 export default function Dashboard() {
@@ -101,115 +81,59 @@ export default function Dashboard() {
         currentMonthName: getCurrentMonthName()
     });
 
-    const processData = useCallback((
-        hotelOrders: any[],
-        hotelExpenses: any[],
-        laundryOrders: any[],
-        laundryExpenses: any[]
-    ): ProcessedData => {
-        const monthRange = getCurrentMonthRange();
-
-        // Ensure all inputs are arrays
-        const safeHotelOrders = ensureArray<any>(hotelOrders);
-        const safeHotelExpenses = ensureArray<any>(hotelExpenses);
-        const safeLaundryOrders = ensureArray<any>(laundryOrders);
-        const safeLaundryExpenses = ensureArray<any>(laundryExpenses);
-
-        // Filter hotel orders for current month
-        const filteredHotelOrders = safeHotelOrders.filter(order =>
-            isInCurrentMonth(order?.created_at, monthRange)
-        );
-
-        // Calculate hotel revenue from filtered orders
-        const hotelRevenue = filteredHotelOrders.reduce((sum, order) => {
-            return sum + toNumber(order.total_amount || order.total_order_price || 0);
-        }, 0);
-
-        // Filter laundry orders for current month
-        const filteredLaundryOrders = safeLaundryOrders.filter(order =>
-            isInCurrentMonth(order?.created_at, monthRange)
-        );
-
-        // Calculate laundry revenue
-        const laundryRevenue = filteredLaundryOrders.reduce((sum, order) => {
-            return sum + toNumber(order.total_price || 0);
-        }, 0);
-
-        // Filter and calculate hotel expenses for current month
-        const hotelExpensesTotal = safeHotelExpenses
-            .filter(expense => isInCurrentMonth(expense?.date, monthRange))
-            .reduce((sum, expense) => sum + toNumber(expense.amount || 0), 0);
-
-        // Filter and calculate laundry expenses for current month
-        const laundryExpensesTotal = safeLaundryExpenses
-            .filter(expense => isInCurrentMonth(expense?.date, monthRange))
-            .reduce((sum, expense) => sum + toNumber(expense.amount || 0), 0);
-
-        // Calculate totals
-        const totalBusinessExpenses = hotelExpensesTotal + laundryExpensesTotal;
-        const hotelProfit = hotelRevenue - hotelExpensesTotal;
-        const laundryProfit = laundryRevenue - laundryExpensesTotal;
-        const totalNetProfit = hotelProfit + laundryProfit;
-        const totalBusinessRevenue = hotelRevenue + laundryRevenue;
-
-        return {
-            totalBusinessRevenue,
-            totalNetProfit,
-            totalBusinessExpenses,
-            hotelRevenue,
-            hotelExpenses: hotelExpensesTotal,
-            hotelProfit,
-            laundryRevenue,
-            laundryExpenses: laundryExpensesTotal,
-            laundryProfit,
-            currentMonthName: getCurrentMonthName()
-        };
-    }, []);
-
     const fetchDashboardData = useCallback(async () => {
         setLoading(true);
         setError(null);
 
         try {
-            // Fetch all data in parallel
-            const [
-                hotelOrdersResponse,
-                hotelExpensesResponse,
-                laundryOrdersResponse,
-                laundryExpensesResponse
-            ] = await Promise.allSettled([
-                fetchApi<any>('orders/', { method: 'GET' }, 'hotel'),
-                fetchApi<any>('Hotelexpense-records/', { method: 'GET' }, 'hotel'),
-                fetchApi<any>('orders/', { method: 'GET' }, 'laundry'),
-                fetchApi<any>('expense-records/', { method: 'GET' }, 'laundry')
-            ]);
+            // Get the dynamic date range for the current month
+            const { start_date, end_date } = getCurrentMonthParams();
 
-            // Extract data from responses
-            const hotelOrders = hotelOrdersResponse.status === 'fulfilled'
-                ? ensureArray<any>(hotelOrdersResponse.value)
-                : [];
+            const token = getAccessToken();
 
-            const hotelExpenses = hotelExpensesResponse.status === 'fulfilled'
-                ? ensureArray<any>(hotelExpensesResponse.value)
-                : [];
+            // Setup headers
+            const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+            if (token) headers['Authorization'] = `Bearer ${token}`;
 
-            const laundryOrders = laundryOrdersResponse.status === 'fulfilled'
-                ? ensureArray<any>(laundryOrdersResponse.value)
-                : [];
+            // Construct URL with query parameters for the current month
+            const url = `${API_BASE_URL}/Report/dashboard/?start_date=${start_date}&end_date=${end_date}`;
 
-            const laundryExpenses = laundryExpensesResponse.status === 'fulfilled'
-                ? ensureArray<any>(laundryExpensesResponse.value)
-                : [];
+            const response = await fetch(url, { headers });
 
-            // Process the data
-            const processedData = processData(
-                hotelOrders,
-                hotelExpenses,
-                laundryOrders,
-                laundryExpenses
-            );
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: Failed to fetch dashboard data`);
+            }
 
-            setData(processedData);
+            const json = await response.json();
+
+            if (json.success && json.data) {
+                const backendData = json.data;
+                const businessGrowth = backendData.business_growth || {};
+                const hotelStats = backendData.hotel_stats || {};
+                const orderStats = backendData.order_stats || {};
+                const expenseStats = backendData.expense_stats || {};
+
+                // Calculate Laundry Profit (Revenue - Expenses)
+                const laundryRevenue = toNumber(orderStats.total_revenue);
+                const laundryExpenses = toNumber(expenseStats.total_expenses);
+                const laundryProfit = laundryRevenue - laundryExpenses;
+
+                // Map backend data to frontend state
+                setData({
+                    totalBusinessRevenue: toNumber(businessGrowth.total_revenue),
+                    totalNetProfit: toNumber(businessGrowth.net_profit),
+                    totalBusinessExpenses: toNumber(businessGrowth.total_expenses),
+                    hotelRevenue: toNumber(hotelStats.total_revenue),
+                    hotelExpenses: toNumber(hotelStats.total_expenses),
+                    hotelProfit: toNumber(hotelStats.net_profit),
+                    laundryRevenue: laundryRevenue,
+                    laundryExpenses: laundryExpenses,
+                    laundryProfit: laundryProfit,
+                    currentMonthName: getCurrentMonthName()
+                });
+            } else {
+                throw new Error(json.message || 'Invalid data response from server');
+            }
 
         } catch (err: any) {
             console.error("Dashboard fetch error:", err);
@@ -217,7 +141,7 @@ export default function Dashboard() {
         } finally {
             setLoading(false);
         }
-    }, [processData]);
+    }, []);
 
     useEffect(() => {
         fetchDashboardData();
@@ -238,42 +162,42 @@ export default function Dashboard() {
             icon: ShoppingCart,
             title: "Create Laundry Order",
             description: "Add new laundry service",
-            color: "blue" as const
+            color: "blue"
         },
         {
             href: ROUTES.hotelOrders,
             icon: ShoppingCart,
             title: "Create Hotel Order",
             description: "Add new food order",
-            color: "green" as const
+            color: "green"
         },
         {
             href: ROUTES.laundryOrders,
             icon: ClipboardList,
             title: "View Orders",
             description: "Manage all orders",
-            color: "amber" as const
+            color: "amber"
         },
         {
             href: ROUTES.hotelOrders,
             icon: ClipboardList,
             title: "Hotel Orders",
             description: "View hotel orders",
-            color: "emerald" as const
+            color: "emerald"
         },
         {
             href: ROUTES.laundryCustomers,
             icon: Users,
             title: "Customers",
             description: "Manage customers",
-            color: "purple" as const
+            color: "purple"
         },
         {
             href: ROUTES.siteManagement,
             icon: User,
             title: "Users",
             description: "Manage user accounts",
-            color: "red" as const
+            color: "red"
         }
     ];
 
@@ -352,11 +276,11 @@ export default function Dashboard() {
                     <div className="relative bg-white/95 backdrop-blur-sm rounded-2xl shadow-xl p-6">
                         <div className="flex items-center">
                             <div className="flex-shrink-0">
-                                <div className="w-14 h-14 bg-gradient-to-br from-blue-100 to-blue-50 rounded-xl flex items-center justify-center shadow-lg">
+                                <div className="w-14 h-14 bg-gradient-to-br from-blue-100 to-blue-50 rounded-xl flex items-center justify-center shadow-lg mr-4">
                                     <DollarSign className="w-7 h-7 text-blue-600" />
                                 </div>
                             </div>
-                            <div className="ml-5 flex-1">
+                            <div className="ml-0">
                                 <p className="text-sm font-medium text-slate-600 uppercase tracking-wide">
                                     Total Revenue ({data.currentMonthName})
                                 </p>
@@ -364,7 +288,7 @@ export default function Dashboard() {
                                     {formatCurrency(data.totalBusinessRevenue)}
                                 </p>
                                 <div className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 mt-2 shadow-sm">
-                                    📈 Current Month Combined Revenue
+                                    📈 Combined Revenue
                                 </div>
                             </div>
                         </div>
@@ -374,18 +298,18 @@ export default function Dashboard() {
                     <div className="relative bg-white/95 backdrop-blur-sm rounded-2xl shadow-xl p-6">
                         <div className="flex items-center">
                             <div className="flex-shrink-0">
-                                <div className="w-14 h-14 bg-gradient-to-br from-green-100 to-green-50 rounded-xl flex items-center justify-center shadow-lg">
+                                <div className="w-14 h-14 bg-gradient-to-br from-green-100 to-green-50 rounded-xl flex items-center justify-center shadow-lg mr-4">
                                     <TrendingUp className="w-7 h-7 text-green-600" />
                                 </div>
                             </div>
-                            <div className="ml-5 flex-1">
+                            <div className="ml-0">
                                 <p className="text-sm font-medium text-slate-600 uppercase tracking-wide">
                                     Total Profit ({data.currentMonthName})
                                 </p>
-                                <p className={`text-2xl font-bold ${data.totalNetProfit >= 0 ? 'text-green-600' : 'text-red-600'} mt-1`}>
+                                <p className={`text-2xl font-bold text-slate-900 mt-1 ${data.totalNetProfit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                                     {formatCurrency(data.totalNetProfit)}
                                 </p>
-                                <div className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${data.totalNetProfit >= 0 ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'} mt-2 shadow-sm`}>
+                                <div className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium mt-2 shadow-sm ${data.totalNetProfit >= 0 ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
                                     {data.totalNetProfit >= 0 ? '💰 Profitable' : '📉 Loss'}
                                 </div>
                             </div>
@@ -398,8 +322,10 @@ export default function Dashboard() {
                     {/* Laundry Business Card */}
                     <div className="relative bg-white/95 backdrop-blur-sm rounded-2xl shadow-xl p-6">
                         <div className="flex items-center mb-4">
-                            <div className="w-10 h-10 bg-gradient-to-br from-amber-100 to-amber-50 rounded-lg flex items-center justify-center shadow-lg mr-3">
-                                <Bath className="w-5 h-5 text-amber-600" />
+                            <div className="flex-shrink-0">
+                                <div className="w-10 h-10 bg-gradient-to-br from-amber-100 to-amber-50 rounded-lg flex items-center justify-center shadow-lg mr-3">
+                                    <Bath className="w-5 h-5 text-amber-600" />
+                                </div>
                             </div>
                             <h3 className="text-xl font-semibold text-slate-900">Laundry Business</h3>
                         </div>
@@ -428,8 +354,10 @@ export default function Dashboard() {
                     {/* Hotel Business Card */}
                     <div className="relative bg-white/95 backdrop-blur-sm rounded-2xl shadow-xl p-6">
                         <div className="flex items-center mb-4">
-                            <div className="w-10 h-10 bg-gradient-to-br from-emerald-100 to-emerald-50 rounded-lg flex items-center justify-center shadow-lg mr-3">
-                                <Building className="w-5 h-5 text-emerald-600" />
+                            <div className="flex-shrink-0">
+                                <div className="w-10 h-10 bg-gradient-to-br from-emerald-100 to-emerald-50 rounded-lg flex items-center justify-center shadow-lg mr-3">
+                                    <Building className="w-5 h-5 text-emerald-600" />
+                                </div>
                             </div>
                             <h3 className="text-xl font-semibold text-slate-900">Hotel Business</h3>
                         </div>
@@ -460,8 +388,10 @@ export default function Dashboard() {
                 <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-xl overflow-hidden">
                     <div className="px-6 py-4 bg-gradient-to-r from-slate-50 to-slate-100/80">
                         <div className="flex items-center">
-                            <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-purple-500 rounded-lg flex items-center justify-center shadow-lg mr-3">
-                                <LayoutDashboard className="w-4 h-4 text-white" />
+                            <div className="flex-shrink-0">
+                                <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-purple-500 rounded-lg flex items-center justify-center shadow-lg mr-3">
+                                    <LayoutDashboard className="w-4 h-4 text-white" />
+                                </div>
                             </div>
                             <h3 className="text-lg font-semibold text-slate-900">Quick Actions</h3>
                         </div>
@@ -472,7 +402,7 @@ export default function Dashboard() {
                             <Link
                                 key={index}
                                 to={action.href}
-                                className="flex items-center p-4 bg-slate-50/50 rounded-xl hover:bg-white transition-all duration-200 hover:shadow-md"
+                                className="flex items-center p-4 bg-slate-50/50 rounded-xl hover:bg-white hover:shadow-md transition-all duration-200"
                             >
                                 <div className={`w-12 h-12 bg-gradient-to-br ${colorClasses[action.color].iconBg} rounded-lg flex items-center justify-center shadow-lg mr-4`}>
                                     <action.icon className={`w-6 h-6 ${colorClasses[action.color].iconColor}`} />
@@ -490,11 +420,11 @@ export default function Dashboard() {
 
                 {/* Error Display */}
                 {error && (
-                    <div className="mt-8 bg-red-50 text-red-700 rounded-xl border border-red-200 p-6">
+                    <div className="mt-8 bg-red-50 text-red-700 rounded-2xl border border-red-200 p-6">
                         <div className="flex items-start">
                             <div className="flex-shrink-0">
                                 <svg className="h-6 w-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.732-.833-2.502 0L4.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.732-.833-2.5L4.732 16.5c-.77.833-1.732.833-2.5z" />
                                 </svg>
                             </div>
                             <div className="ml-3 flex-1">
@@ -502,7 +432,7 @@ export default function Dashboard() {
                                 <p className="text-red-600 mb-4">{error}</p>
                                 <button
                                     onClick={fetchDashboardData}
-                                    className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors font-medium text-sm"
+                                    className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg font-medium transition-colors text-sm"
                                 >
                                     Retry Loading
                                 </button>
