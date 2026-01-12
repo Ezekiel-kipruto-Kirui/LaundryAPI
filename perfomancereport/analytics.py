@@ -83,9 +83,7 @@ class DashboardAnalytics:
             'monthly_business_growth': [],
             'shop_a_stats': self._get_empty_shop_stats(),
             'shop_b_stats': self._get_empty_shop_stats(),
-            'shop_a_orders': {'pending': [], 'partial': [], 'complete': [], 'overdue': []},
-            'shop_b_orders': {'pending': [], 'partial': [], 'complete': [], 'overdue': []},
-            'orders_by_payment_status': {'pending': [], 'partial': [], 'complete': [], 'overdue': []}
+            # Order lists removed as per requirement
         }
 
     def _get_empty_shop_stats(self):
@@ -331,7 +329,7 @@ class DashboardAnalytics:
                 oncredit=False
             ).aggregate(
                 total_revenue=Coalesce(
-                    Sum(F('price') * F('quantity')), 0.0, output_field=DecimalField()
+                    Sum(F('price')), 0.0, output_field=DecimalField()
                 )
             )
             
@@ -368,7 +366,7 @@ class DashboardAnalytics:
     # --- Shop-specific Data ---
 
     def _get_shop_specific_data(self, base_queryset, shop_name, total_expenses_for_shop):
-        """Get combined stats and order lists for a specific shop."""
+        """Get combined stats for a specific shop. Returns only stats, no order lists."""
         try:
             shop_qs = base_queryset.filter(shop=shop_name)
             
@@ -414,63 +412,11 @@ class DashboardAnalytics:
                 if hasattr(value, '__float__'):
                     final_stats[key] = float(value)
             
-            orders_by_status = self._get_orders_by_payment_status(shop_qs)
+            return final_stats
             
-            return {
-                'stats': final_stats,
-                'orders_by_payment_status': orders_by_status
-            }
         except Exception as e:
             logger.error(f"Error getting shop data for {shop_name}: {e}")
-            return {
-                'stats': self._get_empty_shop_stats(),
-                'orders_by_payment_status': {'pending': [], 'partial': [], 'complete': [], 'overdue': []}
-            }
-
-    def _get_orders_by_payment_status(self, queryset):
-        """Get orders grouped by payment status."""
-        try:
-            orders = {
-                'pending': list(queryset.filter(
-                    payment_status=PAYMENT_STATUS_PENDING
-                ).select_related('customer').order_by('-created_at')[:50]),
-                
-                'partial': list(queryset.filter(
-                    payment_status=PAYMENT_STATUS_PARTIAL
-                ).select_related('customer').order_by('-created_at')[:50]),
-                
-                'complete': list(queryset.filter(
-                    payment_status=PAYMENT_STATUS_COMPLETED
-                ).select_related('customer').order_by('-created_at')[:50]),
-                
-                'overdue': list(queryset.filter(
-                    created_at__lt=now().date(),
-                    payment_status__in=[PAYMENT_STATUS_PENDING, PAYMENT_STATUS_PARTIAL]
-                ).select_related('customer').order_by('-created_at')[:50])
-            }
-            
-            # Convert order objects to serializable dicts
-            for status in orders:
-                orders[status] = [
-                    {
-                        'id': order.id,
-                        'uniquecode': order.uniquecode,
-                        'customer_name': order.customer.name if order.customer else 'Unknown',
-                        'total_price': float(order.total_price),
-                        'amount_paid': float(order.amount_paid),
-                        'balance': float(order.balance),
-                        'created_at': order.created_at.strftime('%Y-%m-%d %H:%M') if order.created_at else None,
-                        'order_status': order.order_status,
-                        'payment_status': order.payment_status,
-                        'shop': order.shop
-                    }
-                    for order in orders[status]
-                ]
-            
-            return orders
-        except Exception as e:
-            logger.error(f"Error getting orders by payment status: {e}")
-            return {'pending': [], 'partial': [], 'complete': [], 'overdue': []}
+            return self._get_empty_shop_stats()
 
     # --- Analytics Lists ---
 
@@ -704,11 +650,11 @@ class DashboardAnalytics:
                 'net_profit': total_revenue - total_expenses
             }
             
-            # Get shop-specific data
-            shop_a_data = self._get_shop_specific_data(
+            # Get shop-specific data (stats only, no lists)
+            shop_a_stats = self._get_shop_specific_data(
                 base_qs, 'Shop A', expense_stats.get('shop_a_expenses', 0.0)
             )
-            shop_b_data = self._get_shop_specific_data(
+            shop_b_stats = self._get_shop_specific_data(
                 base_qs, 'Shop B', expense_stats.get('shop_b_expenses', 0.0)
             )
             
@@ -744,31 +690,25 @@ class DashboardAnalytics:
                 'service_types': top_services,
                 'monthly_expenses_data': monthly_expenses_data,
                 'monthly_business_growth': monthly_business_growth,
-                'shop_a_stats': shop_a_data['stats'],
-                'shop_b_stats': shop_b_data['stats'],
-                'shop_a_orders': shop_a_data['orders_by_payment_status'],
-                'shop_b_orders': shop_b_data['orders_by_payment_status'],
-                'orders_by_payment_status': self._get_orders_by_payment_status(base_qs),
+                'shop_a_stats': shop_a_stats,
+                'shop_b_stats': shop_b_stats,
+                # Order lists removed as per requirement
                 # Revenue by shop
                 'revenue_by_shop': [
-                    {'shop': 'Shop A', 'total_revenue': float(shop_a_data['stats'].get('revenue', 0)), 'paid': float(shop_a_data['stats'].get('total_amount_paid', 0)), 'bal': float(shop_a_data['stats'].get('total_balance', 0))},
-                    {'shop': 'Shop B', 'total_revenue': float(shop_b_data['stats'].get('revenue', 0)), 'paid': float(shop_b_data['stats'].get('total_amount_paid', 0)), 'bal': float(shop_b_data['stats'].get('total_balance', 0))}
+                    {'shop': 'Shop A', 'total_revenue': float(shop_a_stats.get('revenue', 0)), 'paid': float(shop_a_stats.get('total_amount_paid', 0)), 'bal': float(shop_a_stats.get('total_balance', 0))},
+                    {'shop': 'Shop B', 'total_revenue': float(shop_b_stats.get('revenue', 0)), 'paid': float(shop_b_stats.get('total_amount_paid', 0)), 'bal': float(shop_b_stats.get('total_balance', 0))}
                 ],
                 # Balance by shop
                 'balance_by_shop': [
-                    {'shop': 'Shop A', 'total_balance': float(shop_a_data['stats'].get('total_balance', 0))},
-                    {'shop': 'Shop B', 'total_balance': float(shop_b_data['stats'].get('total_balance', 0))}
+                    {'shop': 'Shop A', 'total_balance': float(shop_a_stats.get('total_balance', 0))},
+                    {'shop': 'Shop B', 'total_balance': float(shop_b_stats.get('total_balance', 0))}
                 ]
             }
             
             # Convert all Decimal values to float for JSON serialization
             self._convert_decimals_to_floats(result)
             
-            logger.info(f"=== DASHBOARD DATA COMPLETE ===")
-            logger.info(f"Total Orders: {order_stats['total_orders']}")
-            logger.info(f"Total Revenue: {total_revenue}")
-            logger.info(f"Net Profit: {business_growth['net_profit']}")
-            
+           
             return result
             
         except Exception as e:

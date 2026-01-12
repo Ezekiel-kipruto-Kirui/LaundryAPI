@@ -104,9 +104,9 @@ class DashboardSerializer(serializers.Serializer):
     shop_b_stats = ShopStatsSerializer(required=False)
     
     # We use DictField for orders because they are grouped by string keys ('pending', etc)
-    shop_a_orders = serializers.DictField(child=serializers.ListField(), required=False)
-    shop_b_orders = serializers.DictField(child=serializers.ListField(), required=False)
-    orders_by_payment_status = serializers.DictField(child=serializers.ListField(), required=False)
+    # shop_a_orders = serializers.DictField(child=serializers.ListField(), required=False)
+    # shop_b_orders = serializers.DictField(child=serializers.ListField(), required=False)
+    # orders_by_payment_status = serializers.DictField(child=serializers.ListField(), required=False)
 
     def _convert_decimal(self, data):
         """Recursively convert Decimals to Floats in a data structure."""

@@ -118,15 +118,15 @@ class Order(models.Model):
 
     PAYMENT_TYPE_CHOICES = (
         ('cash', 'Cash'),
-        ('mpesa', 'M-Pesa'),
+        ('M-Pesa', 'M-Pesa'),
         ('card', 'Credit/Debit Card'),
         ('bank_transfer', 'Bank Transfer'),
         ('other', 'Other'),
         ('None', 'None'),
-        
+
     )
     payment_type = models.CharField(max_length=50, choices=PAYMENT_TYPE_CHOICES,
-                                    default='pending_payment', blank=True, db_index=True)
+                                    default='None', blank=True, db_index=True)
 
     PAYMENT_STATUS_CHOICES = (
         ('pending', 'pending'),

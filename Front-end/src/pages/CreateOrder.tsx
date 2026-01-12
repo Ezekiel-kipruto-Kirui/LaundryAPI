@@ -39,8 +39,8 @@ const CONDITIONS = [
 
 const PAYMENT_TYPES = [
   { value: 'cash', label: 'Cash' },
-  { value: 'card', label: 'Card' },
-  { value: 'mPesa', label: 'M-Pesa' },
+  { value: 'card', label: 'Card' }, 
+  { value: 'M-Pesa', label: 'M-Pesa' },
   { value: 'bank_transfer', label: 'Bank Transfer' },
   { value: 'other', label: 'Other' },
   { value: 'None', label: 'None' }
@@ -593,8 +593,8 @@ export default function CreateOrder() {
                     </div>
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
                       <div><Label className="block text-sm font-medium text-gray-700 mb-1">Item Names</Label><Input value={it.itemname} onChange={(e) => updateItem(index, 'itemname', e.target.value)} placeholder="e.g. Shirts" /></div>
-                      <div><Label className="block text-sm font-medium text-gray-700 mb-1">Quantity</Label><Input type="number" min="1" value={it.quantity} onChange={(e) => updateItem(index, 'quantity', Number(e.target.value) || 1)} /></div>
-                      <div><Label className="block text-sm font-medium text-gray-700 mb-1">Unit Price</Label><Input type="number" step="0.01" min="0" value={it.unit_price} onChange={(e) => updateItem(index, 'unit_price', Number(e.target.value) || 0)} /></div>
+                      <div><Label className="block text-sm font-medium text-gray-700 mb-1">Quantity</Label><Input type="text" min="1" value={it.quantity} onChange={(e) => updateItem(index, 'quantity', Number(e.target.value) || 1)} /></div>
+                      <div><Label className="block text-sm font-medium text-gray-700 mb-1">Unit Price</Label><Input type="test" step="0.01" min="0" value={it.unit_price} onChange={(e) => updateItem(index, 'unit_price', Number(e.target.value) || 0)} /></div>
                     </div>
                   </div>
                 ))}

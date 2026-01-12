@@ -24,7 +24,7 @@ import type { Chart as ChartType } from 'chart.js/auto';
 
 // --- Types & Interfaces ---
 
-// Matching structure returned by our Backend DashboardAnalytics
+// Updated to match the actual API response structure
 interface DashboardResponse {
   success?: boolean;
   data?: {
@@ -47,14 +47,14 @@ interface DashboardResponse {
       total_complete_amount: number;
       total_collected_amount: number;
       total_balance_amount: number;
-      overdue_payments?: number;
-      total_overdue_amount?: number;
+      overdue_payments: number;
+      total_overdue_amount: number;
     };
     payment_type_stats?: {
       [key: string]: {
-        count: number;
-        total_amount: number;
-        amount_collected: number;
+        count: string;  // Note: API returns strings for these
+        total_amount: string;
+        amount_collected: string;
       }
     };
     expense_stats?: {
@@ -76,16 +76,16 @@ interface DashboardResponse {
       total_expenses: number;
       net_profit: number;
     };
-    revenue_by_shop?: Array<{ shop: string; total_revenue: number; paid: number; bal: number }>;
-    balance_by_shop?: Array<{ shop: string; total_balance: number }>;
-    common_customers?: Array<{ customer__name: string; customer__phone: string; count: number; spent: number }>;
-    top_services?: Array<{ servicetype: string; count: number }>;
-    common_items?: Array<{ itemname: string; count: number }>;
+    revenue_by_shop?: Array<{ shop: string; total_revenue: string; paid: string; bal: string }>;
+    balance_by_shop?: Array<{ shop: string; total_balance: string }>;
+    common_customers?: Array<{ customer__name: string; customer__phone: string; count: string; spent: string }>;
+    top_services?: Array<{ servicetype: string; count: string }>;
+    common_items?: Array<{ itemname: string; count: string }>;
     monthly_business_growth?: Array<{
       label: string;
       data: number[];
       borderColor: string;
-      fill?: boolean;
+      fill?: string | boolean;
       borderDash?: number[];
     }>;
     shop_a_stats?: {
@@ -120,24 +120,15 @@ interface DashboardResponse {
       total_expenses: number;
       net_profit: number;
     };
-    shop_a_orders?: {
-      pending: any[];
-      partial: any[];
-      complete: any[];
-      overdue: any[];
-    };
-    shop_b_orders?: {
-      pending: any[];
-      partial: any[];
-      complete: any[];
-      overdue: any[];
-    };
-    orders_by_payment_status?: {
-      pending: any[];
-      partial: any[];
-      complete: any[];
-      overdue: any[];
-    };
+    payment_methods?: Array<{
+      payment_type: string;
+      count: string;
+      total: string;
+    }>;
+    service_types?: Array<{
+      servicetype: string;
+      count: string;
+    }>;
   };
   message?: string;
   error?: string;
@@ -202,6 +193,17 @@ const STYLE_MAPS = {
   }
 };
 
+// Helper function to parse string values from API
+const parseNumber = (value: string | number | undefined | null): number => {
+  if (value === undefined || value === null) return 0;
+  if (typeof value === 'number') return value;
+  if (typeof value === 'string') {
+    const parsed = parseFloat(value);
+    return isNaN(parsed) ? 0 : parsed;
+  }
+  return 0;
+};
+
 const formatCurrency = (amount: number) => new Intl.NumberFormat('en-KE', { minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(amount || 0);
 const formatCurrencyFull = (amount: number) => new Intl.NumberFormat('en-KE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount || 0);
 const formatNumber = (num: number) => new Intl.NumberFormat('en-US').format(num || 0);
@@ -217,7 +219,7 @@ const CHART_COMMON_OPTIONS = {
       borderWidth: 1,
       titleColor: '#1E293B',
       bodyColor: '#1E293B',
-      callbacks: { 
+      callbacks: {
         label: (ctx: any) => {
           const value = ctx.raw || 0;
           return `Ksh ${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -227,15 +229,15 @@ const CHART_COMMON_OPTIONS = {
   }
 };
 
-// Payment types in the correct order
-const PAYMENT_TYPES = ['cash', 'mpesa', 'card', 'bank_transfer', 'other', 'None'];
+// Payment types in the correct order based on API response
+const PAYMENT_TYPES = ['cash', 'mpesa', 'other', 'bank_transfer', 'None'];
 
 // --- Main Component ---
 
 export default function PerformanceReport() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  
+
   // State to hold full dashboard response
   const [dashboardData, setDashboardData] = useState<DashboardResponse | null>(null);
 
@@ -268,21 +270,22 @@ export default function PerformanceReport() {
       const params = new URLSearchParams();
       if (startDate) params.append('start_date', startDate);
       if (endDate) params.append('end_date', endDate);
-      
+
       const queryString = params.toString();
-      const url = `${API_BASE_URL}/Report/${queryString ? '?' + queryString : ''}`;
+      // CORRECTED ENDPOINT URL
+      const url = `${API_BASE_URL}/Report/dashboard/${queryString ? '?' + queryString : ''}`;
 
       console.log('[Dashboard] Fetching from:', url);
-      
+
       const response = await fetch(url, { headers });
-      
+
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: Failed to fetch dashboard data`);
       }
 
       const json: DashboardResponse = await response.json();
       console.log('[Dashboard] Response:', json);
-      
+
       // Backend wraps response with success/data/message
       if (json.success && json.data) {
         setDashboardData(json);
@@ -308,30 +311,30 @@ export default function PerformanceReport() {
   }, [fetchData]);
 
   // --- Data Processing ---
-  
+
   const processedData = useMemo(() => {
     if (!dashboardData?.data) return null;
 
     const data = dashboardData.data;
     const { order_stats, payment_stats, expense_stats, hotel_stats, business_growth, payment_type_stats } = data;
 
-    // Basic metrics with safe access
-    const totalBusinessRevenue = business_growth?.total_revenue || 0;
-    const totalNetProfit = business_growth?.net_profit || 0;
-    const totalBusinessExpenses = business_growth?.total_expenses || 0;
-    
-    const hotelRevenue = hotel_stats?.total_revenue || 0;
-    const laundryRevenue = order_stats?.total_revenue || 0;
-    const hotelTotalOrders = hotel_stats?.total_orders || 0;
-    const hotelNetProfit = hotel_stats?.net_profit || 0;
-    const hotelTotalExpenses = hotel_stats?.total_expenses || 0;
+    // Basic metrics with safe access using parseNumber helper
+    const totalBusinessRevenue = parseNumber(business_growth?.total_revenue || 0);
+    const totalNetProfit = parseNumber(business_growth?.net_profit || 0);
+    const totalBusinessExpenses = parseNumber(business_growth?.total_expenses || 0);
+
+    const hotelRevenue = parseNumber(hotel_stats?.total_revenue || 0);
+    const laundryRevenue = parseNumber(order_stats?.total_revenue || 0);
+    const hotelTotalOrders = parseNumber(hotel_stats?.total_orders || 0);
+    const hotelNetProfit = parseNumber(hotel_stats?.net_profit || 0);
+    const hotelTotalExpenses = parseNumber(hotel_stats?.total_expenses || 0);
 
     // Payment methods from payment_type_stats
     const paymentMethods = PAYMENT_TYPES.map(type => ({
       name: type === 'None' ? 'Not Paid' : type.charAt(0).toUpperCase() + type.slice(1),
-      amount: payment_type_stats?.[type]?.amount_collected || 0,
-      count: payment_type_stats?.[type]?.count || 0,
-      totalAmount: payment_type_stats?.[type]?.total_amount || 0
+      amount: parseNumber(payment_type_stats?.[type]?.amount_collected) || 0,
+      count: parseNumber(payment_type_stats?.[type]?.count) || 0,
+      totalAmount: parseNumber(payment_type_stats?.[type]?.total_amount) || 0
     })).filter(p => p.count > 0); // Only show payment methods with data
 
     // Shop metrics
@@ -343,38 +346,36 @@ export default function PerformanceReport() {
     const revenueComparisonData = [laundryRevenue, hotelRevenue];
     const revenueComparisonColors = [COLOR_PALETTE.blue, COLOR_PALETTE.red];
 
-    // Revenue by Shop (Pie Chart)
+    // Revenue by Shop (Pie Chart) - using parseNumber for string values
     const pieChartLabels = (data.revenue_by_shop || []).map(s => s.shop);
-    const pieChartValues = (data.revenue_by_shop || []).map(s => s.total_revenue);
+    const pieChartValues = (data.revenue_by_shop || []).map(s => parseNumber(s.total_revenue));
 
     // Services & Items
     const servicesLabels = (data.top_services || []).map(s => s.servicetype);
-    const servicesCounts = (data.top_services || []).map(s => s.count);
-    
+    const servicesCounts = (data.top_services || []).map(s => parseNumber(s.count));
+
     const itemLabels = (data.common_items || []).map(i => i.itemname);
-    const itemCounts = (data.common_items || []).map(i => i.count);
+    const itemCounts = (data.common_items || []).map(i => parseNumber(i.count));
 
     // Top Customers
     const topCustomersList = (data.common_customers || []).map(c => ({
       name: c.customer__name || 'Unknown Customer',
       phone: c.customer__phone || '',
-      orders: c.count || 0,
-      spent: c.spent || 0
+      orders: parseNumber(c.count) || 0,
+      spent: parseNumber(c.spent) || 0
     }));
 
-    // Payment type chart data
-    const paymentTypeChartLabels = PAYMENT_TYPES.map(type => 
-      type === 'None' ? 'Not Paid' : type.charAt(0).toUpperCase() + type.slice(1)
+    // Payment type chart data from payment_methods array
+    const paymentMethodsData = data.payment_methods || [];
+    const paymentTypeChartLabels = paymentMethodsData.map(item =>
+      item.payment_type === 'None' ? 'Not Paid' : item.payment_type.charAt(0).toUpperCase() + item.payment_type.slice(1)
     );
-    const paymentTypeChartData = PAYMENT_TYPES.map(type => 
-      payment_type_stats?.[type]?.amount_collected || 0
-    );
+    const paymentTypeChartData = paymentMethodsData.map(item => parseNumber(item.total));
     const paymentTypeChartColors = [
       COLOR_PALETTE.green,   // cash
       COLOR_PALETTE.blue,    // mpesa
-      COLOR_PALETTE.purple,  // card
-      COLOR_PALETTE.teal,    // bank transfer
       COLOR_PALETTE.orangeYellow, // other
+      COLOR_PALETTE.teal,    // bank transfer
       COLOR_PALETTE.danger   // none
     ];
 
@@ -383,37 +384,37 @@ export default function PerformanceReport() {
       totalBusinessRevenue,
       totalNetProfit,
       totalBusinessExpenses,
-      
+
       // Hotel specific
       hotelRevenue,
       hotelTotalOrders,
       hotelNetProfit,
       hotelTotalExpenses,
-      
+
       // Laundry specific
       laundryRevenue,
-      totalBalanceAmount: order_stats?.total_balance || 0,
-      
+      totalBalanceAmount: parseNumber(order_stats?.total_balance) || 0,
+
       // Payment stats
-      pendingPayments: payment_stats?.pending_payments || 0,
-      totalPendingAmount: payment_stats?.total_pending_amount || 0,
-      partialPayments: payment_stats?.partial_payments || 0,
-      totalPartialAmount: payment_stats?.total_partial_amount || 0,
-      completePayments: payment_stats?.complete_payments || 0,
-      totalCompleteAmount: payment_stats?.total_complete_amount || 0,
-      overduePayments: payment_stats?.overdue_payments || 0,
-      totalOverdueAmount: payment_stats?.total_overdue_amount || 0,
-      totalCollectedAmount: payment_stats?.total_collected_amount || 0,
-      
+      pendingPayments: parseNumber(payment_stats?.pending_payments) || 0,
+      totalPendingAmount: parseNumber(payment_stats?.total_pending_amount) || 0,
+      partialPayments: parseNumber(payment_stats?.partial_payments) || 0,
+      totalPartialAmount: parseNumber(payment_stats?.total_partial_amount) || 0,
+      completePayments: parseNumber(payment_stats?.complete_payments) || 0,
+      totalCompleteAmount: parseNumber(payment_stats?.total_complete_amount) || 0,
+      overduePayments: parseNumber(payment_stats?.overdue_payments) || 0,
+      totalOverdueAmount: parseNumber(payment_stats?.total_overdue_amount) || 0,
+      totalCollectedAmount: parseNumber(payment_stats?.total_collected_amount) || 0,
+
       // Expense stats
-      totalExpenses: expense_stats?.total_expenses || 0,
-      shopAExpenses: expense_stats?.shop_a_expenses || 0,
-      shopBExpenses: expense_stats?.shop_b_expenses || 0,
-      
+      totalExpenses: parseNumber(expense_stats?.total_expenses) || 0,
+      shopAExpenses: parseNumber(expense_stats?.shop_a_expenses) || 0,
+      shopBExpenses: parseNumber(expense_stats?.shop_b_expenses) || 0,
+
       // Shop performance
       shopA,
       shopB,
-      
+
       // Chart data
       revenueComparisonLabels,
       revenueComparisonData,
@@ -427,12 +428,12 @@ export default function PerformanceReport() {
       paymentTypeChartLabels,
       paymentTypeChartData,
       paymentTypeChartColors,
-      
+
       // Lists
       commonCustomers: topCustomersList,
       paymentMethods,
       monthlyBusinessGrowth: data.monthly_business_growth || [],
-      
+
       // Raw data for debugging
       rawData: data
     };
@@ -474,7 +475,7 @@ export default function PerformanceReport() {
             cutout: '70%',
             plugins: {
               ...CHART_COMMON_OPTIONS.plugins,
-              legend: { 
+              legend: {
                 position: 'bottom',
                 labels: {
                   padding: 20,
@@ -517,17 +518,17 @@ export default function PerformanceReport() {
       }
     }
 
-    // 3. Monthly Trend (Line Chart)
+    // 3. Monthly Trend (Line Chart) - Show if data exists
     if (trendChartRef.current && processedData.monthlyBusinessGrowth.length > 0) {
       destroyChart(trendChartRef);
       const ctx = trendChartRef.current.getContext('2d');
       if (ctx) {
         const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-        
-        // Ensure all datasets have 12 data points
+
+        // Parse string data to numbers
         const datasets = processedData.monthlyBusinessGrowth.map(dataset => ({
           ...dataset,
-          data: dataset.data.length === 12 ? dataset.data : [...dataset.data, ...Array(12 - dataset.data.length).fill(0)],
+          data: dataset.data.map((d: any) => parseNumber(d)),
           borderWidth: 2,
           tension: 0.4,
           pointRadius: 0,
@@ -543,14 +544,14 @@ export default function PerformanceReport() {
           options: {
             ...CHART_COMMON_OPTIONS,
             scales: {
-              x: { 
-                grid: { display: false }, 
-                ticks: { color: '#1E293B' } 
+              x: {
+                grid: { display: false },
+                ticks: { color: '#1E293B' }
               },
-              y: { 
-                ticks: { 
+              y: {
+                ticks: {
                   color: '#1E293B',
-                  callback: function(value) {
+                  callback: function (value) {
                     return 'Ksh ' + formatNumber(Number(value));
                   }
                 },
@@ -583,7 +584,7 @@ export default function PerformanceReport() {
           options: {
             ...CHART_COMMON_OPTIONS,
             indexAxis: 'y',
-            plugins: { 
+            plugins: {
               legend: { display: false },
               tooltip: {
                 callbacks: {
@@ -592,13 +593,13 @@ export default function PerformanceReport() {
               }
             },
             scales: {
-              x: { 
+              x: {
                 display: false,
                 grid: { display: false }
               },
-              y: { 
+              y: {
                 grid: { display: false },
-                ticks: { 
+                ticks: {
                   color: '#1E293B',
                   font: { size: 11 }
                 }
@@ -629,7 +630,7 @@ export default function PerformanceReport() {
           options: {
             ...CHART_COMMON_OPTIONS,
             indexAxis: 'y',
-            plugins: { 
+            plugins: {
               legend: { display: false },
               tooltip: {
                 callbacks: {
@@ -638,13 +639,13 @@ export default function PerformanceReport() {
               }
             },
             scales: {
-              x: { 
+              x: {
                 display: false,
                 grid: { display: false }
               },
-              y: { 
+              y: {
                 grid: { display: false },
-                ticks: { 
+                ticks: {
                   color: '#1E293B',
                   font: { size: 11 }
                 }
@@ -657,10 +658,10 @@ export default function PerformanceReport() {
     }
 
     // 6. Payment Type Chart (Doughnut)
-    if (paymentTypeChartRef.current) {
+    if (paymentTypeChartRef.current && processedData.paymentTypeChartData.some(v => v > 0)) {
       destroyChart(paymentTypeChartRef);
       const ctx = paymentTypeChartRef.current.getContext('2d');
-      if (ctx && processedData.paymentTypeChartData.some(v => v > 0)) {
+      if (ctx) {
         const chart = new Chart(ctx, {
           type: 'doughnut',
           data: {
@@ -677,7 +678,7 @@ export default function PerformanceReport() {
             cutout: '60%',
             plugins: {
               ...CHART_COMMON_OPTIONS.plugins,
-              legend: { 
+              legend: {
                 position: 'right',
                 labels: {
                   padding: 15,
@@ -724,6 +725,45 @@ export default function PerformanceReport() {
     );
   }
 
+  if (error) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 p-4 md:p-6 flex items-center justify-center">
+        <div className="text-center max-w-md">
+          <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+            <AlertCircle className="h-8 w-8 text-red-600" />
+          </div>
+          <h2 className="text-xl font-bold text-gray-900 mb-2">Error Loading Dashboard</h2>
+          <p className="text-gray-600 mb-4">{error}</p>
+          <button
+            onClick={() => fetchData()}
+            className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-medium transition flex items-center justify-center gap-2 mx-auto"
+          >
+            <RefreshCw className="h-5 w-5" /> Try Again
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!processedData) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 p-4 md:p-6 flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+            <AlertCircle className="h-8 w-8 text-gray-400" />
+          </div>
+          <h2 className="text-xl font-bold text-gray-900 mb-2">No Data Available</h2>
+          <p className="text-gray-600">No dashboard data could be loaded</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Calculate totals
+  const totalOrders = parseNumber(processedData.shopA?.total_orders || 0) +
+    parseNumber(processedData.shopB?.total_orders || 0) +
+    processedData.hotelTotalOrders;
+
   return (
     <div className="min-h-screen p-4 md:p-6 bg-gradient-to-br from-gray-50 to-gray-100">
       {/* Header */}
@@ -733,7 +773,7 @@ export default function PerformanceReport() {
           <div>
             <h1 className="text-2xl md:text-3xl font-bold text-gray-900">Business Performance Dashboard</h1>
             <p className="text-gray-500 text-sm mt-1">
-              {startDate || endDate 
+              {startDate || endDate
                 ? `Date Range: ${startDate || 'Start'} to ${endDate || 'End'}`
                 : 'Real-time business analytics'}
             </p>
@@ -753,33 +793,33 @@ export default function PerformanceReport() {
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">Start Date</label>
-            <input 
-              type="date" 
-              value={startDate} 
-              onChange={handleStartDateChange} 
-              max={today} 
+            <input
+              type="date"
+              value={startDate}
+              onChange={handleStartDateChange}
+              max={today}
               className="w-full bg-gray-50 border border-gray-200 rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">End Date</label>
-            <input 
-              type="date" 
-              value={endDate} 
-              onChange={handleEndDateChange} 
-              max={today} 
+            <input
+              type="date"
+              value={endDate}
+              onChange={handleEndDateChange}
+              max={today}
               className="w-full bg-gray-50 border border-gray-200 rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
           <div className="flex gap-3 md:col-span-2">
-            <button 
-              onClick={() => fetchData()} 
+            <button
+              onClick={() => fetchData()}
               className="flex-1 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-lg font-medium transition flex items-center justify-center gap-2"
             >
               <RefreshCw className="h-5 w-5" /> Apply Filters
             </button>
-            <button 
-              onClick={handleReset} 
+            <button
+              onClick={handleReset}
               className="flex-1 bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 px-4 py-2.5 rounded-lg font-medium transition flex items-center justify-center gap-2"
             >
               <Filter className="h-5 w-5" /> Clear
@@ -790,33 +830,33 @@ export default function PerformanceReport() {
 
       {/* Business Overview Stats */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-5 mb-8">
-        <StatCard 
-          icon={<Wallet className="h-5 w-5 text-blue-600" />} 
-          bg="blue" 
-          title="Total Revenue" 
-          value={`Ksh ${formatCurrencyFull(processedData?.totalBusinessRevenue || 0)}`} 
-          subtitle="Combined earnings" 
+        <StatCard
+          icon={<Wallet className="h-5 w-5 text-blue-600" />}
+          bg="blue"
+          title="Total Revenue"
+          value={`Ksh ${formatCurrencyFull(processedData.totalBusinessRevenue)}`}
+          subtitle="Combined earnings"
         />
-        <StatCard 
-          icon={<ChartLine className="h-5 w-5 text-green-600" />} 
-          bg="green" 
-          title="Net Profit" 
-          value={`Ksh ${formatCurrencyFull(processedData?.totalNetProfit || 0)}`} 
-          subtitle="After expenses" 
+        <StatCard
+          icon={<ChartLine className="h-5 w-5 text-green-600" />}
+          bg="green"
+          title="Net Profit"
+          value={`Ksh ${formatCurrencyFull(processedData.totalNetProfit)}`}
+          subtitle="After expenses"
         />
-        <StatCard 
-          icon={<Wallet className="h-5 w-5 text-red-600" />} 
-          bg="red" 
-          title="Total Expenses" 
-          value={`Ksh ${formatCurrencyFull(processedData?.totalBusinessExpenses || 0)}`} 
-          subtitle="Combined expenses" 
+        <StatCard
+          icon={<Wallet className="h-5 w-5 text-red-600" />}
+          bg="red"
+          title="Total Expenses"
+          value={`Ksh ${formatCurrencyFull(processedData.totalBusinessExpenses)}`}
+          subtitle="Combined expenses"
         />
-        <StatCard 
-          icon={<ShoppingBag className="h-5 w-5 text-purple-600" />} 
-          bg="purple" 
-          title="Total Orders" 
-          value={formatNumber((processedData?.shopA?.total_orders || 0) + (processedData?.shopB?.total_orders || 0) + (processedData?.hotelTotalOrders || 0))} 
-          subtitle="All businesses" 
+        <StatCard
+          icon={<ShoppingBag className="h-5 w-5 text-purple-600" />}
+          bg="purple"
+          title="Total Orders"
+          value={formatNumber(totalOrders)}
+          subtitle="All businesses"
         />
       </div>
 
@@ -826,7 +866,7 @@ export default function PerformanceReport() {
           <div className="flex justify-between items-center mb-6">
             <h2 className="text-lg font-bold text-gray-900">Revenue Comparison</h2>
             <span className="bg-purple-100 text-purple-800 px-3 py-1 rounded-full text-sm font-semibold">
-              Total: Ksh {formatCurrencyFull(processedData?.totalBusinessRevenue || 0)}
+              Total: Ksh {formatCurrencyFull(processedData.totalBusinessRevenue)}
             </span>
           </div>
           <div className="h-64">
@@ -835,16 +875,16 @@ export default function PerformanceReport() {
           <div className="grid grid-cols-2 gap-4 mt-6">
             <div className="text-center p-3 bg-blue-50 rounded-lg">
               <div className="text-sm font-semibold text-blue-700">Laundry Business</div>
-              <div className="text-lg font-bold text-blue-900">Ksh {formatCurrencyFull(processedData?.laundryRevenue || 0)}</div>
+              <div className="text-lg font-bold text-blue-900">Ksh {formatCurrencyFull(processedData.laundryRevenue)}</div>
               <div className="text-xs text-blue-600 mt-1">
-                {formatNumber(processedData?.shopA?.total_orders || 0 + processedData?.shopB?.total_orders || 0)} orders
+                {formatNumber(parseNumber(processedData.shopA?.total_orders || 0) + parseNumber(processedData.shopB?.total_orders || 0))} orders
               </div>
             </div>
             <div className="text-center p-3 bg-red-50 rounded-lg">
               <div className="text-sm font-semibold text-red-700">Hotel Business</div>
-              <div className="text-lg font-bold text-red-900">Ksh {formatCurrencyFull(processedData?.hotelRevenue || 0)}</div>
+              <div className="text-lg font-bold text-red-900">Ksh {formatCurrencyFull(processedData.hotelRevenue)}</div>
               <div className="text-xs text-red-600 mt-1">
-                {formatNumber(processedData?.hotelTotalOrders || 0)} orders
+                {formatNumber(processedData.hotelTotalOrders)} orders
               </div>
             </div>
           </div>
@@ -859,19 +899,19 @@ export default function PerformanceReport() {
             <Utensils className="h-5 w-5 text-orange-500" />
           </div>
           <div className="space-y-4">
-            <MetricBox 
-              label="Revenue" 
-              value={`Ksh ${formatCurrencyFull(processedData?.hotelRevenue || 0)}`} 
-              sub={`${formatNumber(processedData?.hotelTotalOrders || 0)} orders`} 
-              color="red" 
-              icon={<Wallet className="h-5 w-5" />} 
+            <MetricBox
+              label="Revenue"
+              value={`Ksh ${formatCurrencyFull(processedData.hotelRevenue)}`}
+              sub={`${formatNumber(processedData.hotelTotalOrders)} orders`}
+              color="red"
+              icon={<Wallet className="h-5 w-5" />}
             />
-            <MetricBox 
-              label="Orders" 
-              value={formatNumber(processedData?.hotelTotalOrders || 0)} 
-              sub="Total hotel orders" 
-              color="orange" 
-              icon={<ShoppingBag className="h-5 w-5" />} 
+            <MetricBox
+              label="Orders"
+              value={formatNumber(processedData.hotelTotalOrders)}
+              sub="Total hotel orders"
+              color="orange"
+              icon={<ShoppingBag className="h-5 w-5" />}
             />
             <div className="bg-gradient-to-br from-green-50 to-emerald-50 rounded-lg p-4 border border-green-100">
               <div className="flex items-center gap-3 mb-2">
@@ -880,11 +920,11 @@ export default function PerformanceReport() {
               </div>
               <div className="flex gap-4">
                 <div>
-                  <div className="text-lg font-bold text-green-600">Ksh {formatCurrencyFull(processedData?.hotelNetProfit || 0)}</div>
+                  <div className="text-lg font-bold text-green-600">Ksh {formatCurrencyFull(processedData.hotelNetProfit)}</div>
                   <div className="text-xs text-gray-500">Profit</div>
                 </div>
                 <div>
-                  <div className="text-lg font-bold text-blue-600">Ksh {formatCurrencyFull(processedData?.hotelTotalExpenses || 0)}</div>
+                  <div className="text-lg font-bold text-blue-600">Ksh {formatCurrencyFull(processedData.hotelTotalExpenses)}</div>
                   <div className="text-xs text-gray-500">Expenses</div>
                 </div>
               </div>
@@ -909,7 +949,7 @@ export default function PerformanceReport() {
               <div>
                 <h3 className="text-sm font-medium text-gray-500 uppercase tracking-wider">Revenue</h3>
                 <div className="text-xl font-bold text-gray-900">
-                  Ksh {formatCurrencyFull(processedData?.laundryRevenue || 0)}
+                  Ksh {formatCurrencyFull(processedData.laundryRevenue)}
                 </div>
               </div>
             </div>
@@ -929,38 +969,38 @@ export default function PerformanceReport() {
               <div>
                 <h3 className="text-sm font-medium text-gray-500 uppercase tracking-wider">Payments Status</h3>
                 <div className="text-xl font-bold text-gray-900">
-                  Ksh {formatCurrencyFull(processedData?.totalCollectedAmount || 0)}
+                  Ksh {formatCurrencyFull(processedData.totalCollectedAmount)}
                 </div>
                 <div className="text-xs text-gray-500">Collected</div>
               </div>
             </div>
             <div className="space-y-3 mt-4">
-              <PaymentStatusBadge 
-                label="Pending" 
-                count={processedData?.pendingPayments} 
-                amount={processedData?.totalPendingAmount} 
-                status="pending" 
+              <PaymentStatusBadge
+                label="Pending"
+                count={processedData.pendingPayments}
+                amount={processedData.totalPendingAmount}
+                status="pending"
                 icon={<Clock className="h-3 w-3" />}
               />
-              <PaymentStatusBadge 
-                label="Partial" 
-                count={processedData?.partialPayments} 
-                amount={processedData?.totalPartialAmount} 
-                status="partial" 
+              <PaymentStatusBadge
+                label="Partial"
+                count={processedData.partialPayments}
+                amount={processedData.totalPartialAmount}
+                status="partial"
                 icon={<AlertCircle className="h-3 w-3" />}
               />
-              <PaymentStatusBadge 
-                label="Complete" 
-                count={processedData?.completePayments} 
-                amount={processedData?.totalCompleteAmount} 
-                status="complete" 
+              <PaymentStatusBadge
+                label="Complete"
+                count={processedData.completePayments}
+                amount={processedData.totalCompleteAmount}
+                status="complete"
                 icon={<CheckCircle className="h-3 w-3" />}
               />
-              <PaymentStatusBadge 
-                label="Overdue" 
-                count={processedData?.overduePayments} 
-                amount={processedData?.totalOverdueAmount} 
-                status="overdue" 
+              <PaymentStatusBadge
+                label="Overdue"
+                count={processedData.overduePayments}
+                amount={processedData.totalOverdueAmount}
+                status="overdue"
                 icon={<AlertCircle className="h-3 w-3" />}
               />
             </div>
@@ -975,7 +1015,7 @@ export default function PerformanceReport() {
                 <div>
                   <h3 className="text-sm font-medium text-gray-500 uppercase tracking-wider">Expenses</h3>
                   <div className="text-xl font-bold text-gray-900">
-                    Ksh {formatCurrencyFull(processedData?.totalExpenses || 0)}
+                    Ksh {formatCurrencyFull(processedData.totalExpenses)}
                   </div>
                 </div>
               </div>
@@ -983,15 +1023,15 @@ export default function PerformanceReport() {
             <div className="space-y-3">
               <div className="flex justify-between items-center p-2 bg-blue-50 rounded">
                 <span className="text-sm text-blue-700">Shop A</span>
-                <span className="font-bold text-blue-900">Ksh {formatCurrencyFull(processedData?.shopAExpenses || 0)}</span>
+                <span className="font-bold text-blue-900">Ksh {formatCurrencyFull(processedData.shopAExpenses)}</span>
               </div>
               <div className="flex justify-between items-center p-2 bg-orange-50 rounded">
                 <span className="text-sm text-orange-700">Shop B</span>
-                <span className="font-bold text-orange-900">Ksh {formatCurrencyFull(processedData?.shopBExpenses || 0)}</span>
+                <span className="font-bold text-orange-900">Ksh {formatCurrencyFull(processedData.shopBExpenses)}</span>
               </div>
             </div>
             <div className="flex items-center text-sm text-gray-500 mt-4">
-              <ChartLine className="h-3 w-3 text-red-500 mr-1" /> 
+              <ChartLine className="h-3 w-3 text-red-500 mr-1" />
               <span>Operational costs breakdown</span>
             </div>
           </div>
@@ -999,8 +1039,8 @@ export default function PerformanceReport() {
 
         {/* Shop Performance Grid */}
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-          <ShopPerformanceCard title="Shop A" metrics={processedData?.shopA} />
-          <ShopPerformanceCard title="Shop B" metrics={processedData?.shopB} />
+          <ShopPerformanceCard title="Shop A" metrics={processedData.shopA} />
+          <ShopPerformanceCard title="Shop B" metrics={processedData.shopB} />
         </div>
       </div>
 
@@ -1012,7 +1052,7 @@ export default function PerformanceReport() {
             <span className="bg-yellow-100 text-yellow-800 px-3 py-1 rounded-full text-sm font-semibold">Laundry Only</span>
           </div>
           <div className="h-64">
-            {processedData?.pieChartLabels.length > 0 ? (
+            {processedData.pieChartLabels.length > 0 ? (
               <canvas ref={revenueChartRef} />
             ) : (
               <div className="h-full flex items-center justify-center text-gray-500">
@@ -1027,7 +1067,7 @@ export default function PerformanceReport() {
             <span className="bg-pink-100 text-pink-800 px-3 py-1 rounded-full text-sm font-semibold">Monthly</span>
           </div>
           <div className="h-64">
-            {processedData?.monthlyBusinessGrowth?.length > 0 ? (
+            {processedData.monthlyBusinessGrowth?.length > 0 ? (
               <canvas ref={trendChartRef} />
             ) : (
               <div className="h-full flex items-center justify-center text-gray-500">
@@ -1040,33 +1080,33 @@ export default function PerformanceReport() {
 
       {/* Analytics Section */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <ChartCard 
-          title="Top Services" 
-          color="green" 
-          icon={<Bath className="h-5 w-5" />} 
-          canvasRef={servicesChartRef} 
-          dataAvailable={!!processedData?.servicesLabels.length} 
+        <ChartCard
+          title="Top Services"
+          color="green"
+          icon={<Bath className="h-5 w-5" />}
+          canvasRef={servicesChartRef}
+          dataAvailable={processedData.servicesLabels.length > 0}
         />
-        <ChartCard 
-          title="Common Items" 
-          color="yellow" 
-          icon={<Box className="h-5 w-5" />} 
-          canvasRef={productsChartRef} 
-          dataAvailable={!!processedData?.itemLabels.length} 
+        <ChartCard
+          title="Common Items"
+          color="yellow"
+          icon={<Box className="h-5 w-5" />}
+          canvasRef={productsChartRef}
+          dataAvailable={processedData.itemLabels.length > 0}
         />
 
         <div className="bg-white rounded-xl p-6 shadow-sm border-gray-100">
           <div className="flex justify-between items-center mb-6">
             <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
-              <Users className="h-5 w-5 text-yellow-500" /> 
+              <Users className="h-5 w-5 text-yellow-500" />
               Top Customers
             </h2>
             <span className="bg-yellow-100 text-yellow-800 px-2 py-1 rounded text-xs font-semibold">
-              {processedData?.commonCustomers.length || 0} customers
+              {processedData.commonCustomers.length} customers
             </span>
           </div>
           <div className="h-72 overflow-y-auto pr-2">
-            {processedData?.commonCustomers.length ? processedData.commonCustomers.map((c, i) => (
+            {processedData.commonCustomers.length > 0 ? processedData.commonCustomers.map((c, i) => (
               <div key={i} className="flex items-center p-4 bg-gray-50 rounded-lg mb-3 hover:bg-gray-100 transition">
                 <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white font-bold mr-4">
                   {i + 1}
@@ -1091,7 +1131,7 @@ export default function PerformanceReport() {
       </div>
 
       {/* Payment Methods Table */}
-      {processedData?.paymentMethods.length > 0 && (
+      {processedData.paymentMethods.length > 0 && (
         <div className="mt-8 bg-white rounded-xl p-6 shadow-sm border-gray-100">
           <h2 className="text-lg font-bold text-gray-900 mb-6">Payment Methods Summary</h2>
           <div className="overflow-x-auto">
@@ -1108,13 +1148,12 @@ export default function PerformanceReport() {
                 {processedData.paymentMethods.map((method, i) => (
                   <tr key={i} className="border-b border-gray-100 hover:bg-gray-50">
                     <td className="py-3 px-4">
-                      <span className={`px-2 py-1 rounded text-xs font-medium ${
-                        method.name === 'Cash' ? 'bg-green-100 text-green-800' :
-                        method.name === 'Mpesa' ? 'bg-blue-100 text-blue-800' :
-                        method.name === 'Card' ? 'bg-purple-100 text-purple-800' :
-                        method.name === 'Not Paid' ? 'bg-red-100 text-red-800' :
-                        'bg-gray-100 text-gray-800'
-                      }`}>
+                      <span className={`px-2 py-1 rounded text-xs font-medium ${method.name === 'Cash' ? 'bg-green-100 text-green-800' :
+                          method.name === 'Mpesa' ? 'bg-blue-100 text-blue-800' :
+                            method.name === 'Card' ? 'bg-purple-100 text-purple-800' :
+                              method.name === 'Not Paid' ? 'bg-red-100 text-red-800' :
+                                'bg-gray-100 text-gray-800'
+                        }`}>
                         {method.name}
                       </span>
                     </td>
@@ -1168,7 +1207,7 @@ const StatCard = memo(({ icon, bg, title, value, subtitle }: {
       <h3 className="text-sm font-medium text-gray-500 uppercase tracking-wider mb-1">{title}</h3>
       <div className="text-xl font-bold text-gray-900 mb-1">{value}</div>
       <div className="flex items-center text-xs text-gray-500">
-        <TrendingUp className="h-3 w-3 text-green-500 mr-1" /> 
+        <TrendingUp className="h-3 w-3 text-green-500 mr-1" />
         <span>{subtitle}</span>
       </div>
     </div>
@@ -1225,9 +1264,12 @@ const PaymentStatusBadge = memo(({ label, count, amount, status, icon }: {
 
 const ShopPerformanceCard = memo(({ title, metrics }: { title: string, metrics?: any }) => {
   if (!metrics) return null;
-  
-  // Helper to safely access metrics
-  const getMetric = (key: string, defaultVal = 0) => metrics?.[key] !== undefined ? metrics[key] : defaultVal;
+
+  // Helper to safely access and parse metrics
+  const getMetric = (key: string, defaultVal = 0) => {
+    const value = metrics?.[key];
+    return value !== undefined ? parseNumber(value) : defaultVal;
+  };
 
   return (
     <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100 hover:shadow-md transition">
@@ -1241,19 +1283,19 @@ const ShopPerformanceCard = memo(({ title, metrics }: { title: string, metrics?:
         </span>
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <MetricBox 
-          label="Revenue" 
-          value={`Ksh ${formatCurrencyFull(getMetric('revenue'))}`} 
-          sub={`${title} earnings`} 
-          color="blue" 
-          icon={<Wallet className="h-5 w-5 text-gray-600" />} 
+        <MetricBox
+          label="Revenue"
+          value={`Ksh ${formatCurrencyFull(getMetric('revenue'))}`}
+          sub={`${title} earnings`}
+          color="blue"
+          icon={<Wallet className="h-5 w-5 text-gray-600" />}
         />
-        <MetricBox 
-          label="Orders" 
-          value={`${formatNumber(getMetric('total_orders'))}`} 
-          sub="Total orders" 
-          color="blue" 
-          icon={<ShoppingBag className="h-5 w-5 text-blue-600" />} 
+        <MetricBox
+          label="Orders"
+          value={`${formatNumber(getMetric('total_orders'))}`}
+          sub="Total orders"
+          color="blue"
+          icon={<ShoppingBag className="h-5 w-5 text-blue-600" />}
         />
         <div className="bg-gradient-to-br from-purple-50 to-indigo-50 rounded-lg p-4 border border-purple-100">
           <div className="flex items-center gap-3 mb-2">
