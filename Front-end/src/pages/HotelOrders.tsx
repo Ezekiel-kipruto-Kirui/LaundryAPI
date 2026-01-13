@@ -956,13 +956,13 @@ export default function HotelOrderItems() {
       <div className="max-w-full mx-auto">
         {/* Header */}
         <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
-          <button
+         {/*<button
             onClick={() => window.location.href = ROUTES.dashboard} 
             className="inline-flex items-center px-4 py-2 bg-white rounded-lg shadow-sm border border-gray-200 text-gray-700 hover:text-blue-600 hover:shadow-md transition-all"
           >
             <Home className="w-4 h-4 mr-2 text-blue-500" />
             <span className="text-sm font-medium">Dashboard Home</span>
-          </button>
+          </button>*/} 
 
           <div className="flex flex-col sm:flex-row gap-2 sm:gap-3 w-full lg:w-auto">
             <div className="bg-white p-2 sm:p-3 rounded-lg border border-gray-200 shadow-sm">
