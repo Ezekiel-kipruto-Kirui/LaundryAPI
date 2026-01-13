@@ -209,49 +209,6 @@ class PaymentViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
 
 
-@csrf_exempt
-@api_view(['GET'])
-@permission_classes([AllowAny])
-def by_phone_view(request):
-    """Search customer by phone number (exact or normalized match)"""
-    phone = request.query_params.get('phone', '')
-    if not phone:
-        return Response({"error": "Phone parameter required"}, status=status.HTTP_400_BAD_REQUEST)
-    
-    # Normalize the input phone for comparison
-    import re
-    cleaned = re.sub(r'\D', '', phone)
-    
-    # Try different formats
-    if cleaned.startswith('254') and len(cleaned) == 12:
-        search_phones = [f'+{cleaned}', cleaned]
-    elif cleaned.startswith('0') and len(cleaned) == 10:
-        normalized = '254' + cleaned[1:]
-        search_phones = [f'+{normalized}', normalized]
-    elif cleaned.startswith('7') and len(cleaned) == 9:
-        normalized = '254' + cleaned
-        search_phones = [f'+{normalized}', normalized]
-    else:
-        search_phones = [phone, f'+{phone}']
-    
-    # Search for customer with any matching phone format
-    customer = None
-    for search_phone in search_phones:
-        try:
-            customer = Customer.objects.filter(phone=search_phone).first()
-            if customer:
-                break
-            if not search_phone.startswith('+'):
-                customer = Customer.objects.filter(phone=f'+{search_phone}').first()
-                if customer:
-                    break
-        except Exception:
-            continue
-    
-    if customer:
-        serializer = CustomerSerializer(customer)
-        return Response(serializer.data)
-    return Response({"error": "Customer not found"}, status=status.HTTP_404_NOT_FOUND)
 
 
 @csrf_exempt

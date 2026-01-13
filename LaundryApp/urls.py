@@ -9,7 +9,6 @@ from .views import (
     PaymentViewSet,
     UserProfileViewSet,
     sendsms_view,
-    by_phone_view,
 )
 
 router = DefaultRouter()
@@ -23,6 +22,5 @@ router.register(r'payments', PaymentViewSet, basename='payments')
 
 urlpatterns = [
     path('', include(router.urls)),
-    path('customers/by_phone/', by_phone_view),
     path('send-sms/', sendsms_view),
 ]

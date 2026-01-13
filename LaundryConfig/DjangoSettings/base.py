@@ -67,32 +67,11 @@ INSTALLED_APPS = [
     'HotelApp.apps.HotelappConfig',
 ]
 
-REST_FRAMEWORK = {
-    'DEFAULT_AUTHENTICATION_CLASSES': [
-        'LaundryConfig.authentication.CustomJWTAuthentication',
-        'rest_framework.authentication.SessionAuthentication',
-        
-    ],
-    'DEFAULT_PERMISSION_CLASSES': [
-        'rest_framework.permissions.IsAuthenticated',
-    ],
-    'DEFAULT_PARSER_CLASSES': [
-        'rest_framework.parsers.JSONParser',
-        'rest_framework.parsers.FormParser',
-        'rest_framework.parsers.MultiPartParser',
-    ],
-    "DEFAULT_FILTER_BACKENDS": [
-        "django_filters.rest_framework.DjangoFilterBackend",
-        "rest_framework.filters.SearchFilter",
-        "rest_framework.filters.OrderingFilter",
-    ],
-}
-
-
 MIDDLEWARE = [
 
-    
-    
+
+
+
     'django.middleware.security.SecurityMiddleware',
     'corsheaders.middleware.CorsMiddleware',
     'whitenoise.middleware.WhiteNoiseMiddleware',
@@ -134,19 +113,13 @@ SIMPLE_JWT = {
     'ROTATE_REFRESH_TOKENS': True,
     'BLACKLIST_AFTER_ROTATION': True,
     'UPDATE_LAST_LOGIN': True,  # Important for tracking last login
-    
+
     'ALGORITHM': 'HS256',
     'SIGNING_KEY': SECRET_KEY,
     'VERIFYING_KEY': None,
     'AUDIENCE': None,
     'ISSUER': None,
 
-    'DEFAULT_PAGINATION_CLASS': 'LaundryApp.pagination.CustomPageNumberPagination',
-    'PAGE_SIZE': 10,
-    'PAGE_SIZE_QUERY_PARAM': 'page_size',  # allow ?page_size=N
-    'MAX_PAGE_SIZE': 50,                  # optional limit
-
-    
     'AUTH_HEADER_TYPES': ('Bearer',),
     'USER_ID_FIELD': 'id',
     'USER_ID_CLAIM': 'user_id',
@@ -257,7 +230,7 @@ REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
         'rest_framework_simplejwt.authentication.JWTAuthentication',
         'rest_framework.authentication.SessionAuthentication',
-        
+
     ],
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.IsAuthenticated',
@@ -267,21 +240,19 @@ REST_FRAMEWORK = {
         'rest_framework.parsers.FormParser',
         'rest_framework.parsers.MultiPartParser',
     ],
+    "DEFAULT_FILTER_BACKENDS": [
+        "django_filters.rest_framework.DjangoFilterBackend",
+        "rest_framework.filters.SearchFilter",
+        "rest_framework.filters.OrderingFilter",
+    ],
+    'DEFAULT_PAGINATION_CLASS': 'LaundryApp.pagination.CustomPageNumberPagination',
+    'PAGE_SIZE': 10,
+    'PAGE_SIZE_QUERY_PARAM': 'page_size',
+    'MAX_PAGE_SIZE': 50,
 }
 
 # Disable APPEND_SLASH to prevent issues with API endpoints
 APPEND_SLASH = False
 
-# CSRF settings
-# CSRF_TRUSTED_ORIGINS = [
-#     'http://localhost:8080',
-#     'http://127.0.0.1:8080',
-#     "http://localhost:5173"
-# ]
-# CORS_ALLOWED_ORIGINS = [
-#     "https://cleanpage.shop",
-#     "https://clean-page-laundry:10000",  # Vite local dev (optional)
-#     "http://localhost:5173",
-# ]
 
 

@@ -449,12 +449,6 @@ export default function CreateOrder() {
     setError(null);
   }, []);
 
-  const getTomorrowDate = () => {
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    return tomorrow.toISOString().split('T')[0];
-  };
-
   return (
     <div className="bg-gray-50 min-h-screen p-4 sm:p-6">
       <div className="max-w-4xl mx-auto bg-white/90 backdrop-blur-xl rounded-2xl shadow-lg p-4 sm:p-6 lg:p-8 border border-gray-100 mt-4 sm:mt-6 lg:mt-10">
@@ -546,7 +540,8 @@ export default function CreateOrder() {
                 </div>
                 <div>
                   <Label className="block text-sm font-medium text-gray-700">Delivery/Picked Date <span className="text-red-500">*</span></Label>
-                  <Input type="date" value={deliveryDate} onChange={(e) => setDeliveryDate(e.target.value)} min={getTomorrowDate()} required className="mt-1 w-full" />
+                  {/* Removed min={getTomorrowDate()} to allow past dates */}
+                  <Input type="date" value={deliveryDate} onChange={(e) => setDeliveryDate(e.target.value)} required className="mt-1 w-full" />
                 </div>
               </div>
               <div>
@@ -621,15 +616,12 @@ export default function CreateOrder() {
                   <Label className="block text-sm font-medium text-gray-700">Payment Type</Label>
                   <Select value={paymentType} onValueChange={setPaymentType}><SelectTrigger className="mt-1 w-full"><SelectValue placeholder="Type" /></SelectTrigger><SelectContent>{PAYMENT_TYPES.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}</SelectContent></Select>
                 </div>
-                <div>
-                  <Label className="block text-sm font-medium text-gray-700">Status</Label>
-                  <Select value={paymentStatus} onValueChange={setPaymentStatus}><SelectTrigger className="mt-1 w-full"><SelectValue placeholder="Status" /></SelectTrigger><SelectContent>{PAYMENT_STATUSES.map(s => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}</SelectContent></Select>
-                </div>
-              </div>
-              <div>
+                 <div>
                 <Label className="block text-sm font-medium text-gray-700">Amount Paid (KES)</Label>
                 <Input type="number" step="0.01" min="0" max={totalPrice} value={amountPaid} onChange={(e) => { const val = Number(e.target.value) || 0; setAmountPaid(val); setPaymentStatus(val === 0 ? 'pending' : val >= totalPrice ? 'paid' : 'partial'); }} className="mt-1 w-full" />
               </div>
+              </div>
+             
               <div className="border-t pt-4">
                 <div className="flex justify-between font-medium"><span className="text-gray-700">Balance:</span><span className={balance > 0 ? "text-orange-600" : "text-green-600"}>KES {balance.toFixed(2)}</span></div>
               </div>

@@ -1325,7 +1325,6 @@ export default function HotelOrderItems() {
                           {foodItems.map((foodItem) => (
                             <option key={foodItem.id} value={foodItem.id}>
                               {foodItem.name}
-                              {foodItem.quantity && ` (Stock: ${foodItem.quantity})`}
                             </option>
                           ))}
                         </select>
