@@ -49,7 +49,7 @@ const PAYMENT_TYPES = [
 const PAYMENT_STATUSES = [
   { value: 'pending', label: 'Pending' },
   { value: 'partial', label: 'Partial' },
-  { value: 'paid', label: 'Paid' }
+  { value: 'completed', label: 'completed' }
 ];
 
 // --- Types ---
@@ -618,7 +618,7 @@ export default function CreateOrder() {
                 </div>
                  <div>
                 <Label className="block text-sm font-medium text-gray-700">Amount Paid (KES)</Label>
-                <Input type="number" step="0.01" min="0" max={totalPrice} value={amountPaid} onChange={(e) => { const val = Number(e.target.value) || 0; setAmountPaid(val); setPaymentStatus(val === 0 ? 'pending' : val >= totalPrice ? 'paid' : 'partial'); }} className="mt-1 w-full" />
+                <Input type="number" step="0.01" min="0" max={totalPrice} value={amountPaid} onChange={(e) => { const val = Number(e.target.value) || 0; setAmountPaid(val); setPaymentStatus(val === 0 ? 'pending' : val >= totalPrice ? 'completed' : 'partial'); }} className="mt-1 w-full" />
               </div>
               </div>
              

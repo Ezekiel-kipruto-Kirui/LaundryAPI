@@ -91,13 +91,6 @@ interface ExtendedCustomer extends Customer {
   } | null;
 }
 
-// Specific type for Hotel Order Creator based on API response
-interface ApiHotelOrderCreator {
-  email: string;
-  first_name: string;
-  last_name: string;
-}
-
 interface ApiHotelOrderItem {
   id: number;
   food_item_name: string;
@@ -115,10 +108,12 @@ interface ApiHotelOrder {
   id: number;
   order_items: ApiHotelOrderItem[];
   total_amount: number;
-  created_by_username: string | null;
-  created_by_email: string;
+  created_by: {
+    email: string;
+    first_name?: string;
+    last_name?: string;
+  } | null;
   created_at: string;
-  created_by: ApiHotelOrderCreator | number | User; // Updated to match API
 }
 
 interface UserPerformanceData {
@@ -162,7 +157,7 @@ const getAuthHeaders = () => {
   return headers;
 };
 
-// API functions
+// API functions with pagination handling
 const fetchUsers = async (): Promise<User[]> => {
   try {
     const response = await fetch(`${API_BASE_URL}/Laundry/users/`, {
@@ -234,19 +229,43 @@ const deleteUser = async (userId: number): Promise<void> => {
   }
 };
 
+// Helper function to fetch all pages
+const fetchAllPages = async <T,>(baseUrl: string): Promise<T[]> => {
+  try {
+    let allResults: T[] = [];
+    let nextUrl: string | null = baseUrl;
+    
+    while (nextUrl) {
+      const response = await fetch(nextUrl, {
+        headers: getAuthHeaders(),
+      });
+
+      if (!response.ok) {
+        console.error(`Failed to fetch from ${nextUrl}:`, response.status);
+        break;
+      }
+
+      const data = await response.json();
+      
+      // Add results from this page
+      if (data.results && Array.isArray(data.results)) {
+        allResults = [...allResults, ...data.results];
+      }
+      
+      // Check if there's a next page
+      nextUrl = data.next;
+    }
+    
+    return allResults;
+  } catch (error) {
+    console.error('Error fetching all pages:', error);
+    return [];
+  }
+};
+
 const fetchAllLaundryOrders = async (): Promise<LaundryOrder[]> => {
   try {
-    const response = await fetch(`${API_BASE_URL}/Laundry/orders/`, {
-      headers: getAuthHeaders(),
-    });
-
-    if (!response.ok) {
-      console.error('Failed to fetch laundry orders:', response.status);
-      return [];
-    }
-
-    const data = await response.json();
-    return ensureArray<LaundryOrder>(data);
+    return fetchAllPages<LaundryOrder>(`${API_BASE_URL}/Laundry/orders/`);
   } catch (error) {
     console.error('Error fetching laundry orders:', error);
     return [];
@@ -255,17 +274,7 @@ const fetchAllLaundryOrders = async (): Promise<LaundryOrder[]> => {
 
 const fetchAllHotelOrders = async (): Promise<ApiHotelOrder[]> => {
   try {
-    const response = await fetch(`${API_BASE_URL}/Hotel/orders/`, {
-      headers: getAuthHeaders(),
-    });
-
-    if (!response.ok) {
-      console.error('Failed to fetch hotel orders:', response.status);
-      return [];
-    }
-
-    const data = await response.json();
-    return ensureArray<ApiHotelOrder>(data);
+    return fetchAllPages<ApiHotelOrder>(`${API_BASE_URL}/Hotel/orders/`);
   } catch (error) {
     console.error('Error fetching hotel orders:', error);
     return [];
@@ -274,17 +283,7 @@ const fetchAllHotelOrders = async (): Promise<ApiHotelOrder[]> => {
 
 const fetchAllCustomers = async (): Promise<ExtendedCustomer[]> => {
   try {
-    const response = await fetch(`${API_BASE_URL}/Laundry/customers/`, {
-      headers: getAuthHeaders(),
-    });
-
-    if (!response.ok) {
-      console.error('Failed to fetch customers:', response.status);
-      return [];
-    }
-
-    const data = await response.json();
-    return ensureArray<ExtendedCustomer>(data);
+    return fetchAllPages<ExtendedCustomer>(`${API_BASE_URL}/Laundry/customers/`);
   } catch (error) {
     console.error('Error fetching customers:', error);
     return [];
@@ -320,12 +319,23 @@ const isDateInRange = (dateString: string, startDate?: Date, endDate?: Date): bo
   }
 };
 
-const extractUserId = (createdBy: any): number | null => {
+// Updated extractUserId to handle both Laundry and Hotel API structures
+const extractUserId = (createdBy: any, users: User[] = []): number | null => {
   if (!createdBy) return null;
   
   if (typeof createdBy === 'object' && createdBy !== null) {
-    // Handle User object
-    if ('id' in createdBy) return createdBy.id;
+    // Handle Laundry API User object
+    if ('id' in createdBy) {
+      return createdBy.id;
+    }
+    
+    // Handle Hotel API created_by structure
+    if ('email' in createdBy && createdBy.email) {
+      // Find user by email
+      const user = users.find(u => u.email === createdBy.email);
+      return user ? user.id : null;
+    }
+    
     return null;
   }
   
@@ -663,7 +673,7 @@ export default function SiteManagement() {
 
     // Process laundry orders
     allLaundryOrders.forEach(order => {
-      const userId = extractUserId(order.created_by);
+      const userId = extractUserId(order.created_by, users);
       if (userId && data[userId] && isDateInRange(order.created_at, startDate, endDate)) {
         data[userId].laundryOrders.push(order);
       }
@@ -671,11 +681,7 @@ export default function SiteManagement() {
 
     // Process hotel orders
     allHotelOrders.forEach(order => {
-      // Attempt to extract ID directly (works if API returns object with ID)
-      let userId = extractUserId(order.created_by);
-      
-      
-
+      const userId = extractUserId(order.created_by, users);
       if (userId && data[userId] && isDateInRange(order.created_at, startDate, endDate)) {
         data[userId].hotelOrders.push(order);
       }
@@ -683,7 +689,7 @@ export default function SiteManagement() {
 
     // Process customers
     allCustomers.forEach(customer => {
-      const userId = extractUserId(customer.created_by);
+      const userId = extractUserId(customer.created_by, users);
       if (userId && data[userId]) {
         data[userId].customers.push(customer);
       }
@@ -1076,7 +1082,7 @@ export default function SiteManagement() {
       </Card>
 
       {/* User Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-6 mb-8">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
         <Card className="border-gray-200 shadow-sm hover:shadow-md transition-shadow">
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between">
@@ -1108,6 +1114,43 @@ export default function SiteManagement() {
               {usersLoading ? "..." : users.filter(u => u.is_active).length}
             </div>
             <p className="text-sm text-gray-500 mt-1">Currently active</p>
+          </CardContent>
+        </Card>
+
+        <Card className="border-gray-200 shadow-sm hover:shadow-md transition-shadow">
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-sm font-medium text-gray-600">Total Orders</CardTitle>
+              <div className="p-2 bg-orange-50 rounded-lg">
+                <ShoppingBag className="h-5 w-5 text-orange-600" />
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="text-3xl font-bold text-gray-900">
+              {laundryOrdersLoading || hotelOrdersLoading ? "..." : allLaundryOrders.length + allHotelOrders.length}
+            </div>
+            <p className="text-sm text-gray-500 mt-1">All orders</p>
+          </CardContent>
+        </Card>
+
+        <Card className="border-gray-200 shadow-sm hover:shadow-md transition-shadow">
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-sm font-medium text-gray-600">Total Revenue</CardTitle>
+              <div className="p-2 bg-green-50 rounded-lg">
+                <DollarSign className="h-5 w-5 text-green-600" />
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="text-3xl font-bold text-gray-900">
+              {laundryOrdersLoading || hotelOrdersLoading ? "..." : formatCurrency(
+                allLaundryOrders.reduce((sum, order) => sum + getOrderTotal(order), 0) +
+                allHotelOrders.reduce((sum, order) => sum + getOrderTotal(order), 0)
+              )}
+            </div>
+            <p className="text-sm text-gray-500 mt-1">All revenue</p>
           </CardContent>
         </Card>
       </div>
@@ -1417,8 +1460,80 @@ export default function SiteManagement() {
                           </Button>
                         </div>
 
-                        
+                        {/* Customer Stats */}
+                        <div className="mb-4">
+                          <div className="flex items-center gap-2 mb-2">
+                            <Users className="h-4 w-4 text-gray-500" />
+                            <h4 className="text-sm font-medium text-gray-700">Customers Created</h4>
+                            <Badge variant="outline" className="ml-2 bg-white text-gray-700 border-gray-300">
+                              {performanceData.customers.length} customers
+                            </Badge>
+                          </div>
+                          {performanceData.customers.length > 0 ? (
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-2 max-h-32 overflow-y-auto p-2 bg-white rounded-lg border">
+                              {performanceData.customers.slice(0, 10).map(customer => (
+                                <div key={customer.id} className="flex items-center justify-between p-2 hover:bg-gray-50 rounded">
+                                  <div>
+                                    <p className="text-sm font-medium text-gray-900">{customer.name}</p>
+                                    <p className="text-xs text-gray-500">{customer.phone}</p>
+                                  </div>
+                                  
+                                </div>
+                              ))}
+                              {performanceData.customers.length > 10 && (
+                                <div className="col-span-2 text-center text-xs text-gray-500 py-2">
+                                  +{performanceData.customers.length - 10} more customers
+                                </div>
+                              )}
+                            </div>
+                          ) : (
+                            <p className="text-sm text-gray-500 italic">No customers created</p>
+                          )}
+                        </div>
 
+                        {/* Recent Activity */}
+                        <div>
+                          <h4 className="text-sm font-medium text-gray-700 mb-2">Recent Orders</h4>
+                          <div className="space-y-2">
+                            {[...performanceData.laundryOrders, ...performanceData.hotelOrders]
+                              .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+                              .slice(0, 3)
+                              .map((order, index) => (
+                                <div key={`${'uniquecode' in order ? order.uniquecode : order.id}-${index}`} 
+                                     className="flex items-center justify-between p-3 bg-white rounded-lg border border-gray-200">
+                                  <div>
+                                    <div className="flex items-center gap-2">
+                                      {'uniquecode' in order ? (
+                                        <ShoppingBag className="h-3 w-3 text-blue-500" />
+                                      ) : (
+                                        <Store className="h-3 w-3 text-orange-500" />
+                                      )}
+                                      <span className="text-sm font-medium text-gray-900">
+                                        {'uniquecode' in order ? order.uniquecode : `Hotel #${order.id}`}
+                                      </span>
+                                    </div>
+                                    <p className="text-xs text-gray-500 mt-1">
+                                      {formatDate(order.created_at)}
+                                    </p>
+                                  </div>
+                                  <div className="text-right">
+                                    <span className="text-sm font-bold text-gray-900">
+                                      {formatCurrency(getOrderTotal(order))}
+                                    </span>
+                                    <p className="text-xs text-gray-500 mt-1">
+                                      {'total_price' in order ? 'Laundry' : 'Hotel'}
+                                    </p>
+                                  </div>
+                                </div>
+                              ))}
+                            
+                            {performanceData.totalOrders === 0 && (
+                              <p className="text-sm text-gray-500 italic p-3 bg-white rounded-lg border border-gray-200">
+                                No recent orders
+                              </p>
+                            )}
+                          </div>
+                        </div>
                         
                       </div>
                     )}
