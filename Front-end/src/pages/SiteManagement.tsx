@@ -91,6 +91,13 @@ interface ExtendedCustomer extends Customer {
   } | null;
 }
 
+// Specific type for Hotel Order Creator based on API response
+interface ApiHotelOrderCreator {
+  email: string;
+  first_name: string;
+  last_name: string;
+}
+
 interface ApiHotelOrderItem {
   id: number;
   food_item_name: string;
@@ -111,7 +118,7 @@ interface ApiHotelOrder {
   created_by_username: string | null;
   created_by_email: string;
   created_at: string;
-  created_by: number | User;
+  created_by: ApiHotelOrderCreator | number | User; // Updated to match API
 }
 
 interface UserPerformanceData {
@@ -317,7 +324,9 @@ const extractUserId = (createdBy: any): number | null => {
   if (!createdBy) return null;
   
   if (typeof createdBy === 'object' && createdBy !== null) {
-    return (createdBy as any).id;
+    // Handle User object
+    if ('id' in createdBy) return createdBy.id;
+    return null;
   }
   
   if (typeof createdBy === 'number') {
@@ -325,7 +334,15 @@ const extractUserId = (createdBy: any): number | null => {
   }
   
   if (typeof createdBy === 'string') {
-    const parsed = parseInt(createdBy);
+    // Handle DRF URLs like "/api/users/5/" or "http://domain.com/users/5/"
+    const urlMatch = createdBy.match(/\/(\d+)\/?$/);
+    if (urlMatch) {
+      const parsed = parseInt(urlMatch[1], 10);
+      return isNaN(parsed) ? null : parsed;
+    }
+    
+    // Handle plain string numbers
+    const parsed = parseInt(createdBy, 10);
     return isNaN(parsed) ? null : parsed;
   }
   
@@ -654,7 +671,11 @@ export default function SiteManagement() {
 
     // Process hotel orders
     allHotelOrders.forEach(order => {
-      const userId = extractUserId(order.created_by);
+      // Attempt to extract ID directly (works if API returns object with ID)
+      let userId = extractUserId(order.created_by);
+      
+      
+
       if (userId && data[userId] && isDateInRange(order.created_at, startDate, endDate)) {
         data[userId].hotelOrders.push(order);
       }
@@ -955,37 +976,6 @@ export default function SiteManagement() {
     return colors[userType] || 'bg-gray-100 text-gray-800 border-gray-200';
   };
 
-  // Calculate totals for stats
-  const totalOrders = useMemo(() => {
-    const startDate = dateFilter.startDate ? new Date(dateFilter.startDate) : undefined;
-    const endDate = dateFilter.endDate ? new Date(dateFilter.endDate) : undefined;
-    
-    const filteredLaundryOrders = allLaundryOrders.filter(order => 
-      isDateInRange(order.created_at, startDate, endDate)
-    );
-    
-    const filteredHotelOrders = allHotelOrders.filter(order => 
-      isDateInRange(order.created_at, startDate, endDate)
-    );
-    
-    return filteredLaundryOrders.length + filteredHotelOrders.length;
-  }, [allLaundryOrders, allHotelOrders, dateFilter]);
-
-  const totalRevenue = useMemo(() => {
-    const startDate = dateFilter.startDate ? new Date(dateFilter.startDate) : undefined;
-    const endDate = dateFilter.endDate ? new Date(dateFilter.endDate) : undefined;
-    
-    const laundryRevenue = allLaundryOrders
-      .filter(order => isDateInRange(order.created_at, startDate, endDate))
-      .reduce((sum, order) => sum + safeParseFloat(order.total_price), 0);
-    
-    const hotelRevenue = allHotelOrders
-      .filter(order => isDateInRange(order.created_at, startDate, endDate))
-      .reduce((sum, order) => sum + (order.total_amount || 0), 0);
-    
-    return laundryRevenue + hotelRevenue;
-  }, [allLaundryOrders, allHotelOrders, dateFilter]);
-
   if (usersError) {
     return (
       <div className="flex items-center justify-center h-screen">
@@ -1086,7 +1076,7 @@ export default function SiteManagement() {
       </Card>
 
       {/* User Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-6 mb-8">
         <Card className="border-gray-200 shadow-sm hover:shadow-md transition-shadow">
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between">
@@ -1118,40 +1108,6 @@ export default function SiteManagement() {
               {usersLoading ? "..." : users.filter(u => u.is_active).length}
             </div>
             <p className="text-sm text-gray-500 mt-1">Currently active</p>
-          </CardContent>
-        </Card>
-
-        <Card className="border-gray-200 shadow-sm hover:shadow-md transition-shadow">
-          <CardHeader className="pb-3">
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-sm font-medium text-gray-600">Total Orders</CardTitle>
-              <div className="p-2 bg-orange-50 rounded-lg">
-                <Package className="h-5 w-5 text-orange-600" />
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-bold text-gray-900">
-              {laundryOrdersLoading || hotelOrdersLoading ? "..." : totalOrders}
-            </div>
-            <p className="text-sm text-gray-500 mt-1">Filtered orders</p>
-          </CardContent>
-        </Card>
-
-        <Card className="border-gray-200 shadow-sm hover:shadow-md transition-shadow">
-          <CardHeader className="pb-3">
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-sm font-medium text-gray-600">Total Revenue</CardTitle>
-              <div className="p-2 bg-emerald-50 rounded-lg">
-                <DollarSign className="h-5 w-5 text-emerald-600" />
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-bold text-gray-900">
-              {laundryOrdersLoading || hotelOrdersLoading ? "..." : formatCurrency(totalRevenue)}
-            </div>
-            <p className="text-sm text-gray-500 mt-1">Filtered revenue</p>
           </CardContent>
         </Card>
       </div>

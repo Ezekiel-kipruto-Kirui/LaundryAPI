@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { fetchApi } from "@/services/api"; // Using fetchApi to target 'laundry' app
@@ -32,6 +32,18 @@ import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Loader2, Plus, Trash2, Receipt, Store, DollarSign, Calendar, Filter, RotateCcw, Tag } from "lucide-react";
 
+// --- Helper to handle Paginated vs Array responses ---
+const ensureArray = <T,>(data: unknown): T[] => {
+  if (!data) return [];
+  if (Array.isArray(data)) return data as T[];
+  if (typeof data === 'object' && data !== null) {
+    const anyData = data as any;
+    if (Array.isArray(anyData.results)) return anyData.results as T[];
+    if (Array.isArray(anyData.data)) return anyData.data as T[];
+  }
+  return [];
+};
+
 export default function Expenses() {
   const queryClient = useQueryClient();
   const [shopFilter, setShopFilter] = useState<string>("Shop A");
@@ -60,15 +72,19 @@ export default function Expenses() {
   }, []);
 
   // Fetching from Laundry App explicitly
-  const { data: expenseFields = [], isLoading: fieldsLoading } = useQuery({
+  const { data: expenseFieldsRaw, isLoading: fieldsLoading } = useQuery({
     queryKey: ['expense-fields', 'laundry'],
     queryFn: () => fetchApi<ExpenseField[]>("expense-fields/", undefined, "laundry"),
   });
 
-  const { data: expenseRecords = [], isLoading: recordsLoading } = useQuery({
+  const { data: expenseRecordsRaw, isLoading: recordsLoading } = useQuery({
     queryKey: ['expense-records', 'laundry'],
     queryFn: () => fetchApi<ExpenseRecord[]>("expense-records/", undefined, "laundry"),
   });
+
+  // Safe array extraction
+  const expenseFields = useMemo(() => ensureArray<ExpenseField>(expenseFieldsRaw), [expenseFieldsRaw]);
+  const expenseRecords = useMemo(() => ensureArray<ExpenseRecord>(expenseRecordsRaw), [expenseRecordsRaw]);
 
   const createExpenseMutation = useMutation({
     mutationFn: (data: any) => fetchApi<ExpenseRecord>("expense-records/", {
@@ -123,7 +139,6 @@ export default function Expenses() {
 
 
   // Filter records based on shop and date range
-  // Note: Removed 'Hotel' check as we are fetching from Laundry app only
   const filteredRecords = expenseRecords.filter((record: ExpenseRecord) => {
     // Shop filter (Laundry A or B)
     if (shopFilter !== "all" && record.shop !== shopFilter) {
@@ -580,7 +595,7 @@ export default function Expenses() {
       <style>{`
         input[type="date"] {
           background: white;
-          border: 1px solid #d1d5db;
+          border:1px solid #d1d5db;
           border-radius: 0.5rem;
           padding: 0.5rem 0.75rem;
         }

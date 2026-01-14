@@ -1023,13 +1023,13 @@ export default function CustomersPage() {
                                                         </div>
                                                         <div>
                                                             <div className="text-sm font-medium text-gray-900">{customer.name}</div>
-                                                            <div className="text-sm text-gray-500">ID: {customer.id}</div>
+                                                            
                                                         </div>
                                                     </div>
                                                 </td>
                                                 <td className="px-6 py-4 whitespace-nowrap">
                                                     <div className="text-sm text-gray-900">{customer.phone}</div>
-                                                    <div className="text-sm text-gray-500">Primary contact</div>
+                                                   
                                                 </td>
                                                 <td className="px-6 py-4 whitespace-nowrap">
                                                     <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-blue-100 text-blue-800">
@@ -1039,7 +1039,7 @@ export default function CustomersPage() {
                                                 </td>
                                                 <td className="px-6 py-4 whitespace-nowrap">
                                                     <div className="text-sm font-semibold text-green-600">KSh {stats.totalBilled.toFixed(2)}</div>
-                                                    <div className="text-xs text-gray-500">Lifetime value</div>
+                                                    
                                                 </td>
                                                 <td className="px-6 py-4 whitespace-nowrap">
                                                     <div className="text-sm text-gray-900">
@@ -1049,7 +1049,7 @@ export default function CustomersPage() {
                                                             <span className="text-gray-400">Never</span>
                                                         )}
                                                     </div>
-                                                    <div className="text-xs text-gray-500">Last activity</div>
+                                                    
                                                 </td>
                                                 <td className="px-6 py-4 whitespace-nowrap">
                                                     <div className="flex items-center space-x-2">
