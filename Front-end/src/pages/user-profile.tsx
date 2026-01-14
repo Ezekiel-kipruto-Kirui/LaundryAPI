@@ -7,10 +7,7 @@ import {
   Coffee,
   DollarSign,
   Calendar,
-  CheckCircle,
-  Clock,
   AlertCircle,
-  RefreshCw,
   TrendingUp
 } from 'lucide-react';
 
@@ -25,7 +22,7 @@ const getAuthHeader = () => {
   return token ? { Authorization: `Bearer ${token}` } : {};
 };
 
-// Define User interface (separate from imported User type)
+// Define User interface
 interface AppUser {
   id: number;
   email: string;
@@ -79,7 +76,8 @@ interface HotelOrder {
   total_amount: number;
   created_by_email: string;
   created_at: string;
-  created_by: number;
+  // FIX: Allow created_by to be a number OR an object (matching Laundry API structure)
+  created_by: number | { id: number; email: string } | null;
 }
 
 type OrderView = 'hotel' | 'laundry';
@@ -139,9 +137,10 @@ const UserProfile = () => {
 
       // Fetch hotel orders
       try {
+        // FIX: Increased page_size to 500 to ensure we capture more orders
         const hotelResponse = await axios.get(HOTEL_ORDERS_URL, {
           headers: getAuthHeader(),
-          params: { page_size: 100 }
+          params: { page_size: 500 }
         });
 
         let hotelOrdersData: HotelOrder[] = [];
@@ -151,11 +150,23 @@ const UserProfile = () => {
           hotelOrdersData = hotelResponse.data.results;
         }
 
-        // Filter orders created by current user
-        const userHotelOrders = hotelOrdersData.filter(order => 
-          order.created_by === currentUser.id || 
-          order.created_by_email === currentUser.email
-        );
+        // FIX: Robust filtering logic to handle different API response shapes for 'created_by'
+        const userHotelOrders = hotelOrdersData.filter(order => {
+          // Extract ID safely
+          let orderCreatorId: number | undefined;
+          
+          if (typeof order.created_by === 'object' && order.created_by !== null) {
+            orderCreatorId = order.created_by.id;
+          } else if (typeof order.created_by === 'number') {
+            orderCreatorId = order.created_by;
+          }
+
+          // Match by ID or fallback to Email
+          return orderCreatorId === currentUser.id || 
+                 order.created_by_email === currentUser.email;
+        });
+
+        console.log(`Found ${userHotelOrders.length} hotel orders for user ${currentUser.id}`);
         setUserHotelOrders(userHotelOrders);
       } catch (err) {
         console.error('Error fetching hotel orders:', err);
@@ -221,7 +232,6 @@ const UserProfile = () => {
   const laundryStats = getLaundryStats();
   const hotelStats = getHotelStats();
 
-  // Calculate total orders created (FIXED: Now using numbers, not arrays)
   const totalOrdersCreated = laundryStats.createdOrders + hotelStats.createdOrders;
 
   // Filter orders by date
@@ -340,9 +350,6 @@ const UserProfile = () => {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      
-
       {/* Main Content */}
       <div className="container mx-auto px-4 py-8">
         {/* User Profile Card */}

@@ -30,7 +30,7 @@ export default function FoodItems() {
   // Form States
   const [foodFormData, setFoodFormData] = useState({
     name: "",
-    category: "", // Changed from category_id to category to match serializer
+    category: "", 
     total_order_price: "",
     quantity: ""
   });
@@ -49,13 +49,18 @@ export default function FoodItems() {
     setLoading(true);
     setError(null);
     try {
-      const data: FoodItem[] = await fetchApi<FoodItem[]>(
+      // Use 'any' here to handle potential pagination wrappers safely
+      const response = await fetchApi<any>(
         FOOD_URL,
         { method: 'GET' },
         'hotel'
       );
+      
+      // Handle both direct array responses and paginated responses (results array)
+      const data = Array.isArray(response) ? response : (response?.results || []);
+
       // Sort by created_at in descending order (newest first)
-      const sortedData = data.sort((a, b) => {
+      const sortedData = data.sort((a: FoodItem, b: FoodItem) => {
         const dateA = new Date(a.created_at);
         const dateB = new Date(b.created_at);
         return dateB.getTime() - dateA.getTime();
@@ -69,6 +74,7 @@ export default function FoodItems() {
       } else {
         setError(`Failed to fetch food items: ${err.message}`);
       }
+      setFoodItems([]); // Ensure state remains an array on error
     } finally {
       setLoading(false);
     }
@@ -77,11 +83,16 @@ export default function FoodItems() {
   const fetchCategories = useCallback(async () => {
     setCategoriesLoading(true);
     try {
-      const data: FoodCategory[] = await fetchApi<FoodCategory[]>(
+      // Use 'any' here to handle potential pagination wrappers safely
+      const response = await fetchApi<any>(
         CATEGORIES_URL,
         { method: 'GET' },
         'hotel'
       );
+
+      // Handle both direct array responses and paginated responses (results array)
+      const data = Array.isArray(response) ? response : (response?.results || []);
+
       setCategories(data);
     } catch (err: any) {
       console.error("Fetch Categories Error:", err);
@@ -90,6 +101,7 @@ export default function FoodItems() {
       } else {
         setError(`Failed to fetch categories: ${err.message}`);
       }
+      setCategories([]); // Ensure state remains an array on error
     } finally {
       setCategoriesLoading(false);
     }
