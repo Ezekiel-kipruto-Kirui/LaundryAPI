@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -35,8 +35,23 @@ import { API_BASE_URL } from "@/services/url";
 import { HotelExpenseField, HotelExpenseRecord } from "@/services/types";
 import { getAccessToken } from "@/services/api";
 
+// URL Constants
 const EXPENSE_FIELDS_URL = `${API_BASE_URL}/Hotel/Hotelexpense-fields/`;
 const EXPENSE_RECORDS_URL = `${API_BASE_URL}/Hotel/Hotelexpense-records/`;
+
+// --- HELPER UTILITY: Handles both Arrays and Paginated Objects { results: [...] } ---
+const ensureArray = <T,>(data: unknown): T[] => {
+  if (!data) return [];
+  if (Array.isArray(data)) return data as T[];
+  if (typeof data === 'object' && data !== null) {
+    const anyData = data as any;
+    // Handle Django Rest Framework Pagination
+    if (Array.isArray(anyData.results)) return anyData.results as T[];
+    // Handle generic 'data' wrapper
+    if (Array.isArray(anyData.data)) return anyData.data as T[];
+  }
+  return [];
+};
 
 // API functions
 const fetchExpenseFields = async (): Promise<HotelExpenseField[]> => {
@@ -56,7 +71,9 @@ const fetchExpenseFields = async (): Promise<HotelExpenseField[]> => {
   if (!response.ok) {
     throw new Error('Failed to fetch expense fields');
   }
-  return response.json();
+  
+  const data = await response.json();
+  return ensureArray<HotelExpenseField>(data);
 };
 
 const fetchExpenseRecords = async (): Promise<HotelExpenseRecord[]> => {
@@ -76,7 +93,9 @@ const fetchExpenseRecords = async (): Promise<HotelExpenseRecord[]> => {
   if (!response.ok) {
     throw new Error('Failed to fetch expense records');
   }
-  return response.json();
+  
+  const data = await response.json();
+  return ensureArray<HotelExpenseRecord>(data);
 };
 
 const createExpenseRecord = async (data: Omit<HotelExpenseRecord, 'id' | 'field'> & { field_id: number }): Promise<HotelExpenseRecord> => {
@@ -148,7 +167,7 @@ const createExpenseField = async (data: { label: string }): Promise<HotelExpense
 
 export default function HotelExpenses() {
   const queryClient = useQueryClient();
- 
+  
   const [startDate, setStartDate] = useState<string>("");
   const [endDate, setEndDate] = useState<string>("");
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
@@ -174,15 +193,19 @@ export default function HotelExpenses() {
   }, []);
 
   // Queries
-  const { data: expenseFields = [], isLoading: fieldsLoading } = useQuery({
+  const { data: expenseFieldsRaw, isLoading: fieldsLoading } = useQuery({
     queryKey: ['expense-fields'],
     queryFn: fetchExpenseFields,
   });
 
-  const { data: expenseRecords = [], isLoading: recordsLoading } = useQuery({
+  const { data: expenseRecordsRaw, isLoading: recordsLoading } = useQuery({
     queryKey: ['expense-records'],
     queryFn: fetchExpenseRecords,
   });
+
+  // --- CRITICAL FIX: Use ensureArray here to prevent .map is not a function ---
+  const expenseFields = useMemo(() => ensureArray<HotelExpenseField>(expenseFieldsRaw), [expenseFieldsRaw]);
+  const expenseRecords = useMemo(() => ensureArray<HotelExpenseRecord>(expenseRecordsRaw), [expenseRecordsRaw]);
 
   // Mutations
   const createExpenseMutation = useMutation({
@@ -233,17 +256,19 @@ export default function HotelExpenses() {
   };
 
   // Filter records based on date range
-  const filteredRecords = expenseRecords.filter((record: HotelExpenseRecord) => {
-    // Date range filter
-    const recordDate = new Date(record.date);
-    const start = startDate ? new Date(startDate) : null;
-    const end = endDate ? new Date(endDate) : null;
-    
-    if (start && recordDate < start) return false;
-    if (end && recordDate > end) return false;
-    
-    return true;
-  });
+  const filteredRecords = useMemo(() => {
+    return expenseRecords.filter((record: HotelExpenseRecord) => {
+      // Date range filter
+      const recordDate = new Date(record.date);
+      const start = startDate ? new Date(startDate) : null;
+      const end = endDate ? new Date(endDate) : null;
+      
+      if (start && recordDate < start) return false;
+      if (end && recordDate > end) return false;
+      
+      return true;
+    });
+  }, [expenseRecords, startDate, endDate]);
 
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString('en-US', {
@@ -295,7 +320,7 @@ export default function HotelExpenses() {
 
   const handleResetFilters = () => {
     const today = new Date().toISOString().split('T')[0];
-    const firstDay = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0];
+    const firstDay = new Date(new Date().getFullYear(), new Date().getMonth(),1).toISOString().split('T')[0];
     
     setEndDate(today);
     setStartDate(firstDay);
@@ -398,7 +423,9 @@ export default function HotelExpenses() {
           <div className="px-4 py-4 sm:p-5">
             <div className="flex items-center">
               <div className="flex-shrink-0 bg-blue-700 rounded-md p-2 sm:p-3">
-                <DollarSign className="h-5 w-5 sm:h-6 sm:w-6 text-white" />
+                <svg className="h-5 w-5 sm:h-6 sm:w-6 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
               </div>
               <div className="ml-4 flex-1 min-w-0">
                 <div>
@@ -417,7 +444,9 @@ export default function HotelExpenses() {
           <div className="px-4 py-4 sm:p-5">
             <div className="flex items-center">
               <div className="flex-shrink-0 bg-blue-700 rounded-md p-2 sm:p-3">
-                <Receipt className="h-5 w-5 sm:h-6 sm:w-6 text-white" />
+                <svg className="h-5 w-5 sm:h-6 sm:w-6 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                </svg>
               </div>
               <div className="ml-4 flex-1 min-w-0">
                 <div>
@@ -440,7 +469,9 @@ export default function HotelExpenses() {
       ) : filteredRecords.length === 0 ? (
         <div className="bg-white overflow-hidden shadow rounded-lg">
           <div className="px-4 py-8 sm:px-6 text-center">
-            <Receipt className="mx-auto h-10 w-10 sm:h-12 sm:w-12 text-gray-400" />
+            <svg className="mx-auto h-10 w-10 sm:h-12 sm:w-12 text-gray-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
             <h3 className="mt-2 text-sm font-medium text-gray-900">No expenses recorded {dateRangeDescription}</h3>
             <p className="mt-1 text-sm text-gray-500 hidden sm:block">Get started by creating expense categories and recording your first expense.</p>
             <div className="mt-6 space-y-2 sm:space-y-0 sm:space-x-3 sm:flex sm:justify-center">
@@ -490,12 +521,12 @@ export default function HotelExpenses() {
                     <td className="px-4 py-4 whitespace-nowrap">
                       <div className="text-sm font-medium text-gray-900">{formatDate(record.date)}</div>
                       <div className="text-xs text-gray-500 sm:hidden">
-                        {record.field?.label || 'Unknown'}
+                        {getFieldName(record.field_id)}
                       </div>
                     </td>
                     <td className="px-4 py-4 whitespace-nowrap hidden sm:table-cell">
-                      <Badge className={getFieldColor(record.field?.label || 'Unknown')}>
-                        {record.field?.label || 'Unknown'}
+                      <Badge className={getFieldColor(getFieldName(record.field_id))}>
+                        {getFieldName(record.field_id)}
                       </Badge>
                     </td>
                     <td className="px-4 py-4 whitespace-nowrap">
@@ -511,14 +542,18 @@ export default function HotelExpenses() {
                           title="Edit"
                           onClick={() => toast.info('Edit functionality not implemented yet')}
                         >
-                          <Edit className="w-4 h-4 sm:w-5 sm:h-5" />
+                          <svg className="w-4 h-4 sm:w-5 sm:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                          </svg>
                         </button>
                         <button
                           className="text-red-600 hover:text-red-800 p-1 rounded-full hover:bg-red-100 transition-colors duration-150"
                           title="Delete"
                           onClick={() => deleteExpenseMutation.mutate(record.id)}
                         >
-                          <Trash2 className="w-4 h-4 sm:w-5 sm:h-5" />
+                          <svg className="w-4 h-4 sm:w-5 sm:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                          </svg>
                         </button>
                       </div>
                     </td>
@@ -623,7 +658,7 @@ export default function HotelExpenses() {
                 id="field-label"
                 value={newField.label}
                 onChange={(e) => setNewField({ ...newField, label: e.target.value })}
-                placeholder="e.g., Staff Salaries, Utilities, Maintenance"
+                placeholder="e.g., Staff Salaries, Utilities"
               />
             </div>
             <Button onClick={handleAddField} className="w-full bg-blue-600 hover:bg-blue-700" disabled={createFieldMutation.isPending}>
@@ -642,7 +677,7 @@ export default function HotelExpenses() {
       <style>{`
         input[type="date"] {
           background: white;
-          border: 1px solid #d1d5db;
+          border:1px solid #d1d5db;
           border-radius: 0.5rem;
           padding: 0.5rem 0.75rem;
         }

@@ -110,9 +110,9 @@ interface ApiHotelOrder {
   total_amount: number;
   created_by: {
     email: string;
-    first_name?: string;
-    last_name?: string;
-  } | null;
+    first_name: string;
+    last_name: string;
+  };
   created_at: string;
 }
 
@@ -157,7 +157,45 @@ const getAuthHeaders = () => {
   return headers;
 };
 
-// API functions with pagination handling
+// Helper function to fetch all paginated data
+const fetchAllPages = async <T,>(endpoint: string): Promise<T[]> => {
+  let allResults: T[] = [];
+  let nextUrl: string | null = `${API_BASE_URL}${endpoint}`;
+  
+  try {
+    while (nextUrl) {
+      const response = await fetch(nextUrl, {
+        headers: getAuthHeaders(),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to fetch data from ${nextUrl}: ${response.status}`);
+      }
+
+      const data = await response.json();
+      
+      // Extract results from the current page
+      if (data.results && Array.isArray(data.results)) {
+        allResults = [...allResults, ...data.results];
+      }
+      
+      // Check if there's a next page
+      nextUrl = data.next;
+      
+      // If next is a relative URL, make it absolute
+      if (nextUrl && !nextUrl.startsWith('http')) {
+        nextUrl = `${API_BASE_URL}${nextUrl}`;
+      }
+    }
+    
+    return allResults;
+  } catch (error) {
+    console.error(`Error fetching paginated data from ${endpoint}:`, error);
+    return allResults; // Return whatever we have so far
+  }
+};
+
+// API functions
 const fetchUsers = async (): Promise<User[]> => {
   try {
     const response = await fetch(`${API_BASE_URL}/Laundry/users/`, {
@@ -229,65 +267,17 @@ const deleteUser = async (userId: number): Promise<void> => {
   }
 };
 
-// Helper function to fetch all pages
-const fetchAllPages = async <T,>(baseUrl: string): Promise<T[]> => {
-  try {
-    let allResults: T[] = [];
-    let nextUrl: string | null = baseUrl;
-    
-    while (nextUrl) {
-      const response = await fetch(nextUrl, {
-        headers: getAuthHeaders(),
-      });
-
-      if (!response.ok) {
-        console.error(`Failed to fetch from ${nextUrl}:`, response.status);
-        break;
-      }
-
-      const data = await response.json();
-      
-      // Add results from this page
-      if (data.results && Array.isArray(data.results)) {
-        allResults = [...allResults, ...data.results];
-      }
-      
-      // Check if there's a next page
-      nextUrl = data.next;
-    }
-    
-    return allResults;
-  } catch (error) {
-    console.error('Error fetching all pages:', error);
-    return [];
-  }
-};
-
+// Updated API functions to fetch all paginated data
 const fetchAllLaundryOrders = async (): Promise<LaundryOrder[]> => {
-  try {
-    return fetchAllPages<LaundryOrder>(`${API_BASE_URL}/Laundry/orders/`);
-  } catch (error) {
-    console.error('Error fetching laundry orders:', error);
-    return [];
-  }
+  return fetchAllPages<LaundryOrder>('/Laundry/orders/');
 };
 
 const fetchAllHotelOrders = async (): Promise<ApiHotelOrder[]> => {
-  try {
-    return fetchAllPages<ApiHotelOrder>(`${API_BASE_URL}/Hotel/orders/`);
-  } catch (error) {
-    console.error('Error fetching hotel orders:', error);
-    return [];
-  }
+  return fetchAllPages<ApiHotelOrder>('/Hotel/orders/');
 };
 
 const fetchAllCustomers = async (): Promise<ExtendedCustomer[]> => {
-  try {
-    return fetchAllPages<ExtendedCustomer>(`${API_BASE_URL}/Laundry/customers/`);
-  } catch (error) {
-    console.error('Error fetching customers:', error);
-    return [];
-  }
+  return fetchAllPages<ExtendedCustomer>('/Laundry/customers/');
 };
 
 // Helper functions
@@ -319,23 +309,20 @@ const isDateInRange = (dateString: string, startDate?: Date, endDate?: Date): bo
   }
 };
 
-// Updated extractUserId to handle both Laundry and Hotel API structures
-const extractUserId = (createdBy: any, users: User[] = []): number | null => {
+const extractUserId = (createdBy: any): number | null => {
   if (!createdBy) return null;
   
+  // Handle the case where created_by is an object with email (hotel orders)
   if (typeof createdBy === 'object' && createdBy !== null) {
-    // Handle Laundry API User object
+    // For hotel orders, we need to match by email
+    if ('email' in createdBy) {
+      return null; // We'll handle this differently - see findUserIdByEmail
+    }
+    
+    // For laundry orders/customers, it's a User object with id
     if ('id' in createdBy) {
       return createdBy.id;
     }
-    
-    // Handle Hotel API created_by structure
-    if ('email' in createdBy && createdBy.email) {
-      // Find user by email
-      const user = users.find(u => u.email === createdBy.email);
-      return user ? user.id : null;
-    }
-    
     return null;
   }
   
@@ -357,6 +344,12 @@ const extractUserId = (createdBy: any, users: User[] = []): number | null => {
   }
   
   return null;
+};
+
+// Helper function to find user ID by email
+const findUserIdByEmail = (users: User[], email: string): number | null => {
+  const user = users.find(u => u.email === email);
+  return user ? user.id : null;
 };
 
 const getOrderTotal = (order: LaundryOrder | ApiHotelOrder): number => {
@@ -515,7 +508,7 @@ const OrdersDialog = ({ isOpen, onOpenChange, title, orders, type }: OrdersDialo
                         </TableCell>
                         <TableCell>
                           <div className="space-y-1 max-w-md">
-                            {order.order_items.map((item: any) => (
+                            {order.order_items?.map((item: any) => (
                               <div key={item.id} className="text-sm">
                                 <div className="flex justify-between">
                                   <span className="font-medium text-gray-900">{item.food_item_name}</span>
@@ -526,7 +519,7 @@ const OrdersDialog = ({ isOpen, onOpenChange, title, orders, type }: OrdersDialo
                                 </div>
                               </div>
                             ))}
-                            {order.order_items.length === 0 && (
+                            {(!order.order_items || order.order_items.length === 0) && (
                               <span className="text-sm text-gray-500 italic">No items</span>
                             )}
                           </div>
@@ -673,23 +666,27 @@ export default function SiteManagement() {
 
     // Process laundry orders
     allLaundryOrders.forEach(order => {
-      const userId = extractUserId(order.created_by, users);
+      const userId = extractUserId(order.created_by);
       if (userId && data[userId] && isDateInRange(order.created_at, startDate, endDate)) {
         data[userId].laundryOrders.push(order);
       }
     });
 
-    // Process hotel orders
+    // Process hotel orders - match by email since created_by is an object
     allHotelOrders.forEach(order => {
-      const userId = extractUserId(order.created_by, users);
-      if (userId && data[userId] && isDateInRange(order.created_at, startDate, endDate)) {
-        data[userId].hotelOrders.push(order);
+      if (order.created_by && typeof order.created_by === 'object' && 'email' in order.created_by) {
+        const userEmail = order.created_by.email;
+        const user = users.find(u => u.email === userEmail);
+        
+        if (user && data[user.id] && isDateInRange(order.created_at, startDate, endDate)) {
+          data[user.id].hotelOrders.push(order);
+        }
       }
     });
 
     // Process customers
     allCustomers.forEach(customer => {
-      const userId = extractUserId(customer.created_by, users);
+      const userId = extractUserId(customer.created_by);
       if (userId && data[userId]) {
         data[userId].customers.push(customer);
       }
@@ -1116,43 +1113,6 @@ export default function SiteManagement() {
             <p className="text-sm text-gray-500 mt-1">Currently active</p>
           </CardContent>
         </Card>
-
-        <Card className="border-gray-200 shadow-sm hover:shadow-md transition-shadow">
-          <CardHeader className="pb-3">
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-sm font-medium text-gray-600">Total Orders</CardTitle>
-              <div className="p-2 bg-orange-50 rounded-lg">
-                <ShoppingBag className="h-5 w-5 text-orange-600" />
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-bold text-gray-900">
-              {laundryOrdersLoading || hotelOrdersLoading ? "..." : allLaundryOrders.length + allHotelOrders.length}
-            </div>
-            <p className="text-sm text-gray-500 mt-1">All orders</p>
-          </CardContent>
-        </Card>
-
-        <Card className="border-gray-200 shadow-sm hover:shadow-md transition-shadow">
-          <CardHeader className="pb-3">
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-sm font-medium text-gray-600">Total Revenue</CardTitle>
-              <div className="p-2 bg-green-50 rounded-lg">
-                <DollarSign className="h-5 w-5 text-green-600" />
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-bold text-gray-900">
-              {laundryOrdersLoading || hotelOrdersLoading ? "..." : formatCurrency(
-                allLaundryOrders.reduce((sum, order) => sum + getOrderTotal(order), 0) +
-                allHotelOrders.reduce((sum, order) => sum + getOrderTotal(order), 0)
-              )}
-            </div>
-            <p className="text-sm text-gray-500 mt-1">All revenue</p>
-          </CardContent>
-        </Card>
       </div>
 
       {/* Main Content */}
@@ -1205,9 +1165,10 @@ export default function SiteManagement() {
         </CardHeader>
 
         <CardContent className="p-0">
-          {usersLoading ? (
+          {usersLoading || laundryOrdersLoading || hotelOrdersLoading || customersLoading ? (
             <div className="flex items-center justify-center h-64">
               <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
+              <span className="ml-2 text-gray-600">Loading data...</span>
             </div>
           ) : filteredUsers.length === 0 ? (
             <div className="text-center py-16">
@@ -1460,80 +1421,8 @@ export default function SiteManagement() {
                           </Button>
                         </div>
 
-                        {/* Customer Stats */}
-                        <div className="mb-4">
-                          <div className="flex items-center gap-2 mb-2">
-                            <Users className="h-4 w-4 text-gray-500" />
-                            <h4 className="text-sm font-medium text-gray-700">Customers Created</h4>
-                            <Badge variant="outline" className="ml-2 bg-white text-gray-700 border-gray-300">
-                              {performanceData.customers.length} customers
-                            </Badge>
-                          </div>
-                          {performanceData.customers.length > 0 ? (
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-2 max-h-32 overflow-y-auto p-2 bg-white rounded-lg border">
-                              {performanceData.customers.slice(0, 10).map(customer => (
-                                <div key={customer.id} className="flex items-center justify-between p-2 hover:bg-gray-50 rounded">
-                                  <div>
-                                    <p className="text-sm font-medium text-gray-900">{customer.name}</p>
-                                    <p className="text-xs text-gray-500">{customer.phone}</p>
-                                  </div>
-                                  
-                                </div>
-                              ))}
-                              {performanceData.customers.length > 10 && (
-                                <div className="col-span-2 text-center text-xs text-gray-500 py-2">
-                                  +{performanceData.customers.length - 10} more customers
-                                </div>
-                              )}
-                            </div>
-                          ) : (
-                            <p className="text-sm text-gray-500 italic">No customers created</p>
-                          )}
-                        </div>
+                        
 
-                        {/* Recent Activity */}
-                        <div>
-                          <h4 className="text-sm font-medium text-gray-700 mb-2">Recent Orders</h4>
-                          <div className="space-y-2">
-                            {[...performanceData.laundryOrders, ...performanceData.hotelOrders]
-                              .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-                              .slice(0, 3)
-                              .map((order, index) => (
-                                <div key={`${'uniquecode' in order ? order.uniquecode : order.id}-${index}`} 
-                                     className="flex items-center justify-between p-3 bg-white rounded-lg border border-gray-200">
-                                  <div>
-                                    <div className="flex items-center gap-2">
-                                      {'uniquecode' in order ? (
-                                        <ShoppingBag className="h-3 w-3 text-blue-500" />
-                                      ) : (
-                                        <Store className="h-3 w-3 text-orange-500" />
-                                      )}
-                                      <span className="text-sm font-medium text-gray-900">
-                                        {'uniquecode' in order ? order.uniquecode : `Hotel #${order.id}`}
-                                      </span>
-                                    </div>
-                                    <p className="text-xs text-gray-500 mt-1">
-                                      {formatDate(order.created_at)}
-                                    </p>
-                                  </div>
-                                  <div className="text-right">
-                                    <span className="text-sm font-bold text-gray-900">
-                                      {formatCurrency(getOrderTotal(order))}
-                                    </span>
-                                    <p className="text-xs text-gray-500 mt-1">
-                                      {'total_price' in order ? 'Laundry' : 'Hotel'}
-                                    </p>
-                                  </div>
-                                </div>
-                              ))}
-                            
-                            {performanceData.totalOrders === 0 && (
-                              <p className="text-sm text-gray-500 italic p-3 bg-white rounded-lg border border-gray-200">
-                                No recent orders
-                              </p>
-                            )}
-                          </div>
-                        </div>
                         
                       </div>
                     )}
