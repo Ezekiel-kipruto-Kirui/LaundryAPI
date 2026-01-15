@@ -246,9 +246,7 @@ REST_FRAMEWORK = {
         "rest_framework.filters.OrderingFilter",
     ],
     'DEFAULT_PAGINATION_CLASS': 'LaundryApp.pagination.CustomPageNumberPagination',
-    'PAGE_SIZE': 10,
-    'PAGE_SIZE_QUERY_PARAM': 'page_size',
-    'MAX_PAGE_SIZE': 50,
+    
 }
 
 # Disable APPEND_SLASH to prevent issues with API endpoints

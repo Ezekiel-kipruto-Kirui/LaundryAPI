@@ -142,7 +142,7 @@ export default function Login() {
         className="min-h-screen w-full flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8 bg-cover bg-center relative"
         style={{ backgroundImage: `url('/bg.png')` }}
       >
-        <div className="absolute inset-0 bg-black/40 backdrop-blur-sm"></div>
+        <div className="absolute inset-0 bg-black/40"></div>
 
         <div className="max-w-md w-full relative z-10">
           <div className="bg-white rounded-2xl shadow-xl overflow-hidden border border-gray-100">
