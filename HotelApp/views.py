@@ -193,6 +193,7 @@ class HotelExpenseFieldViewSet(viewsets.ModelViewSet):
     queryset = HotelExpenseField.objects.all()
     serializer_class = HotelExpenseFieldSerializer
     permission_classes = [permissions.IsAuthenticated]
+    pagination_class = None  # Disable pagination for expense fields
     #permission_classes = [AllowAny]
 
 # ---------------------------
@@ -202,6 +203,7 @@ class HotelExpenseRecordViewSet(viewsets.ModelViewSet):
     queryset = HotelExpenseRecord.objects.all().select_related("field")
     serializer_class = HotelExpenseRecordSerializer
     permission_classes = [permissions.IsAuthenticated]
+    pagination_class = None  # Disable pagination for expense records
     filterset_fields = {"date": ["gte", "lte"]}
     #permission_classes = [AllowAny]
 
