@@ -56,6 +56,7 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'django.contrib.humanize',
     'LaundryApp',
+    'axes',
     #'HotelApp',
     'compressor',
     "widget_tweaks",
@@ -68,14 +69,12 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
-
-
-
-
+   
     'django.middleware.security.SecurityMiddleware',
     'corsheaders.middleware.CorsMiddleware',
     'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
+    'axes.middleware.AxesMiddleware', 
     'django.middleware.common.CommonMiddleware',
     #'django.middleware.csrf.CsrfViewMiddleware',  # Disabled for API development
     'django.contrib.auth.middleware.AuthenticationMiddleware',
@@ -84,6 +83,11 @@ MIDDLEWARE = [
 
 ]
 
+AXES_FAILURE_LIMIT = 5          # max attempts
+AXES_COOLOFF_TIME = 1           # hours
+AXES_RESET_ON_SUCCESS = True
+
+AXES_LOCKOUT_PARAMETERS = ['ip_address', 'username']
 
 
 
@@ -130,6 +134,7 @@ SIMPLE_JWT = {
 FRONTEND_BUILD_DIR = os.path.join(BASE_DIR, 'Front-end', 'dist')
 
 AUTHENTICATION_BACKENDS = [
+    "axes.backends.AxesStandaloneBackend",
     'LaundryConfig.authentication.EmailBackend',  # custom email login backend
     'django.contrib.auth.backends.ModelBackend',
 ]
@@ -245,7 +250,7 @@ REST_FRAMEWORK = {
         "rest_framework.filters.SearchFilter",
         "rest_framework.filters.OrderingFilter",
     ],
-    'DEFAULT_PAGINATION_CLASS': 'LaundryApp.pagination.CustomPageNumberPagination',
+    # 'DEFAULT_PAGINATION_CLASS': 'LaundryApp.pagination.CustomPageNumberPagination',
     
 }
 

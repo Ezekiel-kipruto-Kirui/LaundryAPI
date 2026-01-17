@@ -4,6 +4,7 @@ from .models import (
     Customer, Order, OrderItem,
     ExpenseField, ExpenseRecord, Payment, shoptype,CustomUserManager,UserProfile
 )
+from django.utils import timezone
 
 User = get_user_model()
 
@@ -215,6 +216,8 @@ class OrderSerializer(serializers.ModelSerializer):
 
         return order
 
+    
+
     def update(self, instance, validated_data):
         items_data = validated_data.pop("items", None)
 
@@ -222,18 +225,20 @@ class OrderSerializer(serializers.ModelSerializer):
         if request and request.user.is_authenticated:
             validated_data["updated_by"] = request.user
 
-        # Update order fields
+        validated_data["updated_at"] = timezone.now()  # manual timestamp
+
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
+
         instance.save()
 
-        # Update order items (optional)
         if items_data is not None:
             instance.items.all().delete()
             for item_data in items_data:
                 OrderItem.objects.create(order=instance, **item_data)
 
         return instance
+
 
 
 # --- Expense Serializers ---

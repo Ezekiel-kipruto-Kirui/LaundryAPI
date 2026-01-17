@@ -1,6 +1,8 @@
 import Dashboard from "@/pages/Index";
 
 export const ROUTES = {
+
+
     dashboard:"/dashboard",
     reports: "/performance-report",
     siteManagement: "/site-management",

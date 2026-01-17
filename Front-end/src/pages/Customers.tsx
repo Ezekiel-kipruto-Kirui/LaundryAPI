@@ -21,14 +21,14 @@ import {
     FileText,
     MessageSquare,
     Send,
-    AlertCircle
+    AlertCircle,
+    ChevronDown
 } from 'lucide-react';
 import { API_BASE_URL } from '@/services/url';
 
 // --- API Endpoints ---
 const API_CUSTOMERS_URL = `${API_BASE_URL}/Laundry/customers/`;
 const API_ORDERS_URL = `${API_BASE_URL}/Laundry/orders/`;
-// Ensure URL includes /Laundry/ to avoid 405 errors
 const API_SMS_URL = `${API_BASE_URL}/Laundry/send-sms/`;
 
 // --- Types for Pagination ---
@@ -50,15 +50,26 @@ interface PaginatedOrdersResponse extends PaginatedResponse<Order> {
     results: Order[];
 }
 
+// --- FIX: Extended Interface for Customer to include update fields ---
+// This resolves TS2353 and TS2339 errors by defining the missing properties.
+interface CustomerExtended extends Customer {
+    updated_by?: string;
+    updated_at?: string;
+}
+
 // Type assertion helper for customer objects
-const assertCustomer = (customer: any): Customer => {
+// Returns CustomerExtended to include the new fields safely
+const assertCustomer = (customer: any): CustomerExtended => {
     return {
         id: customer?.id || 0,
         name: customer?.name || 'Unknown',
         phone: customer?.phone || '',
         order_count: customer?.order_count || 0,
         total_spent: customer?.total_spent || '0',
-        last_order_date: customer?.last_order_date || null
+        last_order_date: customer?.last_order_date || null,
+        // Add the missing fields with fallback defaults
+        updated_by: customer?.updated_by || 'Unknown',
+        updated_at: customer?.updated_at || null
     };
 };
 
@@ -68,13 +79,19 @@ const SMSModal = ({
     onClose,
     onSend,
     customerCount,
-    isSending
+    isSending,
+    batchSize, 
+    batchNumber, 
+    hasMoreBatches
 }: {
     isOpen: boolean;
     onClose: () => void;
-    onSend: (message: string) => void;
+    onSend: (message: string, limit: number, offset: number) => void;
     customerCount: number;
     isSending: boolean;
+    batchSize: number;
+    batchNumber: number;
+    hasMoreBatches: boolean;
 }) => {
     const [message, setMessage] = useState('');
     const [charCount, setCharCount] = useState(0);
@@ -88,7 +105,8 @@ const SMSModal = ({
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
         if (message.trim() && customerCount > 0) {
-            onSend(message);
+            const offset = (batchNumber - 1) * 100;
+            onSend(message, 100, offset);
         }
     };
 
@@ -98,15 +116,20 @@ const SMSModal = ({
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
             <div className="bg-white rounded-2xl shadow-xl w-full max-w-md">
                 <div className="px-6 py-4 border-b border-gray-200 bg-blue-50">
-                    <div className="flex items-center">
-                        <MessageSquare className="w-5 h-5 text-blue-600 mr-2" />
-                        <h2 className="text-xl font-semibold text-gray-900">Send SMS to All Customers</h2>
+                    <div className="flex items-center justify-between">
+                        <div className="flex items-center">
+                            <MessageSquare className="w-5 h-5 text-blue-600 mr-2" />
+                            <h2 className="text-xl font-semibold text-gray-900">Send SMS to All Customers</h2>
+                        </div>
+                        <span className="text-sm text-gray-600 bg-blue-100 px-2 py-1 rounded">
+                            Batch {batchNumber} of {Math.ceil(customerCount / 100)}
+                        </span>
                     </div>
                 </div>
                 <form onSubmit={handleSubmit} className="p-6">
                     <div className="mb-4">
                         <label className="block text-sm font-medium text-gray-700 mb-2">
-                            Message to send (All customers in database)
+                            Message to send (Limit: 100 customers per batch)
                         </label>
                         <textarea
                             value={message}
@@ -126,7 +149,7 @@ const SMSModal = ({
                         </div>
                     </div>
 
-                    <div className="flex justify-end space-x-3 pt-4 border-t border-gray-200">
+                    <div className="flex justify-between items-center pt-4 border-t border-gray-200">
                         <button
                             type="button"
                             onClick={onClose}
@@ -135,23 +158,59 @@ const SMSModal = ({
                         >
                             Cancel
                         </button>
-                        <button
-                            type="submit"
-                            disabled={isSending || !message.trim()}
-                            className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition-colors duration-200 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
-                        >
-                            {isSending ? (
-                                <>
-                                    <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
-                                    Sending...
-                                </>
-                            ) : (
-                                <>
-                                    <Send className="w-4 h-4 mr-2" />
-                                    Send SMS to All Customers
-                                </>
+                        <div className="flex gap-2">
+                             <button
+                                type="button"
+                                disabled={batchNumber <= 1 || isSending}
+                                onClick={() => {
+                                    const offset = (batchNumber - 2) * 100;
+                                    if (offset >= 0) onSend(message, 100, offset);
+                                }}
+                                className="px-3 py-2 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-lg transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                <ChevronLeft className="w-4 h-4" />
+                            </button>
+                            
+                            {hasMoreBatches && (
+                                <button
+                                    type="submit"
+                                    disabled={isSending || !message.trim()}
+                                    className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition-colors duration-200 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
+                                >
+                                    {isSending ? (
+                                        <>
+                                            <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                                            Sending...
+                                        </>
+                                    ) : (
+                                        <>
+                                            <Send className="w-4 h-4 mr-2" />
+                                            Send Next Batch
+                                        </>
+                                    )}
+                                </button>
                             )}
-                        </button>
+                            
+                            {!hasMoreBatches && batchNumber === 1 && (
+                                <button
+                                    type="submit"
+                                    disabled={isSending || !message.trim()}
+                                    className="px-6 py-2 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-lg transition-colors duration-200 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
+                                >
+                                    {isSending ? (
+                                        <>
+                                            <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                                            Sending...
+                                        </>
+                                    ) : (
+                                        <>
+                                            <Send className="w-4 h-4 mr-2" />
+                                            Send Batch 1
+                                        </>
+                                    )}
+                                </button>
+                            )}
+                        </div>
                     </div>
                 </form>
             </div>
@@ -184,7 +243,7 @@ const Card = ({ icon: Icon, title, value, colorClass }: { icon: React.ElementTyp
 };
 
 // Customer Form Modal
-const CustomerFormModal = ({ customer, onSave, onClose }: { customer: Customer | null, onSave: (c: Customer) => void, onClose: () => void }) => {
+const CustomerFormModal = ({ customer, onSave, onClose }: { customer: CustomerExtended | null, onSave: (c: CustomerExtended) => void, onClose: () => void }) => {
     const [name, setName] = useState(customer?.name || '');
     const [phone, setPhone] = useState(customer?.phone || '');
     const isNew = !customer || customer.id === 0;
@@ -192,7 +251,7 @@ const CustomerFormModal = ({ customer, onSave, onClose }: { customer: Customer |
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
         onSave({
-            ...(customer || { id: 0, phone: '', name: '', order_count: 0, total_spent: '0', last_order_date: null }),
+            ...(customer || { id: 0, phone: '', name: '', order_count: 0, total_spent: '0', last_order_date: null, updated_by: '', updated_at: null }),
             name,
             phone,
         });
@@ -300,13 +359,12 @@ const PaymentStatusBadge = ({ status }: { status: string }) => {
 
 // Customer Detail View Modal with Orders Table
 const CustomerDetailModal = ({ customer, orders, onClose, onEdit, onDelete }: {
-    customer: Customer,
+    customer: CustomerExtended,
     orders: Order[],
     onClose: () => void,
     onEdit: () => void,
     onDelete: () => void
 }) => {
-    // Optimization: Filter for this specific customer only (fast enough as usually one customer has limited orders)
     const customerOrders = orders.filter(order => {
         const orderCustomer = assertCustomer(order.customer);
         return orderCustomer.id === customer.id;
@@ -372,6 +430,20 @@ const CustomerDetailModal = ({ customer, orders, onClose, onEdit, onDelete }: {
                             <button onClick={onDelete} className="inline-flex items-center p-2 bg-red-100 hover:bg-red-200 text-red-700 rounded-lg transition-colors duration-200" title="Delete Customer"><Trash2 className="w-4 h-4 mr-2" /> Delete</button>
                         </div>
                     </div>
+                    
+                    {/* Updated By / Updated At Info */}
+                    {(customer.updated_by || customer.updated_at) && (
+                        <div className="mb-6 p-4 bg-blue-50 rounded-lg border border-blue-100 flex items-start gap-3">
+                            <UserCircle className="w-5 h-5 text-blue-600 mt-0.5" />
+                            <div className="text-sm">
+                                <p className="font-semibold text-blue-900">Record Updated</p>
+                                <p className="text-blue-700">
+                                    By <span className="font-medium">{customer.updated_by || 'System'}</span> on {' '}
+                                    <span className="font-medium">{formatDate(customer.updated_at)}</span>
+                                </p>
+                            </div>
+                        </div>
+                    )}
 
                     <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
                         <div className="bg-blue-50 p-4 rounded-lg">
@@ -544,8 +616,8 @@ const fetchAllOrdersWithPagination = async (): Promise<Order[]> => {
 const getAuthToken = (): string | null => localStorage.getItem("accessToken");
 
 export default function CustomersPage() {
-    const [customers, setCustomers] = useState<Customer[]>([]);
-    const [allCustomers, setAllCustomers] = useState<Customer[]>([]);
+    const [customers, setCustomers] = useState<CustomerExtended[]>([]);
+    const [allCustomers, setAllCustomers] = useState<CustomerExtended[]>([]);
     const [orders, setOrders] = useState<Order[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -554,7 +626,7 @@ export default function CustomersPage() {
     const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
     const [isSMSModalOpen, setIsSMSModalOpen] = useState(false);
     const [isSendingSMS, setIsSendingSMS] = useState(false);
-    const [currentCustomer, setCurrentCustomer] = useState<Customer | null>(null);
+    const [currentCustomer, setCurrentCustomer] = useState<CustomerExtended | null>(null);
     const [ordersLoading, setOrdersLoading] = useState(false);
 
     const [pagination, setPagination] = useState({
@@ -565,6 +637,9 @@ export default function CustomersPage() {
         next: null as string | null,
         previous: null as string | null
     });
+
+    // SMS Pagination State
+    const [smsBatchNumber, setSmsBatchNumber] = useState(1);
 
     // OPTIMIZATION 1: Calculate Customer Stats Map using useMemo
     // This ensures we only iterate through 'orders' (e.g. 2000 items) once when 'orders' change,
@@ -600,9 +675,9 @@ export default function CustomersPage() {
     }, [orders]);
 
     // Helper function to fetch ALL customers (bypassing pagination)
-    const fetchAllCustomers = useCallback(async (): Promise<Customer[]> => {
+    const fetchAllCustomers = useCallback(async (): Promise<CustomerExtended[]> => {
         try {
-            let allCustomers: Customer[] = [];
+            let allCustomers: CustomerExtended[] = [];
             let nextUrl: string | null = `${API_CUSTOMERS_URL}?page_size=100`;
 
             while (nextUrl) {
@@ -704,44 +779,36 @@ export default function CustomersPage() {
     }, [orders, pagination.pageSize, customerStatsMap]);
 
     // SMS Sending Function
-    const sendBulkSMS = async (message: string) => {
+    const sendBulkSMS = async (message: string, limit: number, offset: number) => {
         setIsSendingSMS(true);
         setError(null);
 
         try {
-            // OPTIMIZATION 3: Use state directly instead of fetching all customers again
-            if (allCustomers.length === 0) {
-                alert("No customers found in database.");
+            // Check if we are trying to send to an invalid offset
+            if (allCustomers.length === 0 || offset >= allCustomers.length) {
+                alert("No customers found or invalid batch selection.");
+                setIsSendingSMS(false);
                 return;
             }
 
+            // Slice the customers for the current batch based on limit and offset
+            const batchCustomers = allCustomers.slice(offset, offset + limit);
+
+            if (batchCustomers.length === 0) {
+                alert("No customers found in this batch.");
+                setIsSendingSMS(false);
+                return;
+            }
+            
+            // Prepare phone numbers for this batch
             const phoneNumbers = [...new Set(
-                allCustomers
+                batchCustomers
                     .map(customer => customer.phone)
                     .filter(phone => phone && phone.trim() !== '')
             )];
 
             if (phoneNumbers.length === 0) {
-                alert("No valid phone numbers found among customers.");
-                return;
-            }
-
-            // --- UPDATE: Limit to 100 customers ---
-            const SMS_LIMIT = 100;
-            let finalPhoneNumbers = phoneNumbers;
-            
-            // If there are more than 100 numbers, slice the array
-            if (phoneNumbers.length > SMS_LIMIT) {
-                finalPhoneNumbers = phoneNumbers.slice(0, SMS_LIMIT);
-            }
-
-            // Update confirmation message to reflect the limit
-            const isTruncated = phoneNumbers.length > SMS_LIMIT;
-            const countText = isTruncated
-                ? `the first ${SMS_LIMIT} customers (Total available: ${phoneNumbers.length}).`
-                : `${finalPhoneNumbers.length} customer(s).`;
-
-            if (!confirm(`Are you sure you want to send SMS to ${countText}`)) {
+                alert("No valid phone numbers found in this batch.");
                 setIsSendingSMS(false);
                 return;
             }
@@ -756,8 +823,10 @@ export default function CustomersPage() {
                     'Authorization': `Bearer ${token}`
                 },
                 body: JSON.stringify({
-                    to_number: finalPhoneNumbers, // Send the limited array
-                    message: message
+                    to_number: phoneNumbers,
+                    message: message,
+                    limit: limit, 
+                    offset: offset
                 })
             });
 
@@ -769,9 +838,10 @@ export default function CustomersPage() {
 
             const result = await res.json();
             console.log('SMS Result:', result);
-            alert(`SMS sent successfully to ${finalPhoneNumbers.length} customer(s)!`);
+            alert(`SMS sent successfully to ${phoneNumbers.length} customer(s)!`);
 
-            setIsSMSModalOpen(false);
+            // Advance batch number on success
+            setSmsBatchNumber(prev => prev + 1);
 
         } catch (err: any) {
             console.error("Error sending SMS:", err);
@@ -822,7 +892,7 @@ export default function CustomersPage() {
     }, [pagination.currentPage, searchQuery, ordersLoading]);
 
     // CRUD Handlers
-    const saveCustomer = async (customerData: Customer) => {
+    const saveCustomer = async (customerData: CustomerExtended) => {
         setLoading(true);
         const isNew = customerData.id === 0;
         const url = isNew ? API_CUSTOMERS_URL : `${API_CUSTOMERS_URL}${customerData.id}/`;
@@ -838,7 +908,7 @@ export default function CustomersPage() {
                 })
             });
 
-            const savedCustomer: Customer = isNew ? response : customerData;
+            const savedCustomer: CustomerExtended = isNew ? response : customerData;
 
             // OPTIMIZATION 5: Optimistic Update
             // Update allCustomers state immediately without refetching from DB
@@ -895,12 +965,12 @@ export default function CustomersPage() {
         }
     };
 
-    const viewCustomerDetails = (customer: Customer) => {
+    const viewCustomerDetails = (customer: CustomerExtended) => {
         setCurrentCustomer(customer);
         setIsDetailModalOpen(true);
     };
 
-    const editCustomer = (customer: Customer) => {
+    const editCustomer = (customer: CustomerExtended) => {
         setCurrentCustomer(customer);
         setIsModalOpen(true);
     };
@@ -954,7 +1024,7 @@ export default function CustomersPage() {
                             <PlusCircle className="w-5 h-5 mr-2" />
                             Add New Customer
                         </button>
-                        <button onClick={() => setIsSMSModalOpen(true)} className="inline-flex items-center justify-center px-6 py-3 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-lg transition-colors duration-200 shadow-sm" disabled={loading}>
+                        <button onClick={() => { setSmsBatchNumber(1); setIsSMSModalOpen(true); }} className="inline-flex items-center justify-center px-6 py-3 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-lg transition-colors duration-200 shadow-sm" disabled={loading}>
                             <MessageSquare className="w-5 h-5 mr-2" />
                             Send SMS to All ({allCustomers.length} customers)
                         </button>
@@ -1011,7 +1081,6 @@ export default function CustomersPage() {
                             <tbody className="bg-white divide-y divide-gray-200">
                                 {customers.length > 0 ? (
                                     customers.map((customer) => {
-                                        // OPTIMIZATION 7: Use Map Lookup instead of Filtering
                                         const stats = customerStatsMap.get(customer.id) || { orderCount: 0, totalBilled: 0, lastOrderDate: null };
 
                                         return (
@@ -1023,13 +1092,11 @@ export default function CustomersPage() {
                                                         </div>
                                                         <div>
                                                             <div className="text-sm font-medium text-gray-900">{customer.name}</div>
-                                                            
                                                         </div>
                                                     </div>
                                                 </td>
                                                 <td className="px-6 py-4 whitespace-nowrap">
                                                     <div className="text-sm text-gray-900">{customer.phone}</div>
-                                                   
                                                 </td>
                                                 <td className="px-6 py-4 whitespace-nowrap">
                                                     <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-blue-100 text-blue-800">
@@ -1039,7 +1106,6 @@ export default function CustomersPage() {
                                                 </td>
                                                 <td className="px-6 py-4 whitespace-nowrap">
                                                     <div className="text-sm font-semibold text-green-600">KSh {stats.totalBilled.toFixed(2)}</div>
-                                                    
                                                 </td>
                                                 <td className="px-6 py-4 whitespace-nowrap">
                                                     <div className="text-sm text-gray-900">
@@ -1049,7 +1115,6 @@ export default function CustomersPage() {
                                                             <span className="text-gray-400">Never</span>
                                                         )}
                                                     </div>
-                                                    
                                                 </td>
                                                 <td className="px-6 py-4 whitespace-nowrap">
                                                     <div className="flex items-center space-x-2">
@@ -1123,6 +1188,9 @@ export default function CustomersPage() {
                 onSend={sendBulkSMS}
                 customerCount={allCustomers.length}
                 isSending={isSendingSMS}
+                batchSize={100}
+                batchNumber={smsBatchNumber}
+                hasMoreBatches={smsBatchNumber * 100 < allCustomers.length}
             />
         </div>
     );

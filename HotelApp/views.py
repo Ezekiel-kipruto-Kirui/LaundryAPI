@@ -27,7 +27,7 @@ from LaundryApp.pagination import CustomPageNumberPagination
 
 User = get_user_model()
 
-from django.db.models import Sum
+from django.db.models import Sum,F
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from .models import HotelOrderItem, FoodItem
@@ -35,22 +35,8 @@ from rest_framework.decorators import api_view, permission_classes
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter
 
-# @api_view(['GET']) # This tells Django to treat this as a REST API endpoint
-# @permission_classes([AllowAny])
-# def update_food_revenue(request):
-#     # 1. Calculate totals for all food items
-#     totals = HotelOrderItem.objects.values('food_item').annotate(total_cash=Sum('price'))
-    
-#     # 2. Update the FoodItem records
-#     for item in totals:
-#         try:
-#             food = FoodItem.objects.get(id=item['food_item'])
-#             food.total_amount_cash = item['total_cash']
-#             food.save()
-#         except FoodItem.DoesNotExist:
-#             continue
-            
-#     return Response({"message": "Total revenue per food item updated successfully!"})
+
+
 @api_view(['GET'])
 @permission_classes([permissions.IsAuthenticated])
 def update_food_revenue(request):
@@ -78,9 +64,10 @@ class FoodCategoryViewSet(viewsets.ModelViewSet):
 # ---------------------------
 # views.py
 class FoodItemViewSet(viewsets.ModelViewSet):
-    queryset = FoodItem.objects.all().select_related("category", "created_by")
+    queryset = FoodItem.objects.all()
     serializer_class = FoodItemSerializer
     permission_classes = [AllowAny]  # Or your preferred permissions
+
     
     def get_serializer_class(self):
         return FoodItemSerializer
@@ -102,6 +89,7 @@ class HotelOrderItemViewSet(viewsets.ModelViewSet):
     serializer_class = HotelOrderItemSerializer
     permission_classes = [permissions.IsAuthenticated]
     pagination_class = CustomPageNumberPagination
+
     
     def get_queryset(self):
         queryset = HotelOrderItem.objects.all().select_related("food_item", "order", "order__created_by")
@@ -185,6 +173,17 @@ class HotelOrderViewSet(viewsets.ModelViewSet):
             'total_orders': total_orders,
             'total_revenue': float(total_revenue),
             'average_order_value': float(average_order_value)
+        })
+    @action(detail=False, methods=['get'])
+    def user_sales_summary(self, request):
+        summary = HotelOrderItem.objects.values(
+            user_id=F('order__created_by__id'),
+            ).annotate(total_revenue=Sum('price')
+            ).order_by('-total_revenue')
+
+        return Response({
+            'status': 'success',
+            'data': list(summary)
         })
 # ---------------------------
 #   EXPENSE FIELD VIEWSET

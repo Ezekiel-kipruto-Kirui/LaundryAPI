@@ -23,9 +23,8 @@ class FoodCategorySerializer(serializers.ModelSerializer):
 
 # serializers.py
 class FoodItemSerializer(serializers.ModelSerializer):
-    category = FoodCategorySerializer
-    created_by = UserProfileSerializer
-    
+    category = FoodCategorySerializer()
+    created_by = UserProfileSerializer()
     class Meta:
         model = FoodItem
         fields = '__all__'

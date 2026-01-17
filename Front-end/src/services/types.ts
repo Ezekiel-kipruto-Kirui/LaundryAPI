@@ -5,6 +5,7 @@ export interface Customer {
   order_count?: number;
   total_spent?: string;
   last_order_date?: string | null;
+  created_by?:any;
 }
 export interface OrderItem {
   id?: number;

@@ -19,6 +19,7 @@ import LaundryDashboard from "./pages/LaundryDashboard";
 import CustomersPage from "./pages/Customers";
 import FoodItems from "./pages/foodItemspage";
 import Dashboard from "./pages/Maindashboard";
+import LaundryLanding from "./pages/website";
 import { ROUTES } from "./services/Routes";
 import UserProfile from "./pages/user-profile";
 
@@ -32,7 +33,6 @@ type AppShopType = 'laundry' | 'hotel' | null;
 const getShopIdFromType = (shopType: ShopType): AppShopType => {
   if (!shopType) return null;
 
-  // Map your shop types to section IDs
   const shopMapping: Record<string, 'laundry' | 'hotel'> = {
     'Shop A': 'laundry',
     'Shop B': 'hotel',
@@ -56,28 +56,21 @@ const ProtectedRoute = ({
   const token = getAccessToken();
   const userRole = getUserRole();
   const selectedShop = getSelectedShop();
-
-  // Convert selectedShop to app shop type
   const appSelectedShop = getShopIdFromType(selectedShop);
 
-  // If not authenticated, redirect to login
   if (!token) {
     return <Navigate to="/login" replace />;
   }
 
-  // If user is staff and hasn't selected a shop, redirect to login to select shop
   if (userRole === "staff" && !selectedShop) {
     return <Navigate to="/login" replace state={{ needsShopSelection: true }} />;
   }
 
-  // Check admin access
   if (adminOnly && userRole !== "admin") {
     return <Navigate to="/unauthorized" replace />;
   }
 
-  // Check shop access for staff
   if (userRole === "staff" && shopType && appSelectedShop !== shopType) {
-    // Redirect staff to their assigned shop's dashboard
     if (appSelectedShop === "laundry") {
       return <Navigate to={ROUTES.laundryDashboard} replace />;
     } else if (appSelectedShop === "hotel") {
@@ -111,22 +104,22 @@ const App = () => {
     );
   }
 
-  // Helper to get the initial route based on user role and shop
-  const getInitialRoute = () => {
-    if (!userRole) return "/login";
+  const getRootRedirect = () => {
+    if (!isAuthenticated) {
+      return "/home";
+    }
 
     if (userRole === "admin") {
       return ROUTES.dashboard;
-    } else if (userRole === "staff") {
+    } 
+    
+    if (userRole === "staff") {
       const appSelectedShop = getShopIdFromType(selectedShop);
-      if (appSelectedShop === "laundry") {
-        return ROUTES.laundryDashboard;
-      } else if (appSelectedShop === "hotel") {
-        return ROUTES.fooditems;
-      }
+      if (appSelectedShop === "laundry") return ROUTES.laundryDashboard;
+      if (appSelectedShop === "hotel") return ROUTES.fooditems;
     }
 
-    return "/login";
+    return "/home"; 
   };
 
   return (
@@ -136,19 +129,36 @@ const App = () => {
         <Sonner />
         <BrowserRouter>
           <Routes>
-            {/* Public route */}
+            {/* 
+              PUBLIC LANDING PAGE 
+              NO SIDEBAR: Wrapped in a simple div instead of MainLayout.
+            */}
+            <Route 
+              path="/home" 
+              element={
+                <div className="min-h-screen w-full">
+                  <LaundryLanding />
+                </div>
+              } 
+            />
+
+            {/* 
+              ROOT REDIRECT (/)
+            */}
+            <Route 
+              path="/" 
+              element={<Navigate to={getRootRedirect()} replace />} 
+            />
+
+            {/* Public Login Route */}
             <Route path="/login" element={<Login />} />
 
-            {/* Protected routes */}
+            {/* 
+              PROTECTED ROUTES 
+              Still using MainLayout (which has Sidebar) for these.
+            */}
             {isAuthenticated ? (
               <>
-                {/* Root redirect */}
-                <Route
-                  path="/"
-                  element={<Navigate to={getInitialRoute()} replace />}
-                />
-
-                {/* Admin routes */}
                 <Route
                   path={ROUTES.dashboard}
                   element={
@@ -180,7 +190,6 @@ const App = () => {
                   }
                 />
 
-                {/* Laundry routes */}
                 <Route
                   path={ROUTES.laundryDashboard}
                   element={
@@ -232,7 +241,6 @@ const App = () => {
                   }
                 />
 
-                {/* Hotel routes */}
                 <Route
                   path={ROUTES.fooditems}
                   element={
@@ -266,19 +274,17 @@ const App = () => {
                 <Route
                   path={ROUTES.userprofile}
                   element={
-                   
+                    <ProtectedRoute>
                       <MainLayout>
                         <UserProfile />
                       </MainLayout>
-                   
+                    </ProtectedRoute>
                   }
                 />
 
-                {/* Catch-all for authenticated users */}
                 <Route path="*" element={<NotFound />} />
               </>
             ) : (
-              /* Unauthenticated users get redirected to login */
               <Route path="*" element={<Navigate to="/login" replace />} />
             )}
           </Routes>

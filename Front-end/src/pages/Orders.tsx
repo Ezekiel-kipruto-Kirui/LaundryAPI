@@ -10,11 +10,13 @@ import {
   MessageSquare, Send, Calendar, Phone,
   Database, AlertCircle
 } from 'lucide-react';
-import { Order, OrderItem } from "@/services/types";
+import { Order, OrderItem,User } from "@/services/types";
 import { ROUTES } from "@/services/Routes";
 
 export const ORDERS_URL = `${API_BASE_URL}/Laundry/orders/`;
 export const SEND_SMS_URL = `${API_BASE_URL}/Laundry/send-sms/`;
+const CURRENT_USER_URL = `${API_BASE_URL}/users/me/`;
+
 
 // --- Constants & Types ---
 
@@ -251,6 +253,8 @@ export default function Orders() {
   const [openDropdownId, setOpenDropdownId] = useState<number | null>(null);
   const [currentOrder, setCurrentOrder] = useState<Order | null>(null);
   const [paymentType, setPaymentType] = useState('cash');
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+
 
   // Filter State
   const [filters, setFilters] = useState<FilterState>({
@@ -281,6 +285,24 @@ export default function Orders() {
     pending_revenue: 0,
     completed_revenue: 0,
   });
+  const fetchCurrentUser = useCallback(async () => {
+  try {
+    const user = await apiFetch<User>(CURRENT_USER_URL);
+    setCurrentUser(user);
+  } catch (err) {
+    console.error("Failed to fetch current user", err);
+  }
+}, []);
+useEffect(() => {
+  fetchCurrentUser();
+}, [fetchCurrentUser]);
+
+const currentUserName = useMemo(() => {
+  if (!currentUser) return "Unknown";
+  return `${currentUser.first_name} ${currentUser.last_name}`.trim();
+}, [currentUser]);
+
+
 
   // Fetch stats from backend summary endpoint
   const fetchStats = useCallback(async () => {
@@ -640,10 +662,7 @@ export default function Orders() {
       <div className="max-w-full mx-auto">
         {/* Header */}
         <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
-          <button onClick={() => window.location.href = ROUTES.dashboard} className="inline-flex items-center px-4 py-2 bg-white rounded-lg shadow-sm border border-gray-200 text-gray-700 hover:text-blue-600 hover:shadow-md transition-all">
-            <Home className="w-4 h-4 mr-2 text-blue-500" />
-            <span className="text-sm font-medium">Dashboard Home</span>
-          </button>
+          
 
           <div className="flex-grow max-w-3xl relative">
             <input
@@ -981,17 +1000,25 @@ export default function Orders() {
         {showReceiptModal && currentOrder && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
             <div className="bg-white rounded-lg shadow-lg w-full max-w-sm p-6">
-              <div className="flex justify-between items-center mb-4">
-                <h3 className="font-bold text-lg text-gray-900">Receipt</h3>
-                <button onClick={() => setShowReceiptModal(false)} className="text-gray-400 hover:text-gray-600">
+              <button onClick={() => setShowReceiptModal(false)} className="text-gray-600 hover:text-gray-600">
                   <X className="w-5 h-5" />
                 </button>
+              <div className="text-center items-center mb-4">
+               
+                    <h3 className="font-bold text-lg text-gray-900">Clean Page Laundry</h3>
+                    <p>Be Spotless Be Bright</p>
+               
+                
+                
               </div>
-              <div className="text-sm mb-4">
-                <p className="mb-1"><strong>Order:</strong> {currentOrder.uniquecode}</p>
-                <p className="mb-1"><strong>Date:</strong> {formatDate(currentOrder.created_at)}</p>
-                <p className="mb-3"><strong>Customer:</strong> {currentOrder.customer.name}</p>
+                <div className="text-sm mb-4 w-full">
+                  <div className=" justify-center w-[100%] items-center">
+                  <p className="mb-1"><strong>Order:</strong> {currentOrder.uniquecode}</p>
+                  <p className="mb-1"><strong>Date:</strong> {formatDate(currentOrder.created_at)}</p>
+                  <p className="mb-3"><strong>Customer:</strong> {currentOrder.customer.name}</p>
+                </div>
                 <hr className="my-2" />
+                
                 {currentOrder.items.map((item, i) => (
                   <div key={i} className="flex justify-between mb-1">
                     <span>{item.itemname}</span>
@@ -1011,6 +1038,11 @@ export default function Orders() {
                   <span>Balance</span>
                   <span>{formatCurrency(currentOrder.balance)}</span>
                 </div>
+              </div>
+              <div className="text-center">
+                <p>Served by: {currentUserName}</p>
+                <p>Contacts:  0705588354 </p>
+                <p>Thankyou for trusting our services!</p>
               </div>
               <button
                 onClick={() => window.print()}

@@ -5,8 +5,9 @@ from .views import (
     FoodCategoryViewSet, FoodItemViewSet,
     HotelOrderViewSet, HotelOrderItemViewSet,
     HotelExpenseFieldViewSet, HotelExpenseRecordViewSet
+    # ,user_sales_summary
 )
-
+from django.urls import path, include
 router = DefaultRouter()
 
 router.register("food-categories", FoodCategoryViewSet)
@@ -16,7 +17,10 @@ router.register("order-items", HotelOrderItemViewSet)
 router.register("Hotelexpense-fields", HotelExpenseFieldViewSet)
 router.register("Hotelexpense-records", HotelExpenseRecordViewSet)
 
-urlpatterns = router.urls
+urlpatterns = [
+    path('',include(router.urls)),
+    # path('user_sales/',user_sales_summary)
+] 
 
 """
 

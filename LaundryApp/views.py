@@ -24,7 +24,7 @@ from .pagination import CustomPageNumberPagination
 from .sms_utility import send_sms   
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter
-from django.db.models import Sum, Count, Q
+from django.db.models import Sum, Count, Q,F
 
 class CurrentUserView(APIView):
     permission_classes = [IsAuthenticated]
@@ -145,6 +145,27 @@ class OrderViewSet(viewsets.ModelViewSet):
         "customer__phone",
     ]
 
+    # ... existing code ...
+
+    @action(detail=False, methods=['get'])
+    def user_sales_summary(self, request):
+        """
+        Optimized endpoint to sum Order total_price per user.
+        """
+        # Aggregate Order model, grouping by the created_by user
+        summary = Order.objects.values(
+            user_id=F('created_by__id'),
+            # username=F('created_by__username'),
+            email=F('created_by__email')
+        ).annotate(
+            total_revenue=Sum('total_price')
+        ).order_by('-total_revenue')
+
+        return Response({
+            'status': 'success',
+            'data': list(summary)
+        })
+
     @action(detail=False, methods=['get'])
     def summary(self, request):
         """Get order summary statistics with optional date filtering"""
@@ -174,6 +195,7 @@ class OrderViewSet(viewsets.ModelViewSet):
             'completed_revenue': float(completed_revenue),
             'shop_breakdown': list(shop_stats)
         })
+        
 
 
 # ---------------------- ORDER ITEM CRUD ---------------------- #
@@ -184,7 +206,8 @@ class OrderItemViewSet(viewsets.ModelViewSet):
     """
     queryset = OrderItem.objects.all()
     serializer_class = OrderItemSerializer
-    permission_classes = [AllowAny]
+    permission_classes = [IsAuthenticated]
+    pagination_class=CustomPageNumberPagination
 
 
 # ---------------------- EXPENSE FIELD CRUD ---------------------- #
@@ -198,7 +221,8 @@ class ExpenseFieldViewSet(viewsets.ModelViewSet):
 class ExpenseRecordViewSet(viewsets.ModelViewSet):
     queryset = ExpenseRecord.objects.all().order_by("-date")
     serializer_class = ExpenseRecordSerializer
-    permission_classes = [AllowAny]
+    permission_classes = [IsAuthenticated]
+    
     filterset_fields = {"date": ["gte", "lte"]}
 
 
@@ -268,3 +292,4 @@ def sendsms_view(request):
         },
         status=status.HTTP_400_BAD_REQUEST
     )
+    
