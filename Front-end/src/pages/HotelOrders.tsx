@@ -1541,7 +1541,7 @@ export default function HotelOrderItems() {
                   <AlertTriangle className="h-8 w-8 text-red-600" />
                 </div>
                 <h3 className="text-xl font-bold text-gray-900 mb-2">Confirm Order Deletion</h3>
-                <p className="text-gray-600 text-base">Are you sure you want to delete this entire order?</p>
+                <p className="text-gray-600 text-base"> Are you sure you want to delete this entire order? </p>
               </div>
               <div className="flex justify-center space-x-4">
                 <button

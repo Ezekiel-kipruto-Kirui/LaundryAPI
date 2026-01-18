@@ -1551,7 +1551,7 @@ export default function HotelOrderItems() {
                   }}
                   className="px-6 py-2.5 bg-gray-300 hover:bg-gray-400 text-gray-800 font-semibold rounded-xl transition-all duration-200 text-base"
                 >
-                  Cancel
+                   Cancel 
                 </button>
                 <button
                   onClick={handleDeleteOrder}
