@@ -1,3 +1,0 @@
-write a code to process the data returned by the server and give the following insights
-
-totalrevenue
