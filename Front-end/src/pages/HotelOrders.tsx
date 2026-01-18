@@ -55,6 +55,15 @@ const getAuthHeaders = (): HeadersInit => {
   };
 };
 
+// FIX: Helper function to format date as YYYY-MM-DD using LOCAL time zone
+// This prevents dates from shifting to the previous month when in positive UTC timezones (e.g., Kenya +3)
+const getLocalDateString = (date: Date): string => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
 interface DateRange {
   start_date: string;
   end_date: string;
@@ -345,10 +354,11 @@ const formatPrice = (price: any): string => {
 };
 
 // Custom hook for date range with localStorage persistence
-// Ensures start date is always the 1st of the month
+// FIX: Ensures start date is always the 1st of the month (handles UTC offsets correctly)
 const useDateRange = () => {
   const [dateRange, setDateRange] = useState<DateRange>(() => {
     const now = new Date();
+    // Get 1st of current month at midnight local time
     const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
     const today = new Date();
 
@@ -356,8 +366,8 @@ const useDateRange = () => {
 
     // Default to 1st of month to Current day if no saved date
     const defaultRange = {
-      start_date: firstDayOfMonth.toISOString().split('T')[0],
-      end_date: today.toISOString().split('T')[0]
+      start_date: getLocalDateString(firstDayOfMonth),
+      end_date: getLocalDateString(today)
     };
 
     if (saved) {
@@ -389,12 +399,13 @@ const useDateRange = () => {
   const resetDateRange = useCallback(() => {
     // Reset specifically to 1st of current month -> Today
     const now = new Date();
+    // Get 1st of current month
     const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
     const today = new Date();
 
     const resetRange = {
-      start_date: firstDayOfMonth.toISOString().split('T')[0],
-      end_date: today.toISOString().split('T')[0]
+      start_date: getLocalDateString(firstDayOfMonth),
+      end_date: getLocalDateString(today)
     };
 
     localStorage.setItem('hotelOrdersDateRange', JSON.stringify(resetRange));
@@ -919,7 +930,7 @@ export default function HotelOrderItems() {
     return formatPrice(formData.items.reduce((sum, item) => sum + (parseFloat(item.price) || 0), 0));
   }, [formData.items]);
 
-  // Render page numbers like in the example
+  // Render page numbers like in example
   const renderPageNumbers = useCallback(() => {
     if (totalPages <= 1) return null;
 
