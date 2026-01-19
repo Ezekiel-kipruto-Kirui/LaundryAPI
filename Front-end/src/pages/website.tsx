@@ -345,7 +345,7 @@ export default function LaundryLanding() {
               {[
                 {
                   title: "Dry Cleaning",
-                  desc: "Expert shoe cleaning that brings back freshness, brightness, and style.",
+                  desc: "Expert cleaning that brings back freshness, brightness, and style.",
                   img: "./drycleaningimg.png"
                 },
                 {
