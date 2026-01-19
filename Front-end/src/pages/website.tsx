@@ -42,29 +42,27 @@ export default function LaundryLanding() {
   const [testimonialIndex, setTestimonialIndex] = useState(0);
 
   const testimonials = [
+     {
+      title: "Clothes Cleaning Transformation",
+      desc: "Clothes transformed from dirty to fresh and vibrant. Stains removed and fabric revitalized for a like-new look.",
+      beforeImg: "./dirtyclothes.png",
+      afterImg: "./cleanclothes.jpg",
+      
+    },
     {
       title: "Shoes Restored to Perfection",
       desc: "Transform your shoes with our expert services. Sneaker cleaning, leather polishing, and stain removal. Step out fresh and spotless every day!",
-      beforeImg: "https://images.unsplash.com/photo-1560769629-975ec94e6a86?auto=format&fit=crop&w=500&q=80",
-      afterImg: "https://images.unsplash.com/photo-1542291026-7eec264c27ff?auto=format&fit=crop&w=500&q=80",
-      circleImg: "https://images.unsplash.com/photo-1595950653106-6c9ebd614d3a?auto=format&fit=crop&w=300&q=80",
-      detailLabel: "Shoe Detail"
+      beforeImg: "./dirtshoes.png",
+      afterImg: "./new-sneakers.jpg",
+      
     },
+   
     {
-      title: "Clothes Cleaning Transformation",
-      desc: "Clothes transformed from dirty to fresh and vibrant. Stains removed and fabric revitalized for a like-new look.",
-      beforeImg: "https://images.unsplash.com/photo-1532453288672-3a27e9be9efd?auto=format&fit=crop&w=500&q=80",
-      afterImg: "https://images.unsplash.com/photo-1483985988355-763728e1935b?auto=format&fit=crop&w=500&q=80",
-      circleImg: "https://images.unsplash.com/photo-1490481651871-ab68de25d43d?auto=format&fit=crop&w=300&q=80",
-      detailLabel: "Clothes Detail"
-    },
-    {
-      title: "Mattress Cleaning Transformation",
-      desc: "Mattresses cleaned from dust, stains, and odors to provide a hygienic and comfortable sleeping surface.",
-      beforeImg: "https://images.unsplash.com/photo-1505693314120-0d443867891c?auto=format&fit=crop&w=500&q=80",
-      afterImg: "https://images.unsplash.com/photo-1616486338812-3dadae4b4ace?auto=format&fit=crop&w=500&q=80",
-      circleImg: "https://images.unsplash.com/photo-1631049552057-403cdb8f0658?auto=format&fit=crop&w=300&q=80",
-      detailLabel: "Mattress Detail"
+      title: "Bedding Cleaning Transformation",
+      desc: "Bedding cleaned from dust, stains, and odors to provide a hygienic and comfortable sleeping surface.",
+      beforeImg: "./dirtybeddings.png",
+      afterImg: "./cleanbeddings.png",
+    
     }
   ];
 
@@ -287,9 +285,7 @@ export default function LaundryLanding() {
         {/* --- SERVICES SECTION 2 (More Services) --- */}
         <section className="py-16 bg-white">
           <div className="container mx-auto px-4">
-            <div className="text-center mb-16">
-              <h2 className="text-3xl font-bold text-gray-900">More of our services</h2>
-            </div>
+           
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
               {[
@@ -304,9 +300,9 @@ export default function LaundryLanding() {
                   img: "./man-servant-cleaning-house.jpg"
                 },
                 {
-                  title: "Clothes Washing & Folding",
-                  desc: "Neat, fresh, and well-folded clothes—washed with care.",
-                  img: "https://images.unsplash.com/photo-1558171813-4c088753af8f?auto=format&fit=crop&w=600&q=80"
+                  title: "Clothes Washing ",
+                  desc: "Neat, fresh, and well-washed clothes with care.",
+                  img: "./washing.jpg"
                 }
               ].map((service, idx) => (
                 <div key={idx} className="group relative bg-white rounded-2xl shadow-md hover:shadow-xl transition-all duration-300 overflow-hidden h-[450px] mx-auto w-full max-w-[95%]">
@@ -340,7 +336,60 @@ export default function LaundryLanding() {
             </div>
           </div>
         </section>
+{/* --- SERVICES SECTION 3 (More Services) --- */}
+        <section className="py-16 bg-white">
+          <div className="container mx-auto px-4">
+           
 
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+              {[
+                {
+                  title: "Shoes Cleaning",
+                  desc: "Expert shoe cleaning that brings back freshness, brightness, and style.",
+                  img: "./Drycleaning.png"
+                },
+                {
+                  title: "Ironing",
+                  desc: "Quick-drying and proper ironing ready to use as soon as possible.",
+                  img: "./ironing.jpg"
+                },
+                {
+                  title: "Clothes Folding",
+                  desc: "Neat, fresh, and well-folded clothes with care.",
+                  img: "Folding.jpg"
+                }
+              ].map((service, idx) => (
+                <div key={idx} className="group relative bg-white rounded-2xl shadow-md hover:shadow-xl transition-all duration-300 overflow-hidden h-[450px] mx-auto w-full max-w-[95%]">
+                  <div className="absolute inset-0 bg-[#0db5f7] z-0 h-0 group-hover:h-full transition-all duration-500 ease-in-out"></div>
+                  
+                  <div className="relative z-10 h-[220px] overflow-hidden rounded-t-2xl">
+                    <img 
+                      src={service.img} 
+                      alt={service.title} 
+                      className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
+                    />
+                  </div>
+                  
+                  <div className="relative z-10 p-6 flex flex-col justify-between h-[230px]">
+                    <div>
+                      <h3 className="text-xl font-bold text-gray-900 group-hover:text-white transition-colors mb-2">{service.title}</h3>
+                      <p className="text-sm text-gray-600 group-hover:text-gray-100 leading-relaxed mb-4">
+                        {service.desc}
+                      </p>
+                    </div>
+                    
+                    <div className="space-y-4">
+                      <div className="w-full h-[1px] bg-gray-300 group-hover:bg-white transition-colors"></div>
+                      <a href="#" className="text-sm font-bold text-[#c85c0a] group-hover:text-white transition-colors inline-flex items-center gap-1">
+                        Order Now →
+                      </a>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
         {/* --- TESTIMONIALS / PORTFOLIO (Before & After) --- */}
         <section id="portfolio" className="py-16 bg-gray-50">
           <div className="container mx-auto px-4">
@@ -386,12 +435,7 @@ export default function LaundryLanding() {
                       </div>
 
                       {/* Circle Image (Absolute) */}
-                      <div className="hidden md:flex absolute right-6 top-1/2 transform -translate-y-1/2 flex-col items-center">
-                        <div className="w-[170px] h-[170px] rounded-full border-4 border-[#0db5f7] overflow-hidden shadow-md">
-                          <img src={t.circleImg} alt="Detail" className="w-full h-full object-cover" />
-                        </div>
-                        <span className="mt-2 text-xs text-gray-500 uppercase tracking-wide">{t.detailLabel}</span>
-                      </div>
+                    
                     </div>
                   </div>
                 ))}
@@ -436,17 +480,18 @@ export default function LaundryLanding() {
                 <div className="space-y-6">
                   <div className="flex items-start gap-4">
                     <div className="w-12 h-12 rounded-full bg-blue-50 flex items-center justify-center text-[#0db5f7] text-xl shrink-0">
-                      📍
+                      
                     </div>
                     <div>
                       <h3 className="text-lg font-bold text-gray-900">Address</h3>
-                      <p className="text-gray-600">Moi Avenue Street, Nairobi- Kenya</p>
+                      <p className="text-gray-600"> Kiamumbi,Nakuru 
+  </p>
                     </div>
                   </div>
                   
                   <div className="flex items-start gap-4">
                     <div className="w-12 h-12 rounded-full bg-blue-50 flex items-center justify-center text-[#0db5f7] text-xl shrink-0">
-                      📞
+                    
                     </div>
                     <div>
                       <h3 className="text-lg font-bold text-gray-900">Call Us</h3>
@@ -456,7 +501,7 @@ export default function LaundryLanding() {
 
                   <div className="flex items-start gap-4">
                     <div className="w-12 h-12 rounded-full bg-blue-50 flex items-center justify-center text-[#0db5f7] text-xl shrink-0">
-                      ✉️
+                      
                     </div>
                     <div>
                       <h3 className="text-lg font-bold text-gray-900">Email Us</h3>
