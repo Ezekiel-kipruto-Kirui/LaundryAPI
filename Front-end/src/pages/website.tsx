@@ -356,7 +356,7 @@ export default function LaundryLanding() {
                 {
                   title: "Clothes Folding",
                   desc: "Neat, fresh, and well-folded clothes with care.",
-                  img: "Folding.jpg"
+                  img: "./Folding.jpg"
                 }
               ].map((service, idx) => (
                 <div key={idx} className="group relative bg-white rounded-2xl shadow-md hover:shadow-xl transition-all duration-300 overflow-hidden h-[450px] mx-auto w-full max-w-[95%]">
