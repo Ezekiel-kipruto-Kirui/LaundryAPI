@@ -66,10 +66,8 @@ urlpatterns = [
     path('dirtyclothes.png', lambda request: serve(request, 'dirtyclothes.png', document_root=FRONTEND_BUILD_DIR)),
     path('ironing.jpg', lambda request: serve(request, 'Ironing.jpg', document_root=FRONTEND_BUILD_DIR)),
     path('Folding.jpg', lambda request: serve(request, 'Folding.jpg', document_root=FRONTEND_BUILD_DIR)),
-    path('Drycleaning.png', lambda request: serve(request, 'Drycleaning.png', document_root=FRONTEND_BUILD_DIR)),
+    path('drycleaningimg.png', lambda request: serve(request, 'drycleaningimg.png', document_root=FRONTEND_BUILD_DIR)),
     path('washing.jpg', lambda request: serve(request, 'washing.jpg', document_root=FRONTEND_BUILD_DIR)),
-    
-
     path('favicon.ico', lambda request: serve(request, 'favicon.ico', document_root=FRONTEND_BUILD_DIR)),
     path('placeholder.svg', lambda request: serve(request, 'placeholder.svg', document_root=FRONTEND_BUILD_DIR)),
     path('robots.txt', lambda request: serve(request, 'robots.txt', document_root=FRONTEND_BUILD_DIR)),

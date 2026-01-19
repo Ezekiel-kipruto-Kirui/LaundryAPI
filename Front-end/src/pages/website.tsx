@@ -344,9 +344,9 @@ export default function LaundryLanding() {
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
               {[
                 {
-                  title: "Shoes Cleaning",
+                  title: "Dry Cleaning",
                   desc: "Expert shoe cleaning that brings back freshness, brightness, and style.",
-                  img: "./Drycleaning.png"
+                  img: "./drycleaningimg.png"
                 },
                 {
                   title: "Ironing",
