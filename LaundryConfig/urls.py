@@ -73,6 +73,8 @@ urlpatterns = [
     path('matresscleaning.png', lambda request: serve(request, 'matresscleaning.png', document_root=FRONTEND_BUILD_DIR)),
     path('placeholder.svg', lambda request: serve(request, 'placeholder.svg', document_root=FRONTEND_BUILD_DIR)),
     path('robots.txt', lambda request: serve(request, 'robots.txt', document_root=FRONTEND_BUILD_DIR)),
+    path('sofasetcleaning2.jpg', lambda request: serve(request, 'sofasetcleaning2.jpg', document_root=FRONTEND_BUILD_DIR)),
+    path('matresscleaning03.jpeg', lambda request: serve(request, 'matresscleaning03.jpeg', document_root=FRONTEND_BUILD_DIR)),
     re_path('', TemplateView.as_view(template_name="index.html")),
  
 
