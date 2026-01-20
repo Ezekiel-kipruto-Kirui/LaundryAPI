@@ -164,7 +164,7 @@ export default function LaundryLanding() {
               alt="Background" 
               className="w-full h-full object-cover"
             />
-            {/* <div className="absolute inset-0 bg-black/50 z-10"></div> */}
+            <div className="absolute inset-0 bg-black/60 z-10"></div>
           </div>
 
           {/* Content */}
@@ -239,12 +239,12 @@ export default function LaundryLanding() {
                 {
                   title: "Sofa Set Cleaning",
                   desc: "Deep cleaning that restores your sofa’s look, removing dust, stains, and grime.",
-                  img: "https://images.unsplash.com/photo-1555041469-a586c61ea9bc?auto=format&fit=crop&w=600&q=80"
+                  img: "./sofasetcleaning.png"
                 },
                 {
                   title: "Mattress Deep Cleaning",
                   desc: "Thorough mattress washing to eliminate stains, odors, and allergens for healthier sleep.",
-                  img: "https://images.unsplash.com/photo-1631049307264-da0ec9d70304?auto=format&fit=crop&w=600&q=80"
+                  img: "./matresscleaning.png"
                 }
               ].map((service, idx) => (
                 <div key={idx} className="group relative bg-white rounded-2xl shadow-md hover:shadow-xl transition-all duration-300 overflow-hidden h-[450px] mx-auto w-full max-w-[95%]">
