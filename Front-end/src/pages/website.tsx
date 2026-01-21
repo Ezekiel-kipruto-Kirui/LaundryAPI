@@ -39,28 +39,44 @@ export default function LaundryLanding() {
   // --- State for Testimonial Carousel ---
   const [testimonialIndex, setTestimonialIndex] = useState(0);
 
+  // UPDATED: Added 'tags' property to each testimonial object to handle dynamic rendering
   const testimonials = [
     {
       title: "Clothes Cleaning Transformation",
       desc: "Clothes transformed from dirty to fresh and vibrant. Stains removed and fabric revitalized for a like-new look.",
       beforeImg: "./dirtyclothes.png",
       afterImg: "./cleanclothes.jpg",
-
+      tags: ["Stain Removal", "Fabric Care", "Deep Wash"]
     },
     {
       title: "Shoes Restored to Perfection",
       desc: "Transform your shoes with our expert services. Sneaker cleaning, leather polishing, and stain removal. Step out fresh and spotless every day!",
       beforeImg: "./dirtshoes.png",
       afterImg: "./new-sneakers.jpg",
-
+      tags: ["Sneaker Cleaning", "Leather Polishing", "Restoration"]
     },
-
     {
       title: "Bedding Cleaning Transformation",
       desc: "Bedding cleaned from dust, stains, and odors to provide a hygienic and comfortable sleeping surface.",
       beforeImg: "./dirtybeddings.png",
       afterImg: "./cleanbeddings.png",
-
+      tags: ["Dust Mite Removal", "Odor Elimination", "Hygiene"]
+    },
+    // New Item 1: Ironing
+    {
+      title: "Professional Ironing Service",
+      desc: "From crumpled to crisp. We ensure your clothes are wrinkle-free, neatly pressed, and ready to wear.",
+      beforeImg: "./ironing.png",
+      afterImg: "./ironing1.png",
+      tags: ["Steam Pressing", "Crisp Finish", "Wrinkle Free"]
+    },
+    // New Item 2: Mattress
+    {
+      title: "Mattress Deep Cleaning",
+      desc: "Eliminate hidden allergens, dust, and stains from your mattress for a healthier sleep environment.",
+      beforeImg: "./matressbefore.png",
+      afterImg: "./matressafter.jpg",
+      tags: ["Deep Clean", "Sanitization", "Stain Removal"]
     }
   ];
 
@@ -241,24 +257,15 @@ export default function LaundryLanding() {
               <div className="w-full lg:w-1/2">
                 <h2 className="text-4xl font-bold mb-6 text-slate-900">About Us</h2>
                 <div className="w-20 h-1.5 bg-[#0db5f7] mb-8 rounded-full"></div>
-               <p className="text-lg leading-relaxed text-gray-600 font-serif mb-4">
+                <p className="text-lg leading-relaxed text-gray-600 font-serif mb-4">
                   At Clean Page Laundry, we believe fresh, impeccably clean clothes inspire confidence and comfort. For years, families and professionals have trusted us for quality, care, and perfection in every garment. Using gentle expertise and modern technology, we deliver freshness, elegance, and a personal touch to everything we clean.
                   <br /><br />
                   Beyond laundry, we provide carpet washing, sofa set cleaning, mattress deep cleaning, and shoe cleaning, restoring hygiene and lasting comfort to your home and wardrobe.
                   <br /><br />
                   <span className="font-bold text-[#0db5f7]">Clean Page Laundry & Dry Cleaning Services</span> — where care, cleanliness, and quality meet.
                 </p>
-                
-                {/* <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                  {['Reliabl', 'Fast Delivery', 'Expert Care'].map((item, idx) => (
-                    <div key={idx} className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center text-green-600">
-                        <i className="bi bi-check-lg"></i>
-                      </div>
-                      <span className="font-semibold text-slate-700">{item}</span>
-                    </div>
-                  ))}
-                </div> */}
+
+
               </div>
             </div>
           </div>
@@ -281,7 +288,7 @@ export default function LaundryLanding() {
                 {
                   title: "Carpets Cleaning",
                   desc: "Professional carpet washing that removes dirt, stains, and odors—fresh and fast-drying.",
-                  img: "./closeup-vacuum-cleaner-living-room.jpg"
+                  img: "./carpetcleaning.jpeg"
                 },
                 {
                   title: "Sofa Set Cleaning",
@@ -335,12 +342,12 @@ export default function LaundryLanding() {
                 {
                   title: "Shoes Cleaning",
                   desc: "Expert shoe cleaning that brings back freshness, brightness, and style.",
-                  img: "./shoescleaning.png"
+                  img: "./shoescleaning (2).png"
                 },
                 {
                   title: "Fast Drying for Sofas & Mattress",
                   desc: "Quick-dry technology so that your furniture is ready to use as soon as possible.",
-                  img: "./man-servant-cleaning-house.jpg"
+                  img: "./fastdryingsofa.jpeg"
                 },
                 {
                   title: "Clothes Washing ",
@@ -376,7 +383,7 @@ export default function LaundryLanding() {
                     </a>
                   </div>
                 </div>
-                
+
               ))}
             </div>
           </div>
@@ -436,17 +443,17 @@ export default function LaundryLanding() {
           </div>
         </section>
 
-        {/* --- TESTIMONIALS / PORTFOLIO (One at a time) --- */}
+        {/* --- TESTIMONIALS / PORTFOLIO (Dynamic Rendering) --- */}
         <section id="testimonials" className="py-24 bg-white relative">
           <div className="container mx-auto px-4">
             <div className="text-center mb-16">
               <span className="text-[#0db5f7] font-bold tracking-widest uppercase text-sm">Testimonials</span>
-             
+
             </div>
 
-            {/* Carousel Container - Overflow hidden ensures only one is seen */}
+            {/* Carousel Container */}
             <div className="relative max-w-[1200px] mx-auto overflow-hidden rounded-[2.5rem] ">
-              
+
               <div
                 className="flex transition-transform duration-700 ease-in-out"
                 style={{ transform: `translateX(-${testimonialIndex * 100}%)` }}
@@ -454,7 +461,7 @@ export default function LaundryLanding() {
                 {testimonials.map((t, i) => (
                   <div key={i} className="min-w-full px-4">
                     <div className="flex flex-col lg:flex-row items-stretch gap-0 lg:gap-8 bg-white rounded-[3rem] shadow-xl border border-slate-100 overflow-hidden min-h-[500px]">
-                      
+
                       {/* Before/After Images Side */}
                       <div className="w-full lg:w-3/5 flex flex-col sm:flex-row h-[350px] lg:h-auto relative">
                         <div className="w-1/2 h-full relative group">
@@ -478,30 +485,12 @@ export default function LaundryLanding() {
                         <p className="text-slate-600 text-lg leading-relaxed mb-8 relative z-10 font-serif italic">
                           {t.desc}
                         </p>
-                        
-                        {/* FRAGMENTS FIXED */}
+
+                        {/* DYNAMIC TAGS RENDERING */}
                         <div className="space-y-3 relative z-10">
-                          {i === 0 && (
-                            <>
-                              <ServiceTag text="Sneaker Cleaning" />
-                              <ServiceTag text="Leather Polishing" />
-                              <ServiceTag text="Stain Removal" />
-                            </>
-                          )}
-                          {i === 1 && (
-                            <>
-                              <ServiceTag text="Stain Removal" />
-                              <ServiceTag text="Steam Pressing" />
-                              <ServiceTag text="Folding" />
-                            </>
-                          )}
-                          {i === 2 && (
-                            <>
-                              <ServiceTag text="Dust Mite Removal" />
-                              <ServiceTag text="Odor Elimination" />
-                              <ServiceTag text="Drying" />
-                            </>
-                          )}
+                          {t.tags && t.tags.map((tag, tagIndex) => (
+                            <ServiceTag key={tagIndex} text={tag} />
+                          ))}
                         </div>
                       </div>
                     </div>
@@ -509,20 +498,20 @@ export default function LaundryLanding() {
                 ))}
               </div>
 
-              {/* Controls (Visible only to navigate) */}
+              {/* Controls */}
               <div className="flex justify-center items-center gap-4 py-6 bg-slate-50/50 mt-0 border-t border-slate-100">
-                 <button
+                <button
                   onClick={() => setTestimonialIndex((prev) => (prev - 1 + testimonials.length) % testimonials.length)}
                   className="w-12 h-12 rounded-full border border-slate-200 text-slate-500 hover:bg-slate-100 hover:text-[#0db5f7] transition-colors flex items-center justify-center shadow-sm"
                   aria-label="Previous Testimonial"
                 >
                   <i className="bi bi-arrow-left"></i>
                 </button>
-                
+
                 <div className="flex gap-2">
                   {testimonials.map((_, idx) => (
-                    <button 
-                      key={idx} 
+                    <button
+                      key={idx}
                       className={`h-2 rounded-full transition-all duration-300 ${idx === testimonialIndex ? 'bg-[#0db5f7] w-8' : 'bg-slate-200 w-2'}`}
                       onClick={() => setTestimonialIndex(idx)}
                       aria-label={`Go to testimonial ${idx + 1}`}
@@ -546,7 +535,7 @@ export default function LaundryLanding() {
         <section id="contact" className="py-24 bg-slate-50">
           <div className="container mx-auto px-4">
             <div className="flex flex-col lg:flex-row gap-16">
-              
+
               {/* Info Column */}
               <div className="w-full lg:w-1/2 space-y-12">
                 <div>
@@ -571,119 +560,119 @@ export default function LaundryLanding() {
                   <ContactItem icon="bi-geo-alt-fill" title="Visit Us" text="Kahawa West Opposite Jacaranda Police Station,Nairobi" />
                   <ContactItem icon="bi-telephone-fill" title="Call Us" text="+254 705 588 354" />
                   <ContactItem icon="bi-envelope-fill" title="Email Us" text="cleanpageltd@gmail.com" isFull />
-                 
+
                 </div>
               </div>
 
               {/* Form Column */}
-             <div className="w-full lg:w-1/2">
-  <div className="bg-white p-8 lg:p-12 rounded-[2.5rem] shadow-2xl relative overflow-hidden ring-1 ring-slate-100">
-    
-    {/* Decorative background elements */}
-    <div className="absolute top-0 right-0 w-64 h-64 bg-blue-50 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2 pointer-events-none"></div>
-    <div className="absolute bottom-0 left-0 w-32 h-32 bg-cyan-50 rounded-full blur-3xl translate-y-1/2 -translate-x-1/2 pointer-events-none"></div>
+              <div className="w-full lg:w-1/2">
+                <div className="bg-white p-8 lg:p-12 rounded-xl shadow-2xl relative overflow-hidden ring-1 ring-slate-100">
 
-    {/* Success Overlay */}
-    {formSubmitted && (
-          <div className="absolute inset-0 z-30 bg-white/90 backdrop-blur-sm flex flex-col items-center justify-center text-center p-8 animate-fade-in">
-            <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center text-green-500 text-4xl mb-6 shadow-lg shadow-green-100 animate-bounce">
-              <i className="bi bi-check-lg"></i>
-            </div>
-            <h3 className="text-3xl font-bold text-slate-900 mb-2">Message Sent!</h3>
-            
-            <button 
-              onClick={() => setFormSubmitted(false)} 
-              className="mt-8 px-8 py-3 bg-[#0db5f7] text-white font-bold rounded-full hover:bg-[#0ba3e0] transition-colors shadow-lg shadow-blue-200"
-            >
-              Send Another Message
-            </button>
-          </div>
-        )}
-        
-        {/* Header */}
-        <div className="relative z-10">
-          <h3 className="text-3xl font-bold text-slate-900 mb-3">Send us a message</h3>
-         
+                  {/* Decorative background elements */}
+                  <div className="absolute top-0 right-0 w-64 h-64 bg-blue-50 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2 pointer-events-none"></div>
+                  <div className="absolute bottom-0 left-0 w-32 h-32 bg-cyan-50 rounded-full blur-3xl translate-y-1/2 -translate-x-1/2 pointer-events-none"></div>
 
-          <form onSubmit={handleFormSubmit} className="space-y-2">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* Name Input */}
-              <div className="space-y-2 group">
-                <label className="text-xs font-bold text-slate-400 uppercase tracking-wider group-focus-within:text-[#0db5f7] transition-colors">Your Name</label>
-                <div className="relative">
-                  <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-[#0db5f7] transition-colors">
-                    <i className="bi bi-person text-lg"></i>
+                  {/* Success Overlay */}
+                  {formSubmitted && (
+                    <div className="absolute inset-0 z-30 bg-white/90 backdrop-blur-sm flex flex-col items-center justify-center text-center p-8 animate-fade-in">
+                      <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center text-green-500 text-4xl mb-6 shadow-lg shadow-green-100 animate-bounce">
+                        <i className="bi bi-check-lg"></i>
+                      </div>
+                      <h3 className="text-3xl font-bold text-slate-900 mb-2">Message Sent!</h3>
+
+                      <button
+                        onClick={() => setFormSubmitted(false)}
+                        className="mt-8 px-8 py-3 bg-[#0db5f7] text-white font-bold rounded-full hover:bg-[#0ba3e0] transition-colors shadow-lg shadow-blue-200"
+                      >
+                        Send Another Message
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Header */}
+                  <div className="relative z-10">
+                    <h3 className="text-3xl font-bold text-slate-900 mb-3">Send us a message</h3>
+
+
+                    <form onSubmit={handleFormSubmit} className="space-y-2">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {/* Name Input */}
+                        <div className="space-y-2 group">
+                          <label className="text-xs font-bold text-slate-400 uppercase tracking-wider group-focus-within:text-[#0db5f7] transition-colors">Your Name</label>
+                          <div className="relative">
+                            <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-[#0db5f7] transition-colors">
+                              <i className="bi bi-person text-lg"></i>
+                            </div>
+                            <input
+                              type="text"
+
+                              className="w-full pl-12 pr-4 py-3.5 rounded-xl bg-slate-50 border-2 border-transparent focus:bg-white focus:border-[#0db5f7] focus:ring-4 focus:ring-[#0db5f7]/10 outline-none transition-all placeholder:text-slate-400 text-slate-700 font-medium"
+                              required
+                            />
+                          </div>
+                        </div>
+
+                        {/* Email Input */}
+                        <div className="space-y-2 group">
+                          <label className="text-xs font-bold text-slate-400 uppercase tracking-wider group-focus-within:text-[#0db5f7] transition-colors">Email Address</label>
+                          <div className="relative">
+                            <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-[#0db5f7] transition-colors">
+                              <i className="bi bi-envelope text-lg"></i>
+                            </div>
+                            <input
+                              type="email"
+
+                              className="w-full pl-12 pr-4 py-3.5 rounded-xl bg-slate-50 border-2 border-transparent focus:bg-white focus:border-[#0db5f7] focus:ring-4 focus:ring-[#0db5f7]/10 outline-none transition-all placeholder:text-slate-400 text-slate-700 font-medium"
+                              required
+                            />
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Subject Input */}
+                      <div className="space-y-2 group">
+                        <label className="text-xs font-bold text-slate-400 uppercase tracking-wider group-focus-within:text-[#0db5f7] transition-colors">Subject</label>
+                        <div className="relative">
+                          <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-[#0db5f7] transition-colors">
+                            <i className="bi bi-chat-quote text-lg"></i>
+                          </div>
+                          <input
+                            type="text"
+
+                            className="w-full pl-12 pr-4 py-3.5 rounded-xl bg-slate-50 border-2 border-transparent focus:bg-white focus:border-[#0db5f7] focus:ring-4 focus:ring-[#0db5f7]/10 outline-none transition-all placeholder:text-slate-400 text-slate-700 font-medium"
+                            required
+                          />
+                        </div>
+                      </div>
+
+                      {/* Message Textarea */}
+                      <div className="space-y-2 group">
+                        <label className="text-xs font-bold text-slate-400 uppercase tracking-wider group-focus-within:text-[#0db5f7] transition-colors">Your Message</label>
+                        <div className="relative">
+                          <div className="absolute left-4 top-4 text-slate-400 group-focus-within:text-[#0db5f7] transition-colors">
+                            <i className="bi bi-card-text text-lg"></i>
+                          </div>
+                          <textarea
+                            rows={5}
+
+                            className="w-full pl-12 pr-4 py-3.5 rounded-xl bg-slate-50 border-2 border-transparent focus:bg-white focus:border-[#0db5f7] focus:ring-4 focus:ring-[#0db5f7]/10 outline-none transition-all resize-none placeholder:text-slate-400 text-slate-700 font-medium"
+                            required
+                          ></textarea>
+                        </div>
+                      </div>
+
+                      {/* Submit Button */}
+                      <button
+                        type="submit"
+                        className="w-full bg-[#0db5f7] hover:bg-[#0ba3e0] text-white font-bold py-4 rounded-xl transition-all shadow-lg shadow-[#0db5f7]/30 hover:shadow-[#0db5f7]/50 transform hover:-translate-y-0.5 active:translate-y-0 flex items-center justify-center gap-2"
+                      >
+                        <span>Send Message</span>
+                        <i className="bi bi-send-fill text-lg"></i>
+                      </button>
+                    </form>
                   </div>
-                  <input
-                    type="text"
-                   
-                    className="w-full pl-12 pr-4 py-3.5 rounded-xl bg-slate-50 border-2 border-transparent focus:bg-white focus:border-[#0db5f7] focus:ring-4 focus:ring-[#0db5f7]/10 outline-none transition-all placeholder:text-slate-400 text-slate-700 font-medium"
-                    required
-                  />
                 </div>
               </div>
-
-              {/* Email Input */}
-              <div className="space-y-2 group">
-                <label className="text-xs font-bold text-slate-400 uppercase tracking-wider group-focus-within:text-[#0db5f7] transition-colors">Email Address</label>
-                <div className="relative">
-                  <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-[#0db5f7] transition-colors">
-                    <i className="bi bi-envelope text-lg"></i>
-                  </div>
-                  <input
-                    type="email"
-                    
-                    className="w-full pl-12 pr-4 py-3.5 rounded-xl bg-slate-50 border-2 border-transparent focus:bg-white focus:border-[#0db5f7] focus:ring-4 focus:ring-[#0db5f7]/10 outline-none transition-all placeholder:text-slate-400 text-slate-700 font-medium"
-                    required
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* Subject Input */}
-            <div className="space-y-2 group">
-              <label className="text-xs font-bold text-slate-400 uppercase tracking-wider group-focus-within:text-[#0db5f7] transition-colors">Subject</label>
-              <div className="relative">
-                <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-[#0db5f7] transition-colors">
-                  <i className="bi bi-chat-quote text-lg"></i>
-                </div>
-                <input
-                  type="text"
-                  
-                  className="w-full pl-12 pr-4 py-3.5 rounded-xl bg-slate-50 border-2 border-transparent focus:bg-white focus:border-[#0db5f7] focus:ring-4 focus:ring-[#0db5f7]/10 outline-none transition-all placeholder:text-slate-400 text-slate-700 font-medium"
-                  required
-                />
-              </div>
-            </div>
-
-            {/* Message Textarea */}
-            <div className="space-y-2 group">
-              <label className="text-xs font-bold text-slate-400 uppercase tracking-wider group-focus-within:text-[#0db5f7] transition-colors">Your Message</label>
-              <div className="relative">
-                <div className="absolute left-4 top-4 text-slate-400 group-focus-within:text-[#0db5f7] transition-colors">
-                  <i className="bi bi-card-text text-lg"></i>
-                </div>
-                <textarea
-                  rows={5}
-                  
-                  className="w-full pl-12 pr-4 py-3.5 rounded-xl bg-slate-50 border-2 border-transparent focus:bg-white focus:border-[#0db5f7] focus:ring-4 focus:ring-[#0db5f7]/10 outline-none transition-all resize-none placeholder:text-slate-400 text-slate-700 font-medium"
-                  required
-                ></textarea>
-              </div>
-            </div>
-
-            {/* Submit Button */}
-            <button
-              type="submit"
-              className="w-full bg-[#0db5f7] hover:bg-[#0ba3e0] text-white font-bold py-4 rounded-xl transition-all shadow-lg shadow-[#0db5f7]/30 hover:shadow-[#0db5f7]/50 transform hover:-translate-y-0.5 active:translate-y-0 flex items-center justify-center gap-2"
-            >
-              <span>Send Message</span>
-              <i className="bi bi-send-fill text-lg"></i>
-            </button>
-          </form>
-        </div>
-      </div>
-    </div>
             </div>
           </div>
         </section>
@@ -741,7 +730,7 @@ export default function LaundryLanding() {
                 {['Wash & Fold', 'Dry Cleaning', 'Carpet Cleaning', 'Sofa & Mattress', 'Shoe Cleaning'].map((service) => (
                   <li key={service}>
                     <a href="#services" className="text-slate-400 hover:text-[#0db5f7] transition-colors flex items-center gap-2 group">
-                      <i className="bi bi-chevron-right text-xs opacity-0 -ml-2 group-hover:ml-0 group-hover:opacity-100 transition-all"></i>
+                      
                       {service}
                     </a>
                   </li>
@@ -752,11 +741,11 @@ export default function LaundryLanding() {
             {/* Newsletter / Contact */}
             <div>
               <h4 className="text-white font-bold text-lg mb-6 relative inline-block">
-              Contacts
+                Contacts
                 <span className="absolute -bottom-2 left-0 w-1/2 h-0.5 bg-[#0db5f7]"></span>
               </h4>
-              
-               <ul className="space-y-3 text-sm text-slate-400">
+
+              <ul className="space-y-3 text-sm text-slate-400">
                 <li className="flex items-center gap-3"><i className="bi bi-geo-alt text-[#0db5f7]"></i> Kahawa West, Nairobi</li>
                 <li className="flex items-center gap-3"><i className="bi bi-telephone text-[#0db5f7]"></i> +254 705 588 354</li>
               </ul>
@@ -764,12 +753,12 @@ export default function LaundryLanding() {
           </div>
 
           {/* Bottom Bar */}
-          <div className="border-t border-slate-800 pt-8 flex flex-col md:flex-row justify-between items-center gap-4 text-sm text-slate-500">
+          <div className="border-t border-slate-800 pt-8 flex flex-col md:flex-row justify-center items-center gap-4 text-sm text-slate-500">
             <p>&copy; {new Date().getFullYear()} <span className="text-[#0db5f7] font-semibold">Clean Page Laundry</span>. All Rights Reserved.</p>
-            <div className="flex gap-6">
+            {/* <div className="flex gap-6">
               <a href="#" className="hover:text-white transition-colors">Privacy Policy</a>
               <a href="#" className="hover:text-white transition-colors">Terms of Service</a>
-            </div>
+            </div> */}
           </div>
         </div>
       </footer>
