@@ -448,11 +448,10 @@ export default function LaundryLanding() {
           <div className="container mx-auto px-4">
             <div className="text-center mb-16">
               <span className="text-[#0db5f7] font-bold tracking-widest uppercase text-sm">Testimonials</span>
-
             </div>
 
             {/* Carousel Container */}
-            <div className="relative max-w-[1200px] mx-auto overflow-hidden rounded-[2.5rem] ">
+            <div className="relative max-w-[1200px] mx-auto overflow-hidden rounded-[2.5rem]">
 
               <div
                 className="flex transition-transform duration-700 ease-in-out"
@@ -462,27 +461,49 @@ export default function LaundryLanding() {
                   <div key={i} className="min-w-full px-4">
                     <div className="flex flex-col lg:flex-row items-stretch gap-0 lg:gap-8 bg-white rounded-[3rem] shadow-xl border border-slate-100 overflow-hidden min-h-[500px]">
 
-                      {/* Before/After Images Side */}
-                      <div className="w-full lg:w-3/5 flex flex-col sm:flex-row h-[350px] lg:h-auto relative">
-                        <div className="w-1/2 h-full relative group">
-                          <img src={t.beforeImg} alt="Before" className="w-full h-full object-cover" />
+                      {/* 
+                UPDATED IMAGE CONTAINER: 
+                - Default is flex-col (stacks vertically on mobile).
+                - sm:flex-row (side-by-side on tablet/desktop).
+                - min-h-[300px] ensures images have height on mobile.
+              */}
+                      <div className="w-full lg:w-3/5 flex flex-col sm:flex-row min-h-[300px] relative">
+
+                        {/* Before Image */}
+                        <div className="w-full sm:w-1/2 h-48 sm:h-auto relative group">
+                          <img
+                            src={t.beforeImg}
+                            alt="Before"
+                            className="w-full h-full object-cover"
+                          />
                           <div className="absolute inset-0 bg-black/20 group-hover:bg-transparent transition-colors"></div>
-                          <div className="absolute top-6 left-6 bg-red-500 text-white text-xs font-bold px-4 py-2 rounded-full shadow-lg tracking-wider">BEFORE</div>
+                          <div className="absolute top-4 left-4 sm:top-6 sm:left-6 bg-red-500 text-white text-xs font-bold px-3 py-1 sm:px-4 sm:py-2 rounded-full shadow-lg tracking-wider">BEFORE</div>
                         </div>
-                        <div className="w-1/2 h-full relative group">
-                          <img src={t.afterImg} alt="After" className="w-full h-full object-cover" />
+
+                        {/* After Image */}
+                        <div className="w-full sm:w-1/2 h-48 sm:h-auto relative group">
+                          <img
+                            src={t.afterImg}
+                            alt="After"
+                            className="w-full h-full object-cover"
+                          />
                           <div className="absolute inset-0 bg-black/20 group-hover:bg-transparent transition-colors"></div>
-                          <div className="absolute top-6 left-6 bg-green-500 text-white text-xs font-bold px-4 py-2 rounded-full shadow-lg tracking-wider">AFTER</div>
+                          <div className="absolute top-4 left-4 sm:top-6 sm:left-6 bg-green-500 text-white text-xs font-bold px-3 py-1 sm:px-4 sm:py-2 rounded-full shadow-lg tracking-wider">AFTER</div>
                         </div>
-                        {/* Divider Line */}
-                        <div className="absolute top-4 bottom-4 left-1/2 w-1 bg-white/50 -translate-x-1/2 hidden sm:block"></div>
+
+                        {/* 
+                  UPDATED DIVIDER:
+                  - Hidden on mobile (images are stacked).
+                  - Visible side-by-side line on sm screens and up.
+                */}
+                        <div className="hidden sm:block absolute top-4 bottom-4 left-1/2 w-1 bg-white/50 -translate-x-1/2"></div>
                       </div>
 
                       {/* Text Content Side */}
-                      <div className="w-full lg:w-2/5 flex flex-col justify-center px-8 lg:px-16 py-12 bg-slate-50/50">
+                      <div className="w-full lg:w-2/5 flex flex-col justify-center px-6 sm:px-8 lg:px-16 py-10 sm:py-12 bg-slate-50/50">
                         <i className="bi bi-quote text-6xl text-slate-200 absolute top-8 left-8 -z-0"></i>
-                        <h4 className="text-3xl font-bold text-slate-900 mb-6 relative z-10">{t.title}</h4>
-                        <p className="text-slate-600 text-lg leading-relaxed mb-8 relative z-10 font-serif italic">
+                        <h4 className="text-2xl sm:text-3xl font-bold text-slate-900 mb-4 sm:mb-6 relative z-10">{t.title}</h4>
+                        <p className="text-slate-600 text-base sm:text-lg leading-relaxed mb-6 sm:mb-8 relative z-10 font-serif italic">
                           {t.desc}
                         </p>
 
