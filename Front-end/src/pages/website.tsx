@@ -239,7 +239,7 @@ export default function LaundryLanding() {
               </div>
               {/* Text */}
               <div className="w-full lg:w-1/2">
-                <h2 className="text-4xl font-bold mb-6 text-slate-900">About <span className="text-[#157604]">Clean Page</span></h2>
+                <h2 className="text-4xl font-bold mb-6 text-slate-900">About Us</h2>
                 <div className="w-20 h-1.5 bg-[#0db5f7] mb-8 rounded-full"></div>
                <p className="text-lg leading-relaxed text-gray-600 font-serif mb-4">
                   At Clean Page Laundry, we believe fresh, impeccably clean clothes inspire confidence and comfort. For years, families and professionals have trusted us for quality, care, and perfection in every garment. Using gentle expertise and modern technology, we deliver freshness, elegance, and a personal touch to everything we clean.
