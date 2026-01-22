@@ -56,10 +56,12 @@ urlpatterns = [
     path('Clean-apge-logo-2.png', lambda request: serve(request, 'Clean-apge-logo-2.png', document_root=FRONTEND_BUILD_DIR)),
     path('view-inside-laundromat-room-with-vintage-decor-washing-machines.jpeg', lambda request: serve(request, 'view-inside-laundromat-room-with-vintage-decor-washing-machines.jpeg', document_root=FRONTEND_BUILD_DIR)),
     path('Clean-page-logo.png', lambda request: serve(request, 'Clean-page-logo.png', document_root=FRONTEND_BUILD_DIR)),
-    
+    path('washing.jpeg', lambda request: serve(request, 'washing.jpeg', document_root=FRONTEND_BUILD_DIR)),
     path('ironing2.png', lambda request: serve(request, 'ironing2.png', document_root=FRONTEND_BUILD_DIR)),
     path('folding.png', lambda request: serve(request, 'folding.png', document_root=FRONTEND_BUILD_DIR)),
     path('carpet scraping.png', lambda request: serve(request, 'carpet scraping.png', document_root=FRONTEND_BUILD_DIR)),
+    path('carpetcleaning.jpeg', lambda request: serve(request, 'carpetcleaning.jpeg', document_root=FRONTEND_BUILD_DIR)),
+
     path('cleancarpet.png', lambda request: serve(request, 'cleancarpet.png', document_root=FRONTEND_BUILD_DIR)),
     path('fastdryingsofa.jpeg', lambda request: serve(request, 'fastdryingsofa.jpeg', document_root=FRONTEND_BUILD_DIR)),
     path('dirtysofa.png', lambda request: serve(request, 'dirtysofa.png', document_root=FRONTEND_BUILD_DIR)),
