@@ -1016,6 +1016,7 @@ const currentUserName = useMemo(() => {
                   <p className="mb-1"><strong>Order:</strong> {currentOrder.uniquecode}</p>
                   <p className="mb-1"><strong>Date:</strong> {formatDate(currentOrder.created_at)}</p>
                   <p className="mb-3"><strong>Customer:</strong> {currentOrder.customer.name}</p>
+                  <p className="mb-3"><strong>Customer:</strong> {currentOrder.customer.phone}</p>
                 </div>
                 <hr className="my-2" />
                 
@@ -1041,7 +1042,7 @@ const currentUserName = useMemo(() => {
               </div>
               <div className="text-center">
                 <p>Served by: {currentUserName}</p>
-                <p>Contacts:  0705588354 </p>
+                <p>Contact us:  0705588354 </p>
                 <p>Thankyou for trusting our services!</p>
               </div>
               <button
