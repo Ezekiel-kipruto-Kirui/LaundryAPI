@@ -11,6 +11,7 @@ export const ROUTES = {
     laundryDashboard: "/laundry-dashboard",
     laundryCreateOrder: "/laundry/create-order",
     laundryOrders: "/laundry/orders",
+    orders: "/laundry/orders",
     laundryCustomers: "/laundry/customers",
     laundryExpenses: "/laundry/expenses",
 

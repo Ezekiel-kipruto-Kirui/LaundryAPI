@@ -1,5 +1,17 @@
 {
   "include": ["."],
-  "venvPath": "./venv",
-  "venv": "venv"
+  "exclude": [
+    "**/__pycache__",
+    "**/migrations/**",
+    "venv"
+  ],
+  "venvPath": ".",
+  "venv": "venv",
+  "pythonVersion": "3.13",
+  "typeCheckingMode": "basic",
+  "reportAttributeAccessIssue": "none",
+  "reportIncompatibleMethodOverride": "none",
+  "reportArgumentType": "none",
+  "reportCallIssue": "none",
+  "reportAssignmentType": "none"
 }

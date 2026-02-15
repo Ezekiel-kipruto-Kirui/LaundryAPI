@@ -43,20 +43,6 @@ class HotelOrderItemSerializer(serializers.ModelSerializer):
     def get_total_price(self, obj):
         return obj.get_total_price()
 
-class HotelOrderCreateSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = HotelOrder
-        fields = ['id']  # Only need ID field for creation
-       
-    
-    def create(self, validated_data):
-        request = self.context.get('request')
-        user = request.user if request else None
-        
-        # Create order with current user
-        order = HotelOrder.objects.create(created_by=user)
-        return order
-
 class HotelOrderSerializer(serializers.ModelSerializer):
     order_items = HotelOrderItemSerializer(many=True, read_only=True)
     total_amount = serializers.SerializerMethodField()

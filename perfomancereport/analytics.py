@@ -150,7 +150,7 @@ class DashboardAnalytics:
         
         if base_queryset.exists():
             for order in base_queryset[:5]:
-                logger.info(f"DEBUG: Order {order.id}: status={order.order_status}, "
+                logger.info(f"DEBUG: Order {order.pk}: status={order.order_status}, "
                           f"total_price={order.total_price}, shop={order.shop}, created_at={order.created_at}")
         
         # Apply date filters using created_at (more reliable than delivery_date)

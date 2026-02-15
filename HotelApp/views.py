@@ -1,39 +1,37 @@
 # hotel/views.py
+from datetime import datetime
+from decimal import Decimal
 
 from django.contrib.auth import get_user_model
-from rest_framework import viewsets, permissions, status
-from rest_framework.decorators import action
-from rest_framework.response import Response
+from django.db.models import F, Sum
+from django.http import JsonResponse
+from django_filters.rest_framework import DjangoFilterBackend
+from rest_framework import permissions, viewsets
+from rest_framework.decorators import action, api_view, permission_classes
+from rest_framework.filters import SearchFilter
 from rest_framework.permissions import AllowAny
-from django.db.models import Sum, Count
-from datetime import datetime, timedelta
-from django.utils import timezone
-from .models import FoodItem, HotelOrder, HotelOrderItem
+from rest_framework.response import Response
 
-from .models import (
-    FoodCategory, FoodItem, 
-    HotelOrder, HotelOrderItem,
-    HotelExpenseField, HotelExpenseRecord
-)
-
-from .serializers import (
-    FoodCategorySerializer, FoodItemSerializer,
-    HotelOrderSerializer, HotelOrderItemSerializer,
-    HotelExpenseFieldSerializer, HotelExpenseRecordSerializer,
-    HotelOrderCreateSerializer
-)
 from LaundryApp.pagination import CustomPageNumberPagination
-
+from .models import (
+    FoodCategory,
+    FoodItem,
+    HotelExpenseField,
+    HotelExpenseRecord,
+    HotelOrder,
+    HotelOrderItem,
+)
+from .serializers import (
+    FoodCategorySerializer,
+    FoodItemSerializer,
+    HotelExpenseFieldSerializer,
+    HotelExpenseRecordSerializer,
+    HotelOrderCreateSerializer,
+    HotelOrderItemSerializer,
+    HotelOrderSerializer,
+)
 
 User = get_user_model()
-
-from django.db.models import Sum,F
-from rest_framework.decorators import api_view
-from rest_framework.response import Response
-from .models import HotelOrderItem, FoodItem
-from rest_framework.decorators import api_view, permission_classes
-from django_filters.rest_framework import DjangoFilterBackend
-from rest_framework.filters import SearchFilter
 
 
 
@@ -68,10 +66,6 @@ class FoodItemViewSet(viewsets.ModelViewSet):
     serializer_class = FoodItemSerializer
     permission_classes = [AllowAny]  # Or your preferred permissions
 
-    
-    def get_serializer_class(self):
-        return FoodItemSerializer
-    
     def perform_create(self, serializer):
         # Automatically set created_by to current user
         if self.request.user.is_authenticated:
@@ -90,13 +84,12 @@ class HotelOrderItemViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
     pagination_class = CustomPageNumberPagination
 
-    
-    def get_queryset(self):
+    def get_queryset(self):  # type: ignore[override]
         queryset = HotelOrderItem.objects.all().select_related("food_item", "order", "order__created_by")
         
         # Filter by date range
-        start_date = self.request.query_params.get('start_date')
-        end_date = self.request.query_params.get('end_date')
+        start_date = self.request.GET.get('start_date')
+        end_date = self.request.GET.get('end_date')
         
         if start_date and end_date:
             try:
@@ -116,6 +109,7 @@ class HotelOrderItemViewSet(viewsets.ModelViewSet):
 
 class HotelOrderViewSet(viewsets.ModelViewSet):
     queryset = HotelOrder.objects.all().order_by('-created_at')
+    serializer_class = HotelOrderSerializer
     permission_classes = [AllowAny]
     filter_backends = [
         DjangoFilterBackend,
@@ -127,17 +121,17 @@ class HotelOrderViewSet(viewsets.ModelViewSet):
     }
     pagination_class = CustomPageNumberPagination
     
-    def get_serializer_class(self):
+    def get_serializer_class(self):  # type: ignore[override]
         if self.action == 'create':
             return HotelOrderCreateSerializer
         return HotelOrderSerializer
     
-    def get_queryset(self):
+    def get_queryset(self):  # type: ignore[override]
         queryset = HotelOrder.objects.all().order_by('-created_at')
         
         # Filter by date range
-        start_date = self.request.query_params.get('start_date')
-        end_date = self.request.query_params.get('end_date')
+        start_date = self.request.GET.get('start_date')
+        end_date = self.request.GET.get('end_date')
         
         if start_date and end_date:
             try:
@@ -165,9 +159,11 @@ class HotelOrderViewSet(viewsets.ModelViewSet):
             order__in=queryset
         ).aggregate(
             total=Sum('price')
-        )['total'] or 0
+        )['total']
+        if total_revenue is None:
+            total_revenue = Decimal("0.00")
         
-        average_order_value = total_revenue / total_orders if total_orders > 0 else 0
+        average_order_value = total_revenue / total_orders if total_orders > 0 else Decimal("0.00")
         
         return Response({
             'total_orders': total_orders,
@@ -206,9 +202,6 @@ class HotelExpenseRecordViewSet(viewsets.ModelViewSet):
     filterset_fields = {"date": ["gte", "lte"]}
     #permission_classes = [AllowAny]
 
-from django.http import JsonResponse
-from django.db.models import Sum
-
 
 def update_food_items_view(request):
     updated = []
@@ -222,7 +215,9 @@ def update_food_items_view(request):
         total_revenue = HotelOrderItem.objects.filter(
             food_item=item,
             oncredit=False
-        ).aggregate(total=Sum('price'))['total'] or 0
+        ).aggregate(total=Sum('price'))['total']
+        if total_revenue is None:
+            total_revenue = Decimal("0.00")
 
         item.quantity = total_quantity
         item.total_order_price = total_revenue
@@ -231,7 +226,7 @@ def update_food_items_view(request):
         updated.append({
             "food_item": item.name,
             "quantity": total_quantity,
-            "revenue": total_revenue
+            "revenue": float(total_revenue)
         })
 
     return JsonResponse({

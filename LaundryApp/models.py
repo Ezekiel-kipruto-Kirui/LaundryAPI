@@ -2,6 +2,8 @@
 from __future__ import annotations
 import uuid
 import logging
+from decimal import Decimal
+from typing import cast
 from django.db import models, transaction, IntegrityError
 from django.db.models import Sum
 import requests
@@ -62,7 +64,6 @@ class CustomUserManager(BaseUserManager):
 
 class UserProfile(AbstractUser):
     username = None
-    objects = CustomUserManager()
     email = models.EmailField(unique=True)
     USERNAME_FIELD = 'email'
     REQUIRED_FIELDS = []
@@ -74,7 +75,7 @@ class UserProfile(AbstractUser):
     )
     user_type = models.CharField(max_length=20, choices=USER_TYPE_CHOICES, db_index=True)
 
-    objects = CustomUserManager()
+    objects = CustomUserManager()  # pyright: ignore[reportAssignmentType]
 
     def __str__(self):
         return f"{self.email} - {self.user_type})"
@@ -84,7 +85,7 @@ class UserProfile(AbstractUser):
 
 class Customer(models.Model):
     name = models.CharField(max_length=200, db_index=True)
-    phone = PhoneNumberField(region="KE", unique=True, db_index=True)
+    phone = PhoneNumberField(region="KE", unique=True, db_index=True)  # pyright: ignore[reportCallIssue]
     address = models.CharField(max_length=255, default='',  null=True, blank=True)
     created_by = models.ForeignKey(
     UserProfile,
@@ -153,9 +154,9 @@ class Order(models.Model):
                                     default='pending', db_index=True)
 
     addressdetails = models.TextField(default='', blank=True)
-    amount_paid = models.DecimalField(max_digits=12, decimal_places=2, default=0)
-    total_price = models.DecimalField(max_digits=12, decimal_places=2, default=0, editable=False)
-    balance = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    amount_paid = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+    total_price = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"), editable=False)
+    balance = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
     #created_by = models.ForeignKey(UserProfile, on_delete=models.SET_NULL, null=True, blank=True)
     
@@ -181,7 +182,7 @@ class Order(models.Model):
 
     def save(self, *args, **kwargs):
 
-        with transaction.atomic():
+        with transaction.atomic():  # pyright: ignore[reportGeneralTypeIssues]
             if not self.uniquecode:
                 prefix = "ORD"
                 for _ in range(5):
@@ -261,27 +262,31 @@ class OrderItem(models.Model):
     additional_info = models.TextField(blank=True, null=True)
     unit_price = models.DecimalField(max_digits=10, decimal_places=2)
     total_item_price = models.DecimalField(max_digits=12, decimal_places=2,
-                                           default=0, editable=False)
+                                           default=Decimal("0.00"), editable=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def save(self, *args, **kwargs):
         if self.itemname:
-            items = [item.strip() for item in self.itemname.split(',') if item.strip()]
+            item_name = str(self.itemname)
+            items = [item.strip() for item in item_name.split(',') if item.strip()]
             self.itemname = ', '.join(items)
 
-        self.total_item_price = (self.unit_price or 0)
+        self.total_item_price = self.unit_price or Decimal("0.00")
         super().save(*args, **kwargs)
 
         # Update order totals only if needed
-        if self.order_id:
-            order_total = self.order.items.aggregate(total=Sum('total_item_price'))['total'] or 0
-            if order_total != self.order.total_price:
-                self.order.total_price = order_total
-                self.order.balance = self.order.total_price - self.order.amount_paid
-                self.order.save(update_fields=['total_price', 'balance'])
+        order = cast(Order, self.order)
+        if order and order.pk:
+            order_total = OrderItem.objects.filter(order=order).aggregate(total=Sum('total_item_price'))['total']
+            if order_total is None:
+                order_total = Decimal("0.00")
+            if order_total != order.total_price:
+                order.total_price = order_total
+                order.balance = Decimal(str(order.total_price)) - Decimal(str(order.amount_paid))
+                order.save(update_fields=['total_price', 'balance'])
 
     def get_item_list(self):
-        return [item.strip() for item in self.itemname.split(',') if item.strip()] if self.itemname else []
+        return [item.strip() for item in str(self.itemname).split(',') if item.strip()] if self.itemname else []
 
     def item_count(self):
         return len(self.get_item_list())

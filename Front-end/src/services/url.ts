@@ -1,34 +1,33 @@
 // services/url.ts
 
-// Determine the base URL based on the current hostname
-let API_BASE_URL ='http://127.0.0.1:8080/api';
+const normalizeBaseUrl = (url: string): string => url.replace(/\/+$/, "");
 
-const currentHostname = window.location.hostname;
+const resolveApiBaseUrl = (): string => {
+  const envApiUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim();
+  if (envApiUrl) {
+    return normalizeBaseUrl(envApiUrl);
+  }
 
-// Local development environments
-const isLocalhost = currentHostname === "localhost" || 
-                    currentHostname === "127.0.0.1";
+  const hostname = window.location.hostname;
+  const isLocalhost = hostname === "localhost" || hostname === "127.0.0.1";
+  const isProduction =
+    hostname === "cleanpage.shop" ||
+    hostname === "www.cleanpage.shop" ||
+    hostname.includes("cleanpage.shop");
 
-// Production domain
-const isProduction = currentHostname === "cleanpage.shop" || 
-                     currentHostname === "www.cleanpage.shop" ||
-                     currentHostname.includes("cleanpage.shop");
+  if (isProduction) {
+    return "https://cleanpage.shop/api";
+  }
 
-// Set API URL based on environment
-if (isLocalhost) {
-    // Local development
-    API_BASE_URL = "http://127.0.0.1:8080/api";
-} else if (isProduction) {
-    // Production
-    API_BASE_URL = "https://cleanpage.shop/api";
-} else {
-    // Staging/Testing (if you have other domains)
-    // You can add specific staging domains here
-    if (currentHostname.includes("staging")) {
-        API_BASE_URL = `https://${currentHostname}/api`;
-    } else {
-        // Fallback - try to infer from current location
-        API_BASE_URL = `${window.location.protocol}//${currentHostname}/api`||'http://127.0.0.1:8080';
-    }
-}
+  // Vite dev server is 5173 in this project; default backend to Django's runserver port.
+  if (isLocalhost && window.location.port === "5173") {
+    return `${window.location.protocol}//${hostname}:8080/api`;
+  }
+
+  // When frontend is served by Django/static hosting, keep API same-origin.
+  return `${window.location.protocol}//${window.location.host}/api`;
+};
+
+const API_BASE_URL = resolveApiBaseUrl();
+
 export { API_BASE_URL };

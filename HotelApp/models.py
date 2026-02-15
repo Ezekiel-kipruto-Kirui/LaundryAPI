@@ -1,4 +1,6 @@
 import os
+from decimal import Decimal
+from typing import cast
 from django.db import models
 from django.conf import settings
 from django.utils import timezone
@@ -36,14 +38,12 @@ class HotelOrder(models.Model):
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
 
     def __str__(self):
-        return f"HotelOrder {self.id} by {self.created_by.username}"
+        order_pk = self.pk if self.pk is not None else "unsaved"
+        return f"HotelOrder {order_pk} by {self.created_by}"
 
     def get_total(self):
-        # Calculate total as quantity * price for each item, then sum
-        total = 0
-        for item in self.order_items.all():
-            total += item.get_total_price()
-        return total
+        total = HotelOrderItem.objects.filter(order=self).aggregate(total=Sum("price"))["total"]
+        return total if total is not None else Decimal("0.00")
 
 # models.py
 class HotelOrderItem(models.Model):
@@ -63,16 +63,18 @@ class HotelOrderItem(models.Model):
         total_revenue = HotelOrderItem.objects.filter(
             food_item=self.food_item,
             oncredit=False  # Only cash sales
-        ).aggregate(total=Sum('price'))['total'] or 0
+        ).aggregate(total=Sum('price'))['total']
+        if total_revenue is None:
+            total_revenue = Decimal("0.00")
         total_quantity = HotelOrderItem.objects.filter(
             food_item=self.food_item,
             oncredit=False  # Only cash sales
         ).aggregate(total=Sum('quantity'))['total'] or 0
         # Update the related FoodItem
-        self.food_item.total_order_price = total_revenue
-        self.food_item.quantity = total_quantity
-        
-        self.food_item.save()
+        food_item = cast(FoodItem, self.food_item)
+        food_item.total_order_price = total_revenue
+        food_item.quantity = total_quantity
+        food_item.save()
     
     def get_total_price(self):
         """Calculate total price for this order item"""

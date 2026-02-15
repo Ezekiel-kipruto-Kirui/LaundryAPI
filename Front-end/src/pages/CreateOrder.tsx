@@ -7,9 +7,11 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Plus, Trash, ChevronLeft, ChevronRight, ChevronDown, ChevronUp } from "lucide-react";
-import { Customer, createorderpayload, OrderItem } from '@/services/types'
+import { Customer, createorderpayload } from '@/services/types'
 import { API_BASE_URL } from '../services/url'
 import { getAccessToken } from "@/services/api";
+import { useNavigate } from "react-router-dom";
+import { ROUTES } from "@/services/Routes";
 
 // --- API Endpoints ---
 const ORDERS_URL = `${API_BASE_URL}/Laundry/orders/`;
@@ -69,6 +71,18 @@ interface FormOrderItem {
   additional_info: string;
   unit_price: number;
 }
+
+type SubmitAction = "save" | "save_add_next";
+
+const createEmptyItem = (): FormOrderItem => ({
+  servicetype: [],
+  itemtype: [],
+  itemname: '',
+  quantity: 1,
+  itemcondition: '',
+  additional_info: '',
+  unit_price: 0,
+});
 
 // Custom MultiSelect Dropdown Component
 interface MultiSelectDropdownProps {
@@ -168,6 +182,7 @@ const MultiSelectDropdown: React.FC<MultiSelectDropdownProps> = ({
 };
 
 export default function CreateOrder() {
+  const navigate = useNavigate();
   const [customerPhone, setCustomerPhone] = useState("");
   const [customerName, setCustomerName] = useState("");
   const [shop, setShop] = useState<"Shop A" | "Shop B">("Shop A");
@@ -176,15 +191,17 @@ export default function CreateOrder() {
   const [paymentType, setPaymentType] = useState("");
   const [paymentStatus, setPaymentStatus] = useState("pending");
   const [amountPaid, setAmountPaid] = useState(0);
-  const [items, setItems] = useState<FormOrderItem[]>([{
-    servicetype: [], itemtype: [], itemname: '', quantity: 1, itemcondition: '', additional_info: '', unit_price: 0,
-  }]);
+  const [items, setItems] = useState<FormOrderItem[]>([createEmptyItem()]);
 
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isCustomerLookupLoading, setIsCustomerLookupLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [currentStep, setCurrentStep] = useState(1);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const submitActionRef = useRef<SubmitAction>("save");
+  const customerLookupTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const lastLookupPhoneRef = useRef<string>("");
 
   useEffect(() => {
     console.log("API Endpoints:", { CUSTOMERS_URL, ORDERS_URL });
@@ -199,9 +216,7 @@ export default function CreateOrder() {
   }, []);
 
   const addItem = useCallback(() => {
-    setItems(prev => [...prev, {
-      servicetype: [], itemtype: [], itemname: '', quantity: 1, itemcondition: '', additional_info: '', unit_price: 0,
-    }]);
+    setItems(prev => [...prev, createEmptyItem()]);
   }, []);
 
   const updateItem = useCallback((index: number, field: keyof FormOrderItem, value: any) => {
@@ -220,31 +235,103 @@ export default function CreateOrder() {
     if (items.length > 1) setItems(prev => prev.filter((_, i) => i !== index));
   }, [items.length]);
 
-  const normalizePhoneNumber = (phone: string): string => {
+  const normalizePhoneNumber = useCallback((phone: string): string => {
     if (!phone) return "";
-    const cleaned = phone.replace(/\D/g, ''); // Remove non-digits
+    const cleaned = phone.replace(/\D/g, '');
 
     if (cleaned.startsWith('254') && cleaned.length === 12) {
-      return '+' + cleaned; 
+      return `+${cleaned}`;
     }
-    
+
     if (cleaned.startsWith('0') && cleaned.length === 10) {
-      return '+254' + cleaned.substring(1);
+      return `+254${cleaned.substring(1)}`;
     }
-    
+
     if (cleaned.startsWith('7') && cleaned.length === 9) {
-      return '+254' + cleaned;
+      return `+254${cleaned}`;
     }
 
     if (cleaned.length === 12 && cleaned.startsWith('254')) {
-        return '+' + cleaned;
+      return `+${cleaned}`;
     }
 
-    return ""; 
-  };
+    return "";
+  }, []);
+
+  const findExistingCustomerByPhone = useCallback(async (normalizedPhone: string): Promise<Customer | null> => {
+    const searchResponse = await fetch(`${CUSTOMERS_URL}by_phone/?phone=${encodeURIComponent(normalizedPhone)}`, {
+      headers: {
+        'Accept': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      }
+    });
+
+    if (searchResponse.ok) {
+      const existingCustomer = await searchResponse.json() as Customer;
+      setSelectedCustomer(existingCustomer);
+      setCustomerName(existingCustomer.name);
+      setCustomerPhone(normalizedPhone);
+      setError(null);
+      return existingCustomer;
+    }
+
+    if (searchResponse.status === 404) {
+      return null;
+    }
+
+    const errorText = await searchResponse.text();
+    throw new Error(errorText || `Failed to search customer (${searchResponse.status})`);
+  }, []);
+
+  useEffect(() => {
+    if (customerLookupTimeoutRef.current) {
+      clearTimeout(customerLookupTimeoutRef.current);
+    }
+
+    if (!customerPhone.trim()) {
+      lastLookupPhoneRef.current = "";
+      setSelectedCustomer(null);
+      return;
+    }
+
+    const normalizedPhone = normalizePhoneNumber(customerPhone);
+    if (!normalizedPhone) {
+      setSelectedCustomer(null);
+      return;
+    }
+
+    customerLookupTimeoutRef.current = setTimeout(async () => {
+      if (lastLookupPhoneRef.current === normalizedPhone) return;
+      lastLookupPhoneRef.current = normalizedPhone;
+      setIsCustomerLookupLoading(true);
+      try {
+        const existingCustomer = await findExistingCustomerByPhone(normalizedPhone);
+        if (existingCustomer) {
+          showToast("Existing customer found and auto-selected!");
+        } else if (
+          selectedCustomer &&
+          normalizePhoneNumber(String(selectedCustomer.phone)) !== normalizedPhone
+        ) {
+          setSelectedCustomer(null);
+        }
+      } catch (err) {
+        console.error("Auto customer lookup failed:", err);
+      } finally {
+        setIsCustomerLookupLoading(false);
+      }
+    }, 450);
+
+    return () => {
+      if (customerLookupTimeoutRef.current) {
+        clearTimeout(customerLookupTimeoutRef.current);
+      }
+    };
+  }, [customerPhone, findExistingCustomerByPhone, normalizePhoneNumber, selectedCustomer, showToast]);
 
   /**
-   * Logic to search customer by phone using the by_phone endpoint.
+   * Step 1 action:
+   * 1) Use existing customer when found by phone
+   * 2) Create customer if not found
    */
   const handleCustomerLookup = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -263,91 +350,64 @@ export default function CreateOrder() {
       return;
     }
 
-    console.log("=== Step 1: Searching customer by phone ===");
     try {
-      const searchResponse = await fetch(`${CUSTOMERS_URL}by_phone/?phone=${encodeURIComponent(normalizedPhone)}`, {
-        headers: {
-          'Accept': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        }
-      });
-
-      if (searchResponse.ok) {
-        const existingCustomer = await searchResponse.json() as Customer;
-        console.log("Customer found:", existingCustomer);
-        setSelectedCustomer(existingCustomer);
-        setCustomerName(existingCustomer.name);
-        showToast("Existing customer found and selected!");
+      lastLookupPhoneRef.current = normalizedPhone;
+      const existingCustomer = await findExistingCustomerByPhone(normalizedPhone);
+      if (existingCustomer) {
+        showToast("Existing customer selected.");
         showStep(2);
-        setIsLoading(false);
         return;
       }
 
-      if (searchResponse.status === 404) {
-        // Customer not found, try to create
-        if (!customerName.trim()) {
-          setError("Customer not found. Please enter a name to create a new customer.");
-          setIsLoading(false);
-          return;
-        }
-
-        console.log("=== Step 2: Customer not found. Creating new one... ===");
-
-        const createResponse = await fetch(CUSTOMERS_URL, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json',
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          },
-          body: JSON.stringify({ name: customerName.trim(), phone: normalizedPhone }),
-        });
-
-        const responseText = await createResponse.text();
-
-        if (!createResponse.ok) {
-          let data: ApiErrorResponse = {};
-          try { data = JSON.parse(responseText) as ApiErrorResponse; }
-          catch (e) { /* ignore parse error */ }
-
-          const errorObj = data;
-          const detail = (errorObj.phone?.[0] || errorObj.detail || "").toString().toLowerCase();
-
-          // If duplicate error occurred (race condition), try searching again
-          if (detail.includes('phone') && (detail.includes('exist') || detail.includes('unique'))) {
-             console.warn("Creation failed due to duplicate. Re-checking...");
-             const retryResponse = await fetch(`${CUSTOMERS_URL}by_phone/?phone=${encodeURIComponent(normalizedPhone)}`, {
-               headers: {
-                 'Accept': 'application/json',
-                 ...(token ? { Authorization: `Bearer ${token}` } : {}),
-               }
-             });
-
-             if(retryResponse.ok) {
-               const reCheckCustomer = await retryResponse.json() as Customer;
-               setSelectedCustomer(reCheckCustomer);
-               setCustomerName(reCheckCustomer.name);
-               showToast("Customer selected!");
-               showStep(2);
-               setIsLoading(false);
-               return;
-             }
-          }
-
-          // If we reach here, it's a real error
-          throw new Error(errorObj.phone?.[0] || errorObj.name?.[0] || errorObj.detail || `Failed to create customer (${createResponse.status})`);
-        }
-
-        // Success: Parse the text we already read
-        const newCustomer = JSON.parse(responseText) as Customer;
-        console.log("Customer created successfully:", newCustomer);
-        setSelectedCustomer(newCustomer);
-        showToast("Customer created successfully!");
-        showStep(2);
-      } else {
-        throw new Error(`Failed to search customer (${searchResponse.status})`);
+      if (!customerName.trim()) {
+        setError("Customer not found. Enter a name to create a new customer.");
+        return;
       }
 
+      const createResponse = await fetch(CUSTOMERS_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ name: customerName.trim(), phone: normalizedPhone }),
+      });
+
+      const responseText = await createResponse.text();
+
+      if (!createResponse.ok) {
+        let data: ApiErrorResponse = {};
+        try { data = JSON.parse(responseText) as ApiErrorResponse; }
+        catch (e) { /* ignore parse error */ }
+
+        const errorObj = data;
+        const detail = (errorObj.phone?.[0] || errorObj.detail || "").toString().toLowerCase();
+
+        // Handle race condition where another request already created this customer
+        if (detail.includes('phone') && (detail.includes('exist') || detail.includes('unique'))) {
+          const reCheckCustomer = await findExistingCustomerByPhone(normalizedPhone);
+          if (reCheckCustomer) {
+            showToast("Existing customer selected.");
+            showStep(2);
+            return;
+          }
+        }
+
+        throw new Error(
+          errorObj.phone?.[0] ||
+          errorObj.name?.[0] ||
+          errorObj.detail ||
+          `Failed to create customer (${createResponse.status})`
+        );
+      }
+
+      const newCustomer = JSON.parse(responseText) as Customer;
+      setSelectedCustomer(newCustomer);
+      setCustomerName(newCustomer.name);
+      setCustomerPhone(normalizedPhone);
+      showToast("Customer created successfully!");
+      showStep(2);
     } catch (err: any) {
       console.error("Error in handleCustomerLookup:", err);
       setError(err.message || "Failed to process customer.");
@@ -355,6 +415,22 @@ export default function CreateOrder() {
       setIsLoading(false);
     }
   };
+
+  const resetOrderForm = useCallback(() => {
+    setCustomerPhone("");
+    setCustomerName("");
+    setSelectedCustomer(null);
+    setShop("Shop A");
+    setDeliveryDate("");
+    setAddress("");
+    setPaymentType("");
+    setPaymentStatus("pending");
+    setAmountPaid(0);
+    setItems([createEmptyItem()]);
+    setCurrentStep(1);
+    setError(null);
+    lastLookupPhoneRef.current = "";
+  }, []);
 
   const handleOrderSubmit = useCallback(async (e: React.FormEvent) => {
     e.preventDefault();
@@ -432,8 +508,14 @@ export default function CreateOrder() {
       }
 
       const orderCode = data.uniquecode || data.order_number || data.id || "N/A";
-      showToast(`Order ${orderCode} created successfully!`);
-      setTimeout(() => window.location.reload(), 2000);
+      if (submitActionRef.current === "save_add_next") {
+        resetOrderForm();
+        navigate(ROUTES.laundryCreateOrder, { replace: true });
+        showToast(`Order ${orderCode} created. Add the next order.`);
+      } else {
+        showToast(`Order ${orderCode} created successfully!`);
+        navigate(ROUTES.orders, { replace: true });
+      }
 
     } catch (err: any) {
       console.error("=== DEBUG: Order submission error ===");
@@ -442,7 +524,11 @@ export default function CreateOrder() {
     } finally {
       setIsLoading(false);
     }
-  }, [selectedCustomer, shop, deliveryDate, address, paymentType, paymentStatus, amountPaid, totalPrice, items, showToast]);
+  }, [
+    selectedCustomer, shop, deliveryDate, address,
+    paymentType, paymentStatus, amountPaid, totalPrice,
+    items, showToast, navigate, resetOrderForm
+  ]);
 
   const showStep = useCallback((stepNumber: number) => {
     setCurrentStep(stepNumber);
@@ -495,11 +581,36 @@ export default function CreateOrder() {
             <form onSubmit={handleCustomerLookup} className="space-y-4 sm:space-y-5 p-2 sm:p-4">
               <div>
                 <Label className="block text-sm font-medium text-gray-700">Customer Name <span className="text-red-500">*</span></Label>
-                <Input value={customerName} onChange={(e) => setCustomerName(e.target.value)} placeholder="Enter customer full name" required className="mt-1 sm:mt-2 w-full rounded-lg border border-gray-300 bg-gray-50 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-200 p-2 sm:p-3" />
+                <Input
+                  value={customerName}
+                  onChange={(e) => setCustomerName(e.target.value)}
+                  placeholder="Enter customer full name"
+                  required
+                  readOnly={!!selectedCustomer}
+                  className="mt-1 sm:mt-2 w-full rounded-lg border border-gray-300 bg-gray-50 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-200 p-2 sm:p-3"
+                />
               </div>
               <div>
                 <Label className="block text-sm font-medium text-gray-700">Phone Number <span className="text-red-500">*</span></Label>
-                <Input value={customerPhone} onChange={(e) => { setCustomerPhone(e.target.value); setSelectedCustomer(null); }} placeholder="0712345678 or 254712345678" required className="mt-1 sm:mt-2 w-full rounded-lg border border-gray-300 bg-gray-50 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-200 p-2 sm:p-3" />
+                <Input
+                  value={customerPhone}
+                  onChange={(e) => {
+                    const nextPhone = e.target.value;
+                    setCustomerPhone(nextPhone);
+                    const selectedPhone = selectedCustomer ? normalizePhoneNumber(String(selectedCustomer.phone)) : "";
+                    const normalizedInput = normalizePhoneNumber(nextPhone);
+                    if (selectedCustomer && normalizedInput !== selectedPhone) {
+                      setSelectedCustomer(null);
+                    }
+                    setError(null);
+                  }}
+                  placeholder="0712345678 or 254712345678"
+                  required
+                  className="mt-1 sm:mt-2 w-full rounded-lg border border-gray-300 bg-gray-50 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-200 p-2 sm:p-3"
+                />
+                {isCustomerLookupLoading && (
+                  <p className="mt-1 text-xs text-blue-600">Checking existing customer...</p>
+                )}
               </div>
               {selectedCustomer && (
                 <div className="p-3 bg-green-50 border border-green-200 rounded-lg flex items-center justify-between">
@@ -511,8 +622,8 @@ export default function CreateOrder() {
                 </div>
               )}
               <div className="flex justify-end mt-4 sm:mt-6">
-                <Button type="submit" disabled={isLoading || !customerPhone || !customerName.trim()} className="w-full sm:w-auto px-4 sm:px-6 py-2.5 rounded-lg bg-blue-600 text-white font-medium hover:bg-blue-700 hover:shadow">
-                  {isLoading ? "Processing..." : "Next →"}
+                <Button type="submit" disabled={isLoading || isCustomerLookupLoading || !customerPhone} className="w-full sm:w-auto px-4 sm:px-6 py-2.5 rounded-lg bg-blue-600 text-white font-medium hover:bg-blue-700 hover:shadow">
+                  {isLoading ? "Processing..." : "Next ->"}
                 </Button>
               </div>
             </form>
@@ -627,7 +738,24 @@ export default function CreateOrder() {
               </div>
               <div className="flex flex-col sm:flex-row justify-between gap-3 mt-6">
                 <Button onClick={() => showStep(3)} type="button" className="bg-gray-300 text-gray-700 hover:bg-gray-400">← Back</Button>
-                <Button type="submit" disabled={isLoading} className="bg-green-600 hover:bg-green-700 text-white">{isLoading ? "Creating..." : "Create Order"}</Button>
+                <div className="flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-end">
+                  <Button
+                    type="submit"
+                    disabled={isLoading}
+                    onClick={() => { submitActionRef.current = "save"; }}
+                    className="bg-green-600 hover:bg-green-700 text-white"
+                  >
+                    {isLoading && submitActionRef.current === "save" ? "Saving..." : "Save"}
+                  </Button>
+                  <Button
+                    type="submit"
+                    disabled={isLoading}
+                    onClick={() => { submitActionRef.current = "save_add_next"; }}
+                    className="bg-blue-600 hover:bg-blue-700 text-white"
+                  >
+                    {isLoading && submitActionRef.current === "save_add_next" ? "Saving..." : "Save and Add Next"}
+                  </Button>
+                </div>
               </div>
             </form>
           </div>
@@ -636,3 +764,5 @@ export default function CreateOrder() {
     </div>
   );
 }
+
+

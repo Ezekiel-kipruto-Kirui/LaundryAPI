@@ -54,9 +54,89 @@ interface FilterState {
   dateFilter: { startDate: string; endDate: string };
 }
 
+interface OrderStats {
+  total_orders: number;
+  pending_orders: number;
+  completed_orders: number;
+  delivered_orders: number;
+  total_revenue: number;
+  pending_revenue: number;
+  completed_revenue: number;
+}
+
+interface FetchOrdersOptions {
+  force?: boolean;
+  silent?: boolean;
+}
+
+const HIDDEN_ORDER_STATUS: Order['order_status'] = 'Delivered_picked';
+const ORDERS_CACHE_TTL_MS = 60 * 1000;
+const CACHE_MAX_ENTRIES = 50;
+
 // --- Helper Functions (Outside Component) ---
 
 const getAuthToken = (): string | null => localStorage.getItem("accessToken");
+
+const parseMoneyValue = (value: string | number | null | undefined): number => {
+  const numeric = typeof value === 'string' ? parseFloat(value) : Number(value ?? 0);
+  return Number.isFinite(numeric) ? numeric : 0;
+};
+
+const toMoneyString = (value: number): string => {
+  const safeValue = Number.isFinite(value) ? value : 0;
+  return safeValue.toFixed(2);
+};
+
+const derivePaymentStatus = (
+  totalPrice: number,
+  amountPaid: number,
+  balance: number
+): Order['payment_status'] => {
+  if (amountPaid <= 0 || totalPrice <= 0) {
+    return 'pending';
+  }
+  if (balance <= 0.009 || amountPaid >= totalPrice - 0.009) {
+    return 'completed';
+  }
+  return 'partial';
+};
+
+const normalizeOrderPayment = (order: Order): Order => {
+  const totalPrice = Math.max(0, parseMoneyValue(order.total_price));
+  const amountPaid = Math.max(0, parseMoneyValue(order.amount_paid));
+  const rawBalance = parseMoneyValue(order.balance);
+  const computedBalance = Math.max(0, totalPrice - amountPaid);
+  const normalizedBalance =
+    Number.isFinite(rawBalance) && Math.abs(rawBalance - computedBalance) <= 0.009
+      ? Math.max(0, rawBalance)
+      : computedBalance;
+
+  const normalizedPaid = Math.min(amountPaid, totalPrice > 0 ? totalPrice : amountPaid);
+  const paymentStatus = derivePaymentStatus(totalPrice, normalizedPaid, normalizedBalance);
+
+  return {
+    ...order,
+    total_price: toMoneyString(totalPrice),
+    amount_paid: toMoneyString(normalizedPaid),
+    balance: toMoneyString(normalizedBalance),
+    payment_status: paymentStatus,
+    payment_type: paymentStatus === 'pending' ? 'None' : order.payment_type,
+  };
+};
+
+const filterOutDeliveredOrders = (orderList: Order[]): Order[] =>
+  orderList.filter((order) => order.order_status !== HIDDEN_ORDER_STATUS);
+
+const isCacheFresh = (timestamp: number): boolean =>
+  Date.now() - timestamp < ORDERS_CACHE_TTL_MS;
+
+const pruneCacheIfNeeded = <T,>(cache: Map<string, T>): void => {
+  if (cache.size <= CACHE_MAX_ENTRIES) return;
+  const firstKey = cache.keys().next().value;
+  if (firstKey) {
+    cache.delete(firstKey);
+  }
+};
 
 const formatCurrency = (amount: string | number): string => {
   const numAmount = typeof amount === 'string' ? parseFloat(amount) : amount;
@@ -254,6 +334,11 @@ export default function Orders() {
   const [currentOrder, setCurrentOrder] = useState<Order | null>(null);
   const [paymentType, setPaymentType] = useState('cash');
   const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [searchInput, setSearchInput] = useState('');
+  const [dateDraft, setDateDraft] = useState<{ startDate: string; endDate: string }>({
+    startDate: '',
+    endDate: ''
+  });
 
 
   // Filter State
@@ -276,7 +361,7 @@ export default function Orders() {
   });
 
   // Stats State
-  const [stats, setStats] = useState({
+  const [stats, setStats] = useState<OrderStats>({
     total_orders: 0,
     pending_orders: 0,
     completed_orders: 0,
@@ -285,6 +370,15 @@ export default function Orders() {
     pending_revenue: 0,
     completed_revenue: 0,
   });
+
+  // Refs
+  const searchTimeoutRef = useRef<NodeJS.Timeout>();
+  const exportDropdownRef = useRef<HTMLDivElement>(null);
+  const dropdownRefs = useRef<{ [key: number]: HTMLDivElement | null }>({});
+  const ordersCacheRef = useRef<Map<string, { response: PaginatedOrdersResponse; timestamp: number }>>(new Map());
+  const allOrdersCacheRef = useRef<Map<string, { orders: Order[]; timestamp: number }>>(new Map());
+  const statsCacheRef = useRef<Map<string, { stats: OrderStats; timestamp: number }>>(new Map());
+
   const fetchCurrentUser = useCallback(async () => {
   try {
     const user = await apiFetch<User>(CURRENT_USER_URL);
@@ -303,13 +397,77 @@ const currentUserName = useMemo(() => {
 }, [currentUser]);
 
 
+  const clearOrderCaches = useCallback(() => {
+    ordersCacheRef.current.clear();
+    allOrdersCacheRef.current.clear();
+    statsCacheRef.current.clear();
+  }, []);
+
+  const upsertOrderInState = useCallback((rawOrder: Order) => {
+    const normalizedOrder = normalizeOrderPayment(rawOrder);
+    const hideOrder = normalizedOrder.order_status === HIDDEN_ORDER_STATUS;
+
+    setOrders((prev) => {
+      const index = prev.findIndex((order) => order.id === normalizedOrder.id);
+      if (index === -1) {
+        return hideOrder ? prev : [normalizedOrder, ...prev];
+      }
+      if (hideOrder) {
+        return prev.filter((order) => order.id !== normalizedOrder.id);
+      }
+      const next = [...prev];
+      next[index] = normalizedOrder;
+      return next;
+    });
+
+    setAllOrders((prev) => {
+      const index = prev.findIndex((order) => order.id === normalizedOrder.id);
+      if (index === -1) {
+        return hideOrder ? prev : [normalizedOrder, ...prev];
+      }
+      if (hideOrder) {
+        return prev.filter((order) => order.id !== normalizedOrder.id);
+      }
+      const next = [...prev];
+      next[index] = normalizedOrder;
+      return next;
+    });
+
+    setCurrentOrder((prev) => (prev?.id === normalizedOrder.id ? normalizedOrder : prev));
+    setSelectedOrders((prev) => {
+      if (!prev.has(normalizedOrder.id) || !hideOrder) return prev;
+      const next = new Set(prev);
+      next.delete(normalizedOrder.id);
+      return next;
+    });
+  }, []);
+
+  const removeOrderFromState = useCallback((orderId: number) => {
+    setOrders((prev) => prev.filter((order) => order.id !== orderId));
+    setAllOrders((prev) => prev.filter((order) => order.id !== orderId));
+    setCurrentOrder((prev) => (prev?.id === orderId ? null : prev));
+    setSelectedOrders((prev) => {
+      if (!prev.has(orderId)) return prev;
+      const next = new Set(prev);
+      next.delete(orderId);
+      return next;
+    });
+  }, []);
+
 
   // Fetch stats from backend summary endpoint
   const fetchStats = useCallback(async () => {
+    const params = buildQueryParams();
+    const cacheKey = params.toString();
+    const cachedStats = statsCacheRef.current.get(cacheKey);
+    if (cachedStats && isCacheFresh(cachedStats.timestamp)) {
+      setStats(cachedStats.stats);
+      return;
+    }
+
     try {
-      const params = buildQueryParams();
       const response = await apiFetch<{ total_orders: number, total_revenue: number, pending_orders: number, completed_orders: number, pending_revenue: number, completed_revenue: number, shop_breakdown: any[] }>(`${ORDERS_URL}summary/?${params.toString()}`);
-      setStats({
+      const nextStats: OrderStats = {
         total_orders: response.total_orders,
         pending_orders: response.pending_orders,
         completed_orders: response.completed_orders,
@@ -317,7 +475,10 @@ const currentUserName = useMemo(() => {
         total_revenue: response.total_revenue,
         pending_revenue: response.pending_revenue,
         completed_revenue: response.completed_revenue,
-      });
+      };
+      setStats(nextStats);
+      statsCacheRef.current.set(cacheKey, { stats: nextStats, timestamp: Date.now() });
+      pruneCacheIfNeeded(statsCacheRef.current);
     } catch (err) {
       console.error("Error fetching stats:", err);
       // Fallback to local calculation if summary fails
@@ -327,11 +488,6 @@ const currentUserName = useMemo(() => {
       }
     }
   }, [filters, orders]);
-
-  // Refs
-  const searchTimeoutRef = useRef<NodeJS.Timeout>();
-  const exportDropdownRef = useRef<HTMLDivElement>(null);
-  const dropdownRefs = useRef<{ [key: number]: HTMLDivElement | null }>({});
 
   // Derived State
   const selectedOrderObjects = useMemo(() =>
@@ -395,36 +551,60 @@ const currentUserName = useMemo(() => {
 
   // --- API Calls ---
 
-  const fetchOrders = useCallback(async (page = 1) => {
-    setLoading(true);
+  const applyOrdersResponse = useCallback((response: PaginatedOrdersResponse, page: number) => {
+    if (!response.results || !Array.isArray(response.results)) {
+      throw new Error('Invalid response format');
+    }
+
+    const normalizedOrders = filterOutDeliveredOrders(
+      response.results.map((order) => normalizeOrderPayment(order))
+    );
+
+    setOrders(normalizedOrders);
+
+    const totalItems = response.count || 0;
+    const pageSize = response.page_size || pagination.pageSize;
+    const totalPages = response.total_pages || Math.ceil(totalItems / pageSize) || 1;
+    const currentPage = response.current_page || page;
+
+    setPagination({
+      currentPage,
+      totalPages,
+      totalItems,
+      pageSize,
+      next: response.next,
+      previous: response.previous
+    });
+  }, [pagination.pageSize]);
+
+  const fetchOrders = useCallback(async (page = 1, options: FetchOrdersOptions = {}) => {
+    const { force = false, silent = false } = options;
     setError(null);
 
+    const params = buildQueryParams({
+      page: page.toString(),
+      page_size: pagination.pageSize.toString()
+    });
+    const queryString = params.toString();
+    const cacheKey = queryString;
+
+    if (!force) {
+      const cachedPage = ordersCacheRef.current.get(cacheKey);
+      if (cachedPage && isCacheFresh(cachedPage.timestamp)) {
+        applyOrdersResponse(cachedPage.response, page);
+        return;
+      }
+    }
+
+    if (!silent) {
+      setLoading(true);
+    }
+
     try {
-      const params = buildQueryParams({
-        page: page.toString(),
-        page_size: pagination.pageSize.toString()
-      });
-
-      console.log('Fetching orders with params:', params.toString());
-      const response = await apiFetch<PaginatedOrdersResponse>(`${ORDERS_URL}?${params.toString()}`);
-
-      if (!response.results || !Array.isArray(response.results)) throw new Error('Invalid response format');
-
-      setOrders(response.results);
-
-      const totalItems = response.count || 0;
-      const totalPages = response.total_pages || Math.ceil(totalItems / pagination.pageSize) || 1;
-      const currentPage = response.current_page || page;
-
-      setPagination({
-        currentPage,
-        totalPages,
-        totalItems,
-        pageSize: response.page_size || pagination.pageSize,
-        next: response.next,
-        previous: response.previous
-      });
-
+      const response = await apiFetch<PaginatedOrdersResponse>(`${ORDERS_URL}?${queryString}`);
+      ordersCacheRef.current.set(cacheKey, { response, timestamp: Date.now() });
+      pruneCacheIfNeeded(ordersCacheRef.current);
+      applyOrdersResponse(response, page);
     } catch (err: any) {
       console.error("Error fetching orders:", err);
       if (err.message === "Unauthorized") {
@@ -435,15 +615,25 @@ const currentUserName = useMemo(() => {
       }
       setOrders([]);
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
-  }, [filters, pagination.pageSize]);
+  }, [filters, pagination.pageSize, applyOrdersResponse]);
 
   const fetchAllOrders = useCallback(async () => {
+    const params = buildQueryParams({ page_size: '100' });
+    const cacheKey = params.toString();
+    const cachedOrders = allOrdersCacheRef.current.get(cacheKey);
+    if (cachedOrders && isCacheFresh(cachedOrders.timestamp)) {
+      setAllOrders(cachedOrders.orders);
+      return;
+    }
+
     setLoadingAll(true);
     try {
       let allOrdersData: Order[] = [];
-      let nextUrl: string | null = `${ORDERS_URL}?${buildQueryParams({ page_size: '100' }).toString()}`;
+      let nextUrl: string | null = `${ORDERS_URL}?${cacheKey}`;
 
       while (nextUrl) {
         const response = await apiFetch<PaginatedOrdersResponse>(nextUrl);
@@ -451,7 +641,14 @@ const currentUserName = useMemo(() => {
         nextUrl = response.next;
         if (allOrdersData.length > 2000) break;
       }
-      setAllOrders(allOrdersData);
+
+      const visibleOrders = filterOutDeliveredOrders(
+        allOrdersData.map((order) => normalizeOrderPayment(order))
+      );
+
+      setAllOrders(visibleOrders);
+      allOrdersCacheRef.current.set(cacheKey, { orders: visibleOrders, timestamp: Date.now() });
+      pruneCacheIfNeeded(allOrdersCacheRef.current);
     } catch (err) {
       console.error("Error fetching all orders:", err);
       alert('Could not load all orders for SMS.');
@@ -485,32 +682,60 @@ const currentUserName = useMemo(() => {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  useEffect(() => {
+    if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
+    searchTimeoutRef.current = setTimeout(() => {
+      setFilters((prev) => (
+        prev.searchQuery === searchInput ? prev : { ...prev, searchQuery: searchInput }
+      ));
+    }, 350);
+
+    return () => {
+      if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
+    };
+  }, [searchInput]);
+
+  useEffect(() => {
+    setShowBulkActions(selectedOrders.size > 0);
+  }, [selectedOrders]);
+
+  useEffect(() => {
+    setSelectedOrders((prev) => {
+      const visibleIds = new Set(orders.map((order) => order.id));
+      const next = new Set(Array.from(prev).filter((id) => visibleIds.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [orders]);
+
   // --- Handlers ---
 
   const handleSearch = (query: string) => {
-    setFilters(prev => ({ ...prev, searchQuery: query }));
-    if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
-    searchTimeoutRef.current = setTimeout(() => {
-      fetchOrders(1);
-    }, 500);
+    setSearchInput(query);
   };
 
   const applyDateFilter = () => {
-    fetchOrders(1);
+    setFilters((prev) => ({
+      ...prev,
+      dateFilter: { ...dateDraft }
+    }));
   };
 
   const clearDateFilter = () => {
-    setFilters(prev => ({ ...prev, dateFilter: { startDate: '', endDate: '' } }));
-    fetchOrders(1);
+    const clearedRange = { startDate: '', endDate: '' };
+    setDateDraft(clearedRange);
+    setFilters(prev => ({ ...prev, dateFilter: clearedRange }));
   };
 
   const clearAllFilters = () => {
+    const clearedRange = { startDate: '', endDate: '' };
+    setSearchInput('');
+    setDateDraft(clearedRange);
     setFilters({
       searchQuery: '',
       paymentFilter: '',
       shopFilter: '',
       orderStatusFilter: '',
-      dateFilter: { startDate: '', endDate: '' }
+      dateFilter: clearedRange
     });
   };
 
@@ -527,7 +752,6 @@ const currentUserName = useMemo(() => {
       const newSet = new Set(prev);
       if (newSet.has(orderId)) newSet.delete(orderId);
       else newSet.add(orderId);
-      setShowBulkActions(newSet.size > 0);
       return newSet;
     });
   };
@@ -535,16 +759,13 @@ const currentUserName = useMemo(() => {
   const toggleSelectAll = (checked: boolean) => {
     if (checked) {
       setSelectedOrders(new Set(orders.map(o => o.id)));
-      setShowBulkActions(true);
     } else {
       setSelectedOrders(new Set());
-      setShowBulkActions(false);
     }
   };
 
   const clearSelection = () => {
     setSelectedOrders(new Set());
-    setShowBulkActions(false);
   };
 
   const sendBulkSMS = async (message: string, recipients: Order[]) => {
@@ -583,7 +804,11 @@ const currentUserName = useMemo(() => {
   };
 
   // --- Inline Helpers for Modals ---
-  const updateOrderStatus = async (orderId: number, status: Order['order_status']) => {
+  const updateOrderStatus = async (
+    orderId: number,
+    status: Order['order_status'],
+    shouldRefresh = true
+  ) => {
     try {
       const token = getAuthToken();
       const res = await fetch(`${ORDERS_URL}${orderId}/`, {
@@ -593,7 +818,12 @@ const currentUserName = useMemo(() => {
       });
       if (!res.ok) throw new Error('Failed to update');
 
-      fetchOrders(pagination.currentPage);
+      const updatedOrder = await res.json() as Order;
+      upsertOrderInState(updatedOrder);
+      clearOrderCaches();
+      if (shouldRefresh) {
+        void fetchOrders(pagination.currentPage, { force: true, silent: true });
+      }
     } catch (err) {
       alert('Failed to update status');
     }
@@ -608,8 +838,9 @@ const currentUserName = useMemo(() => {
         headers: { ...(token && { 'Authorization': `Bearer ${token}` }) }
       });
       if (res.ok) {
-        fetchOrders(pagination.currentPage);
-        if (selectedOrders.has(orderId)) toggleOrderSelection(orderId);
+        removeOrderFromState(orderId);
+        clearOrderCaches();
+        void fetchOrders(pagination.currentPage, { force: true, silent: true });
       }
     } catch (err) {
       alert('Failed to delete order');
@@ -618,9 +849,12 @@ const currentUserName = useMemo(() => {
 
   const handleBulkAction = async (status: 'Completed' | 'Delivered_picked') => {
     if (!confirm(`Mark ${selectedOrders.size} orders as ${status}?`)) return;
-    for (const id of selectedOrders) {
-      await updateOrderStatus(id, status);
+    const selectedIds = Array.from(selectedOrders);
+    for (const id of selectedIds) {
+      await updateOrderStatus(id, status, false);
     }
+    clearOrderCaches();
+    void fetchOrders(pagination.currentPage, { force: true, silent: true });
     clearSelection();
   };
 
@@ -668,7 +902,7 @@ const currentUserName = useMemo(() => {
             <input
               type="text"
               placeholder="Search orders..."
-              value={filters.searchQuery}
+              value={searchInput}
               onChange={(e) => handleSearch(e.target.value)}
               className="pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg w-full focus:ring-2 focus:ring-blue-500 focus:border-blue-500 shadow-sm"
             />
@@ -684,14 +918,14 @@ const currentUserName = useMemo(() => {
             <div className="flex gap-2">
               <input
                 type="date"
-                value={filters.dateFilter.startDate}
-                onChange={(e) => setFilters(prev => ({ ...prev, dateFilter: { ...prev.dateFilter, startDate: e.target.value } }))}
+                value={dateDraft.startDate}
+                onChange={(e) => setDateDraft(prev => ({ ...prev, startDate: e.target.value }))}
                 className="px-3 py-2 border border-gray-300 rounded-md text-sm"
               />
               <input
                 type="date"
-                value={filters.dateFilter.endDate}
-                onChange={(e) => setFilters(prev => ({ ...prev, dateFilter: { ...prev.dateFilter, endDate: e.target.value } }))}
+                value={dateDraft.endDate}
+                onChange={(e) => setDateDraft(prev => ({ ...prev, endDate: e.target.value }))}
                 className="px-3 py-2 border border-gray-300 rounded-md text-sm"
               />
               <button onClick={applyDateFilter} className="px-3 py-2 bg-blue-500 text-white rounded-md text-sm hover:bg-blue-600">Apply</button>
@@ -776,8 +1010,8 @@ const currentUserName = useMemo(() => {
 
           <div className="flex items-center gap-2">
             <span className="text-sm text-gray-500 font-medium">Order Status:</span>
-            {['pending', 'Completed', 'Delivered_picked'].map(status => (
-              <button key={status} onClick={() => { setFilters(prev => ({ ...prev, orderStatusFilter: prev.orderStatusFilter === status ? '' : status })); }} className={`px-3 py-1.5 rounded-full text-sm font-medium ${filters.orderStatusFilter === status ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700'}`}>{status === 'Delivered_picked' ? 'Delivered' : status}</button>
+            {['pending', 'Completed'].map(status => (
+              <button key={status} onClick={() => { setFilters(prev => ({ ...prev, orderStatusFilter: prev.orderStatusFilter === status ? '' : status })); }} className={`px-3 py-1.5 rounded-full text-sm font-medium ${filters.orderStatusFilter === status ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700'}`}>{status}</button>
             ))}
           </div>
 
@@ -950,14 +1184,17 @@ const currentUserName = useMemo(() => {
                   onClick={async () => {
                     try {
                       const token = getAuthToken();
+                      const totalPrice = parseMoneyValue(currentOrder.total_price);
+                      const currentBalance = Math.max(0, parseMoneyValue(currentOrder.balance));
+                      const currentAmountPaid = parseMoneyValue(currentOrder.amount_paid);
 
-                      // Calculate new amount paid (existing amount + balance)
-                      const totalPrice = parseFloat(currentOrder.total_price);
-                      const currentBalance = parseFloat(currentOrder.balance);
-                      const currentAmountPaid = parseFloat(currentOrder.amount_paid);
+                      if (currentBalance <= 0) {
+                        alert('This order is already fully paid.');
+                        setShowPaymentModal(false);
+                        return;
+                      }
 
-                      // Update amount paid to include the current balance payment
-                      const newAmountPaid = currentAmountPaid + currentBalance;
+                      const newAmountPaid = Math.min(totalPrice, currentAmountPaid + currentBalance);
 
                       const response = await fetch(`${ORDERS_URL}${currentOrder.id}/`, {
                         method: 'PATCH',
@@ -966,10 +1203,9 @@ const currentUserName = useMemo(() => {
                           ...(token && { 'Authorization': `Bearer ${token}` })
                         },
                         body: JSON.stringify({
-                          payment_status: 'completed',
                           payment_type: paymentType,
-                          amount_paid: newAmountPaid.toFixed(2), // Update amount paid with the new total
-                          balance: '0.00' // Set balance to zero
+                          amount_paid: newAmountPaid.toFixed(2),
+                          balance: '0.00'
                         })
                       });
 
@@ -977,10 +1213,12 @@ const currentUserName = useMemo(() => {
                         throw new Error('Failed to update payment');
                       }
 
-                      // Refresh the orders list and close modal
-                      fetchOrders(pagination.currentPage);
+                      const updatedOrder = normalizeOrderPayment(await response.json() as Order);
+                      upsertOrderInState(updatedOrder);
+                      clearOrderCaches();
+                      void fetchOrders(pagination.currentPage, { force: true, silent: true });
                       setShowPaymentModal(false);
-                      alert('Payment completed successfully! Balance set to zero.');
+                      alert(`Payment updated successfully. Status: ${updatedOrder.payment_status}.`);
 
                     } catch (err) {
                       console.error('Payment update error:', err);
