@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
+from django.db import transaction
 from .models import (
     Customer, Order, OrderItem,
     ExpenseField, ExpenseRecord, Payment, shoptype,CustomUserManager,UserProfile
@@ -209,10 +210,11 @@ class OrderSerializer(serializers.ModelSerializer):
         if request and request.user.is_authenticated:
             validated_data["created_by"] = request.user
 
-        order = Order.objects.create(**validated_data)
+        with transaction.atomic():
+            order = Order.objects.create(**validated_data)
 
-        for item_data in items_data:
-            OrderItem.objects.create(order=order, **item_data)
+            for item_data in items_data:
+                OrderItem.objects.create(order=order, **item_data)
 
         return order
 

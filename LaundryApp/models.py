@@ -342,6 +342,51 @@ class Payment(models.Model):
         return f"Payment for {self.order.uniquecode} - KSh {self.price}"
 
 
+def _build_order_items_summary(order: Order) -> str:
+    item_entries: list[str] = []
+
+    for order_item in order.items.all():
+        names = order_item.get_item_list()
+        if not names and order_item.itemname:
+            names = [str(order_item.itemname).strip()]
+
+        quantity = int(order_item.quantity or 1)
+        for name in names:
+            if quantity > 1:
+                item_entries.append(f"{quantity}x {name}")
+            else:
+                item_entries.append(name)
+
+    if not item_entries:
+        return "items not specified"
+
+    max_items_in_sms = 6
+    visible_items = item_entries[:max_items_in_sms]
+    summary = ", ".join(visible_items)
+    hidden_count = len(item_entries) - max_items_in_sms
+    if hidden_count > 0:
+        summary = f"{summary}, +{hidden_count} more"
+
+    return summary
+
+
+def _format_currency(value: Decimal) -> str:
+    return f"KSh {Decimal(value).quantize(Decimal('0.01'))}"
+
+
+def _send_order_sms(customer_phone: str, order_code: str, message_body: str) -> None:
+    success, response = send_sms(customer_phone, message_body)
+
+    if success:
+        logger.info(
+            f"SMS sent successfully for order {order_code} | SID={response}"
+        )
+    else:
+        logger.error(
+            f"Failed to send SMS for order {order_code} | Error={response}"
+        )
+
+
 @receiver(post_save, sender=Order)
 def handle_order_sms(sender, instance, created, **kwargs):
     customer = instance.customer
@@ -351,20 +396,46 @@ def handle_order_sms(sender, instance, created, **kwargs):
     # Validate phone number format (+countrycode)
     if not customer_phone or not customer_phone.startswith("+"):
         logger.warning(
-            f"⚠️ Invalid phone number for order {order_code}: {customer_phone}"
+            f"Invalid phone number for order {order_code}: {customer_phone}"
         )
         return
 
     message_body = None
 
-    # 🆕 NEW ORDER CREATED
+    # NEW ORDER CREATED
     if created:
-        message_body = (
-            f"Hello {customer.name}! "
-            f"Your order {order_code} has been received and is now being processed."
-        )
+        def send_created_order_sms():
+            try:
+                order_with_items = (
+                    Order.objects.select_related("customer")
+                    .prefetch_related("items")
+                    .get(pk=instance.pk)
+                )
+            except Order.DoesNotExist:
+                logger.error(
+                    f"Order not found while preparing SMS for {order_code}"
+                )
+                return
 
-    # ✅ ORDER COMPLETED (status change only)
+            items_summary = _build_order_items_summary(order_with_items)
+            total_price = _format_currency(order_with_items.total_price)
+            amount_paid = _format_currency(order_with_items.amount_paid)
+            balance = _format_currency(order_with_items.balance)
+            created_message = (
+                f"Hello {order_with_items.customer.name}! "
+                f"Your order {order_with_items.uniquecode} has been received. "
+                f"Items: {items_summary}. "
+                f"Total: {total_price}. "
+                f"Paid: {amount_paid}. "
+                f"Balance: {balance}. "
+                "And it is now being processed."
+            )
+            _send_order_sms(customer_phone, order_code, created_message)
+
+        transaction.on_commit(send_created_order_sms)
+        return
+
+    # ORDER COMPLETED (status change only)
     elif (
         instance.order_status == "Completed"
         and getattr(instance, "previous_order_status", None) != "Completed"
@@ -374,7 +445,7 @@ def handle_order_sms(sender, instance, created, **kwargs):
             "Thank you for choosing our laundry service."
         )
 
-    # 🚚 ORDER DELIVERED / PICKED UP (status change only)
+    # ORDER DELIVERED / PICKED UP (status change only)
     elif (
         instance.order_status == "Delivered_picked"
         and getattr(instance, "previous_order_status", None) != "Delivered_picked"
@@ -384,15 +455,6 @@ def handle_order_sms(sender, instance, created, **kwargs):
             "We appreciate your trust in our services!"
         )
 
-    # 📤 SEND SMS USING TWILIO MESSAGING SERVICE
+    # SEND SMS USING TWILIO MESSAGING SERVICE
     if message_body:
-        success, response = send_sms(customer_phone, message_body)
-
-        if success:
-            logger.info(
-                f"📤 SMS sent successfully for order {order_code} | SID={response}"
-            )
-        else:
-            logger.error(
-                f"❌ Failed to send SMS for order {order_code} | Error={response}"
-            )
+        _send_order_sms(customer_phone, order_code, message_body)
