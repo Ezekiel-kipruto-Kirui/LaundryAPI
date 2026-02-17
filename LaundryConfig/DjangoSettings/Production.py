@@ -21,6 +21,15 @@ CSRF_TRUSTED_ORIGINS = [
     # 'https://elite-laundry0010.onrender.com',
 ]
 
+CORS_ALLOWED_ORIGINS = [
+    'https://www.cleanpage.shop',
+    'https://cleanpage.shop',
+    'https://cluster-calculation.vercel.app',
+]
+
+# Keep this enabled when the frontend sends cookies/authorization across origins.
+CORS_ALLOW_CREDENTIALS = True
+
 DATABASES = {
     'default': dj_database_url.config(
         default=os.getenv('DATABASE_URL'),
