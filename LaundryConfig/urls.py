@@ -43,6 +43,7 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/Laundry/', include('LaundryApp.urls')),
     path('api/Hotel/', include('HotelApp.urls')),
+    path('api/daraja-emails/', include('APIApp.urls')),
     path('api/token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     path('api/Report/', include('perfomancereport.urls')),
