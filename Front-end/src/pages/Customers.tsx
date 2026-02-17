@@ -11,7 +11,6 @@ import {
     Search,
     User,
     ShoppingBag,
-    ChartLine,
     ChevronLeft,
     ChevronRight,
     Store,
@@ -52,14 +51,7 @@ interface PaginatedOrdersResponse extends PaginatedResponse<Order> {
     results: Order[];
 }
 
-// Dashboard Stats Interface
-interface DashboardStats {
-    pending: number;
-    completed: number;
-    delivered_picked: number;
-}
-
-// Type assertion helper
+// Type assertion helper for customer objects
 const assertCustomer = (customer: any): Customer => {
     return {
         id: customer?.id || 0,
@@ -73,7 +65,7 @@ const assertCustomer = (customer: any): Customer => {
 
 // --- Components ---
 
-// SMS Modal
+// SMS Send Modal Component
 const SMSModal = ({
     isOpen,
     onClose,
@@ -90,6 +82,19 @@ const SMSModal = ({
     const [message, setMessage] = useState('');
     const [charCount, setCharCount] = useState(0);
 
+    const handleMessageChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+        const value = e.target.value;
+        setMessage(value);
+        setCharCount(value.length);
+    };
+
+    const handleSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        if (message.trim() && customerCount > 0) {
+            onSend(message);
+        }
+    };
+
     if (!isOpen) return null;
 
     return (
@@ -101,26 +106,54 @@ const SMSModal = ({
                         <h2 className="text-xl font-semibold text-gray-900">Send SMS to All Customers</h2>
                     </div>
                 </div>
-                <form onSubmit={(e) => { e.preventDefault(); onSend(message); }} className="p-6">
+                <form onSubmit={handleSubmit} className="p-6">
                     <div className="mb-4">
-                        <label className="block text-sm font-medium text-gray-700 mb-2">Message</label>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                            Message to send (All customers in database)
+                        </label>
                         <textarea
                             value={message}
-                            onChange={(e) => { setMessage(e.target.value); setCharCount(e.target.value.length); }}
+                            onChange={handleMessageChange}
                             className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent h-40"
                             placeholder="Type your message here..."
                             required
                             maxLength={160}
                         />
-                        <div className="flex justify-between mt-2 text-xs text-gray-500">
-                            <span>Characters: {charCount}/160</span>
-                            <span>SMS parts: {Math.ceil(charCount / 160)}</span>
+                        <div className="flex justify-between mt-2">
+                            <span className="text-xs text-gray-500">
+                                Characters: {charCount}/160
+                            </span>
+                            <span className="text-xs text-gray-500">
+                                SMS parts: {Math.ceil(charCount / 160)}
+                            </span>
                         </div>
                     </div>
+
                     <div className="flex justify-end space-x-3 pt-4 border-t border-gray-200">
-                        <button type="button" onClick={onClose} disabled={isSending} className="px-6 py-2 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg">Cancel</button>
-                        <button type="submit" disabled={isSending || !message.trim()} className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg disabled:opacity-50 flex items-center">
-                            {isSending ? <><RefreshCw className="w-4 h-4 mr-2 animate-spin" /> Sending...</> : <><Send className="w-4 h-4 mr-2" /> Send SMS</>}
+                        <button
+                            type="button"
+                            onClick={onClose}
+                            className="px-6 py-2 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors duration-200"
+                            disabled={isSending}
+                        >
+                            Cancel
+                        </button>
+                        <button
+                            type="submit"
+                            disabled={isSending || !message.trim()}
+                            className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition-colors duration-200 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
+                        >
+                            {isSending ? (
+                                <>
+                                    <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                                    Sending...
+                                </>
+                            ) : (
+                                <>
+                                    <Send className="w-4 h-4 mr-2" />
+                                    Send SMS to All Customers
+                                </>
+                            )}
                         </button>
                     </div>
                 </form>
@@ -129,7 +162,7 @@ const SMSModal = ({
     );
 };
 
-// Card Component
+// Updated Card Component for Dashboard Metrics
 interface SubMetric {
     label: string;
     value: string | number;
@@ -197,24 +230,58 @@ const CustomerFormModal = ({ customer, onSave, onClose }: { customer: Customer |
     const [phone, setPhone] = useState(customer?.phone || '');
     const isNew = !customer || customer.id === 0;
 
+    const handleSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        onSave({
+            ...(customer || { id: 0, phone: '', name: '', order_count: 0, total_spent: '0', last_order_date: null }),
+            name,
+            phone,
+        });
+    };
+
     return (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
             <div className="bg-white rounded-2xl shadow-xl w-full max-w-md">
                 <div className="px-6 py-4 border-b border-gray-200">
-                    <h2 className="text-xl font-semibold text-gray-900">{isNew ? 'Add New Customer' : 'Edit Customer'}</h2>
+                    <h2 className="text-xl font-semibold text-gray-900">
+                        {isNew ? 'Add New Customer' : 'Edit Customer'}
+                    </h2>
                 </div>
-                <form onSubmit={(e) => { e.preventDefault(); onSave({ ...(customer || { id: 0, phone: '', name: '', order_count: 0, total_spent: '0', last_order_date: null }), name, phone }); }} className="p-6">
+                <form onSubmit={handleSubmit} className="p-6">
                     <div className="mb-4">
                         <label className="block text-sm font-medium text-gray-700 mb-2">Name</label>
-                        <input type="text" value={name} onChange={(e) => setName(e.target.value)} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" required />
+                        <input
+                            type="text"
+                            value={name}
+                            onChange={(e) => setName(e.target.value)}
+                            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                            required
+                        />
                     </div>
                     <div className="mb-6">
                         <label className="block text-sm font-medium text-gray-700 mb-2">Phone</label>
-                        <input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" required />
+                        <input
+                            type="tel"
+                            value={phone}
+                            onChange={(e) => setPhone(e.target.value)}
+                            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                            required
+                        />
                     </div>
                     <div className="flex justify-end space-x-3 pt-4 border-t border-gray-200">
-                        <button type="button" onClick={onClose} className="px-6 py-2 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg">Cancel</button>
-                        <button type="submit" className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg">{isNew ? 'Add Customer' : 'Save Changes'}</button>
+                        <button
+                            type="button"
+                            onClick={onClose}
+                            className="px-6 py-2 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors duration-200"
+                        >
+                            Cancel
+                        </button>
+                        <button
+                            type="submit"
+                            className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition-colors duration-200 shadow-sm"
+                        >
+                            {isNew ? 'Add Customer' : 'Save Changes'}
+                        </button>
                     </div>
                 </form>
             </div>
@@ -222,558 +289,859 @@ const CustomerFormModal = ({ customer, onSave, onClose }: { customer: Customer |
     );
 };
 
-// Badges
+// Order Status Badge Component
 const OrderStatusBadge = ({ status }: { status: string }) => {
-    const config: any = {
-        completed: { bg: 'bg-green-100', text: 'text-green-800', label: 'Completed' },
-        pending: { bg: 'bg-yellow-100', text: 'text-yellow-800', label: 'Pending' },
-        processing: { bg: 'bg-blue-100', text: 'text-blue-800', label: 'Processing' },
-        delivered_picked: { bg: 'bg-purple-100', text: 'text-purple-800', label: 'Delivered' },
-        cancelled: { bg: 'bg-red-100', text: 'text-red-800', label: 'Cancelled' },
+    const getStatusConfig = (status: string) => {
+        switch (status.toLowerCase()) {
+            case 'completed':
+                return { bg: 'bg-green-100', text: 'text-green-800', label: 'Completed' };
+            case 'pending':
+                return { bg: 'bg-yellow-100', text: 'text-yellow-800', label: 'Pending' };
+            case 'processing':
+                return { bg: 'bg-blue-100', text: 'text-blue-800', label: 'Processing' };
+            case 'delivered_picked':
+                return { bg: 'bg-purple-100', text: 'text-purple-800', label: 'Delivered' };
+            case 'cancelled':
+                return { bg: 'bg-red-100', text: 'text-red-800', label: 'Cancelled' };
+            default:
+                return { bg: 'bg-gray-100', text: 'text-gray-800', label: status };
+        }
     };
-    const c = config[status.toLowerCase()] || { bg: 'bg-gray-100', text: 'text-gray-800', label: status };
-    return <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${c.bg} ${c.text}`}>{c.label}</span>;
+
+    const config = getStatusConfig(status);
+    return (
+        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${config.bg} ${config.text}`}>
+            {config.label}
+        </span>
+    );
 };
 
+// Payment Status Badge Component
 const PaymentStatusBadge = ({ status }: { status: string }) => {
-    const config: any = {
-        completed: { bg: 'bg-green-100', text: 'text-green-800', label: 'Paid' },
-        partial: { bg: 'bg-yellow-100', text: 'text-yellow-800', label: 'Partial' },
-        pending: { bg: 'bg-red-100', text: 'text-red-800', label: 'Pending' },
+    const getStatusConfig = (status: string) => {
+        switch (status.toLowerCase()) {
+            case 'completed':
+                return { bg: 'bg-green-100', text: 'text-green-800', label: 'Paid' };
+            case 'partial':
+                return { bg: 'bg-yellow-100', text: 'text-yellow-800', label: 'Partial' };
+            case 'pending':
+                return { bg: 'bg-red-100', text: 'text-red-800', label: 'Pending' };
+            default:
+                return { bg: 'bg-gray-100', text: 'text-gray-800', label: status };
+        }
     };
-    const c = config[status.toLowerCase()] || { bg: 'bg-gray-100', text: 'text-gray-800', label: status };
-    return <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${c.bg} ${c.text}`}>{c.label}</span>;
+
+    const config = getStatusConfig(status);
+    return (
+        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${config.bg} ${config.text}`}>
+            {config.label}
+        </span>
+    );
 };
 
-// Detail Modal
-const CustomerDetailModal = ({ customer, orders, isLoadingOrders, ordersError, onRetryLoadOrders, onClose, onEdit, onDelete }: any) => {
-    const totalSpent = orders.reduce((sum: number, order: Order) => sum + parseFloat(order.total_price || '0'), 0).toFixed(2);
-    const totalBalance = orders.reduce((sum: number, order: Order) => sum + parseFloat(order.balance || '0'), 0).toFixed(2);
-    const pendingOrders = orders.filter((order: Order) => order.order_status === 'pending').length;
+// Customer Detail View Modal with Orders Table
+const CustomerDetailModal = ({
+    customer,
+    orders,
+    isLoadingOrders,
+    ordersError,
+    onRetryLoadOrders,
+    onClose,
+    onEdit,
+    onDelete
+}: {
+    customer: Customer,
+    orders: Order[],
+    isLoadingOrders: boolean,
+    ordersError: string | null,
+    onRetryLoadOrders: () => void,
+    onClose: () => void,
+    onEdit: () => void,
+    onDelete: () => void
+}) => {
+    const totalSpent = orders.reduce((sum, order) => sum + parseFloat(order.total_price || '0'), 0).toFixed(2);
+    const totalBalance = orders.reduce((sum, order) => sum + parseFloat(order.balance || '0'), 0).toFixed(2);
+    const pendingOrders = orders.filter(order => order.order_status === 'pending').length;
 
-    const formatCurrency = (amount: string) => `KSh ${parseFloat(amount || '0').toLocaleString('en-KE', { minimumFractionDigits: 2 })}`;
-    const formatDate = (dateString: string) => !dateString ? 'N/A' : new Date(dateString).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+    const formatDate = (dateString: string) => {
+        if (!dateString) return 'N/A';
+        return new Date(dateString).toLocaleDateString('en-US', {
+            year: 'numeric',
+            month: 'short',
+            day: 'numeric'
+        });
+    };
+
+    const formatCurrency = (amount: string) => {
+        const num = parseFloat(amount);
+        return `KSh ${isNaN(num) ? '0.00' : num.toLocaleString('en-KE', {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2
+        })}`;
+    };
 
     return (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-            <div className="bg-white rounded-2xl shadow-xl w-full max-w-6xl max-h-[90vh] overflow-hidden flex flex-col">
-                <div className="px-6 py-4 border-b border-gray-200 bg-gray-50 flex justify-between items-center">
-                    <h2 className="text-xl font-semibold text-gray-900">Customer Details</h2>
-                    <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button>
+            <div className="bg-white rounded-2xl shadow-xl w-full max-w-6xl max-h-[90vh] overflow-hidden">
+                <div className="px-6 py-4 border-b border-gray-200 bg-gray-50">
+                    <div className="flex items-center justify-between">
+                        <h2 className="text-xl font-semibold text-gray-900">Customer Details</h2>
+                        <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+                            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                        </button>
+                    </div>
                 </div>
                 <div className="p-6 overflow-y-auto">
                     <div className="flex items-center mb-6">
-                        <div className="w-16 h-16 bg-blue-500 rounded-full flex items-center justify-center mr-4"><User className="text-white text-2xl" /></div>
-                        <div className="flex-1"><h1 className="text-2xl font-bold text-gray-900">{customer.name}</h1><p className="text-gray-600">ID: {customer.id} • Phone: {customer.phone}</p></div>
+                        <div className="w-16 h-16 bg-blue-500 rounded-full flex items-center justify-center mr-4">
+                            <User className="text-white text-2xl" />
+                        </div>
+                        <div className="flex-1">
+                            <h1 className="text-2xl font-bold text-gray-900">{customer.name}</h1>
+                            <p className="text-gray-600">ID: {customer.id} • Phone: {customer.phone}</p>
+                        </div>
                         <div className="space-x-2">
-                            <button onClick={onEdit} className="inline-flex items-center p-2 bg-amber-100 hover:bg-amber-200 text-amber-700 rounded-lg"><Edit className="w-4 h-4 mr-2" /> Edit</button>
-                            <button onClick={onDelete} className="inline-flex items-center p-2 bg-red-100 hover:bg-red-200 text-red-700 rounded-lg"><Trash2 className="w-4 h-4 mr-2" /> Delete</button>
+                            <button onClick={onEdit} className="inline-flex items-center px-4 py-2 bg-amber-100 hover:bg-amber-200 text-amber-700 rounded-lg transition-colors duration-200"><Edit className="w-4 h-4 mr-2" /> Edit</button>
+                            <button onClick={onDelete} className="inline-flex items-center px-4 py-2 bg-red-100 hover:bg-red-200 text-red-700 rounded-lg transition-colors duration-200"><Trash2 className="w-4 h-4 mr-2" /> Delete</button>
                         </div>
                     </div>
+
                     <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-                        {[
-                            { title: 'Total Orders', val: orders.length, color: 'text-blue-900', bg: 'bg-blue-50', titleColor: 'text-blue-800' },
-                            { title: 'Total Billed', val: formatCurrency(totalSpent), color: 'text-green-900', bg: 'bg-green-50', titleColor: 'text-green-800' },
-                            { title: 'Pending Balance', val: formatCurrency(totalBalance), color: 'text-yellow-900', bg: 'bg-yellow-50', titleColor: 'text-yellow-800' },
-                            { title: 'Active Orders', val: pendingOrders, color: 'text-purple-900', bg: 'bg-purple-50', titleColor: 'text-purple-800' },
-                        ].map((stat, i) => (
-                            <div key={i} className={`${stat.bg} p-4 rounded-lg`}>
-                                <h3 className={`text-sm font-medium ${stat.titleColor} mb-2`}>{stat.title}</h3>
-                                <p className={`text-2xl font-bold ${stat.color}`}>{stat.val}</p>
-                            </div>
-                        ))}
-                    </div>
-                    <h3 className="text-lg font-semibold text-gray-900 mb-4">Customer Orders</h3>
-                    {isLoadingOrders ? <div className="text-center p-8"><RefreshCw className="w-8 h-8 animate-spin mx-auto text-blue-500" /></div> : ordersError ? <div className="text-center p-8 text-red-500">{ordersError}</div> : orders.length > 0 ? (
-                        <div className="overflow-x-auto bg-white rounded-xl border border-gray-200">
-                            <table className="w-full">
-                                <thead className="bg-gray-50"><tr>
-                                    {['Order Code', 'Shop', 'Status', 'Payment', 'Total', 'Date'].map(h => <th key={h} className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">{h}</th>)}
-                                </tr></thead>
-                                <tbody className="divide-y divide-gray-200">
-                                    {orders.map((order: Order) => (
-                                        <tr key={order.id} className="hover:bg-gray-50">
-                                            <td className="px-6 py-4 text-sm font-medium text-blue-600">{order.uniquecode}</td>
-                                            <td className="px-6 py-4 text-sm text-gray-900">{order.shop || 'N/A'}</td>
-                                            <td className="px-6 py-4"><OrderStatusBadge status={order.order_status} /></td>
-                                            <td className="px-6 py-4"><PaymentStatusBadge status={order.payment_status} /></td>
-                                            <td className="px-6 py-4 text-sm font-semibold text-gray-900">{formatCurrency(order.total_price)}</td>
-                                            <td className="px-6 py-4 text-sm text-gray-900">{formatDate(order.created_at)}</td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
+                        <div className="bg-blue-50 p-4 rounded-lg">
+                            <h3 className="text-sm font-medium text-blue-800 mb-2">Total Orders</h3>
+                            <p className="text-2xl font-bold text-blue-900">{orders.length}</p>
                         </div>
-                    ) : <p className="text-center text-gray-500 py-8">No orders found.</p>}
+                        <div className="bg-green-50 p-4 rounded-lg">
+                            <h3 className="text-sm font-medium text-green-800 mb-2">Total Billed</h3>
+                            <p className="text-2xl font-bold text-green-900">{formatCurrency(totalSpent)}</p>
+                        </div>
+                        <div className="bg-yellow-50 p-4 rounded-lg">
+                            <h3 className="text-sm font-medium text-yellow-800 mb-2">Pending Balance</h3>
+                            <p className="text-2xl font-bold text-yellow-900">{formatCurrency(totalBalance)}</p>
+                        </div>
+                        <div className="bg-purple-50 p-4 rounded-lg">
+                            <h3 className="text-sm font-medium text-purple-800 mb-2">Active Orders</h3>
+                            <p className="text-2xl font-bold text-purple-900">{pendingOrders}</p>
+                        </div>
+                    </div>
+
+                    <div className="mb-6">
+                        <h3 className="text-lg font-semibold text-gray-900 mb-4">Customer Orders ({orders.length})</h3>
+                        {isLoadingOrders ? (
+                            <div className="text-center p-8 bg-gray-50 rounded-xl">
+                                <RefreshCw className="w-10 h-10 text-blue-500 mx-auto mb-4 animate-spin" />
+                                <p className="text-gray-600">Loading customer orders...</p>
+                            </div>
+                        ) : ordersError ? (
+                            <div className="text-center p-8 bg-red-50 rounded-xl border border-red-200">
+                                <AlertCircle className="w-10 h-10 text-red-500 mx-auto mb-4" />
+                                <p className="text-red-700 mb-4">{ordersError}</p>
+                                <button onClick={onRetryLoadOrders} className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg">Retry</button>
+                            </div>
+                        ) : orders.length > 0 ? (
+                            <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                                <div className="overflow-x-auto">
+                                    <table className="w-full min-w-max">
+                                        <thead className="bg-gray-50">
+                                            <tr>
+                                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Order Code</th>
+                                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Shop</th>
+                                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Payment</th>
+                                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Total</th>
+                                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="bg-white divide-y divide-gray-200">
+                                            {orders.map((order) => (
+                                                <tr key={order.id} className="hover:bg-gray-50">
+                                                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-blue-600">{order.uniquecode}</td>
+                                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{order.shop || 'N/A'}</td>
+                                                    <td className="px-6 py-4 whitespace-nowrap"><OrderStatusBadge status={order.order_status} /></td>
+                                                    <td className="px-6 py-4 whitespace-nowrap"><PaymentStatusBadge status={order.payment_status} /></td>
+                                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{formatCurrency(order.total_price)}</td>
+                                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{formatDate(order.created_at)}</td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="text-center p-8 bg-gray-50 rounded-xl">
+                                <ShoppingCart className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+                                <p className="text-gray-500 text-lg">No orders found for this customer</p>
+                            </div>
+                        )}
+                    </div>
                 </div>
             </div>
         </div>
     );
 };
 
-// Helper: API Fetch
+// Helper function for API calls
 const apiFetch = async <T,>(url: string, options: RequestInit = {}): Promise<T> => {
     const token = localStorage.getItem('access_token');
+    const defaultHeaders = {
+        'Content-Type': 'application/json',
+        ...(token && { 'Authorization': `Bearer ${token}` }),
+    };
     const controller = new AbortController();
-    const id = setTimeout(() => controller.abort(), 20000);
+    const timeoutMs = 20000;
+    const timeoutId = options.signal ? null : setTimeout(() => controller.abort(), timeoutMs);
 
+    let response: Response;
     try {
-        const res = await fetch(url, { ...options, signal: controller.signal, headers: { 'Content-Type': 'application/json', ...(token && { 'Authorization': `Bearer ${token}` }), ...options.headers } });
-        clearTimeout(id);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        return res.status === 204 ? null as T : res.json();
-    } catch (e: any) {
-        clearTimeout(id);
-        throw e;
+        response = await fetch(url, {
+            ...options,
+            signal: options.signal || controller.signal,
+            headers: { ...defaultHeaders, ...options.headers },
+        });
+    } catch (error: any) {
+        if (error?.name === 'AbortError') throw new Error('Request timeout. Please check API status and try again.');
+        throw error;
+    } finally {
+        if (timeoutId) clearTimeout(timeoutId);
     }
+
+    if (!response.ok) {
+        if (response.status === 401) throw new Error('Unauthorized');
+        const errorText = await response.text();
+        console.error(`API Error ${response.status}:`, errorText);
+        throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    if (response.status === 204) return null as T;
+    return response.json();
 };
 
-// Types & Interfaces
-interface PaginationState { currentPage: number; totalPages: number; totalItems: number; pageSize: number; next: string | null; previous: string | null; }
-interface CustomerStats { orderCount: number; totalBilled: number; lastOrderDate: string | null; }
-interface CacheEntry<T> { data: T; timestamp: number; }
-interface CachedCustomersPage { customers: Customer[]; pagination: PaginationState; }
+// --- Types ---
+interface PaginationState {
+    currentPage: number;
+    totalPages: number;
+    totalItems: number;
+    pageSize: number;
+    next: string | null;
+    previous: string | null;
+}
+
+interface CustomerStats {
+    orderCount: number;
+    totalBilled: number;
+    totalBalance: number;
+    pending: number;
+    completed: number;
+    delivered: number;
+    lastOrderDate: string | null;
+}
+
+interface CacheEntry<T> {
+    data: T;
+    timestamp: number;
+}
+
+interface CachedCustomersPage {
+    customers: Customer[];
+    pagination: PaginationState;
+}
 
 const CACHE_TTL_MS = 5 * 60 * 1000;
-const isCacheFresh = (ts: number) => Date.now() - ts < CACHE_TTL_MS;
+const isCacheFresh = (timestamp: number) => Date.now() - timestamp < CACHE_TTL_MS;
+
+const getAuthToken = (): string | null => localStorage.getItem("accessToken");
 
 export default function CustomersPage() {
     const [customers, setCustomers] = useState<Customer[]>([]);
     const [allCustomers, setAllCustomers] = useState<Customer[]>([]);
     const [currentCustomerOrders, setCurrentCustomerOrders] = useState<Order[]>([]);
+    const [customerOrdersLoading, setCustomerOrdersLoading] = useState(false);
+    const [customerOrdersError, setCustomerOrdersError] = useState<string | null>(null);
+    
+    // Stats by ID for immediate UI updates
+    const [customerStatsById, setCustomerStatsById] = useState<Record<number, CustomerStats>>({});
+    
+    // Global Aggregates for Dashboard
+    const [globalStats, setGlobalStats] = useState({
+        totalBalance: 0,
+        totalPending: 0,
+        totalCompleted: 0,
+        totalDelivered: 0
+    });
+
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [searchQuery, setSearchQuery] = useState('');
-    
-    // Modals
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
     const [isSMSModalOpen, setIsSMSModalOpen] = useState(false);
     const [isSendingSMS, setIsSendingSMS] = useState(false);
     const [currentCustomer, setCurrentCustomer] = useState<Customer | null>(null);
-    
-    // Pagination
-    const [pagination, setPagination] = useState<PaginationState>({ currentPage: 1, totalPages: 1, totalItems: 0, pageSize: 10, next: null, previous: null });
-    
-    // Dashboard Stats
-    const [dashboardStats, setDashboardStats] = useState<DashboardStats>({ pending: 0, completed: 0, delivered_picked: 0 });
-    const [customerOrdersLoading, setCustomerOrdersLoading] = useState(false);
-    const [customerOrdersError, setCustomerOrdersError] = useState<string | null>(null);
 
-    // Refs
+    const [pagination, setPagination] = useState<PaginationState>({
+        currentPage: 1,
+        totalPages: 1,
+        totalItems: 0,
+        pageSize: 10,
+        next: null,
+        previous: null
+    });
+
     const customersPageCacheRef = useRef<Map<string, CacheEntry<CachedCustomersPage>>>(new Map());
     const allCustomersCacheRef = useRef<CacheEntry<Customer[]> | null>(null);
     const customerOrdersCacheRef = useRef<Map<number, CacheEntry<Order[]>>>(new Map());
+    const isFetchingPageStatsRef = useRef<Set<number>>(new Set()); // Prevent duplicate fetches for same page
 
-    // --- Logic: Dashboard Stats Calculation ---
-    const fetchDashboardOrderStats = useCallback(async () => {
-        // Optimization: Fetch orders to populate the sub-metrics (Pending/Completed/Delivered)
-        // We limit this to the most recent 2000 orders to keep the app responsive, 
-        // as counting 10,000+ orders on every load is too heavy.
+    const clearCustomerListCaches = useCallback(() => {
+        customersPageCacheRef.current.clear();
+        allCustomersCacheRef.current = null;
+    }, []);
+
+    // --- Stats Logic ---
+
+    const deriveCustomerStats = (orders: Order[]): CustomerStats => {
+        const totalBilled = orders.reduce((sum, order) => sum + (parseFloat(order.total_price) || 0), 0);
+        const totalBalance = orders.reduce((sum, order) => sum + (parseFloat(order.balance) || 0), 0);
+        
+        const pending = orders.filter(o => o.order_status.toLowerCase() === 'pending').length;
+        const completed = orders.filter(o => o.order_status.toLowerCase() === 'completed').length;
+        const delivered = orders.filter(o => o.order_status.toLowerCase() === 'delivered_picked').length;
+
+        const lastOrderDate = orders.reduce<string | null>((latest, order) => {
+            if (!order.created_at) return latest;
+            if (!latest) return order.created_at;
+            return new Date(order.created_at) > new Date(latest) ? order.created_at : latest;
+        }, null);
+
+        return {
+            orderCount: orders.length,
+            totalBilled,
+            totalBalance,
+            pending,
+            completed,
+            delivered,
+            lastOrderDate
+        };
+    };
+
+    // Helper: Fetch orders and calculate stats
+    const fetchOrdersForCustomer = useCallback(async (customer: Customer, forceRefresh = false): Promise<Order[]> => {
+        const cached = customerOrdersCacheRef.current.get(customer.id);
+        if (!forceRefresh && cached && isCacheFresh(cached.timestamp)) {
+            // Ensure stats are updated even from cache
+            const stats = deriveCustomerStats(cached.data);
+            setCustomerStatsById(prev => {
+                if (prev[customer.id]?.orderCount !== stats.orderCount) {
+                    return { ...prev, [customer.id]: stats };
+                }
+                return prev;
+            });
+            return cached.data;
+        }
+
+        const searchTerm = (customer.phone || customer.name || `${customer.id}`).trim();
+        const params = new URLSearchParams({ page_size: '100' });
+        if (searchTerm) params.append('search', searchTerm);
+
+        let nextUrl: string | null = `${API_ORDERS_URL}?${params.toString()}`;
+        let pageCount = 0;
+        const MAX_PAGES = 20;
+        let matchedOrders: Order[] = [];
+
         try {
-            let nextUrl: string | null = `${API_ORDERS_URL}?page_size=100`;
-            let count = 0;
-            const MAX_DASHBOARD_ORDERS = 2000;
-            
-            const tempStats: DashboardStats = { pending: 0, completed: 0, delivered_picked: 0 };
-
-            while (nextUrl && count < MAX_DASHBOARD_ORDERS) {
+            while (nextUrl && pageCount < MAX_PAGES) {
                 const response = await apiFetch<PaginatedOrdersResponse>(nextUrl);
-                if (!response.results) break;
+                if (!response.results || !Array.isArray(response.results)) break;
 
-                response.results.forEach(order => {
-                    const status = order.order_status?.toLowerCase();
-                    if (status === 'pending') tempStats.pending++;
-                    else if (status === 'completed') tempStats.completed++;
-                    else if (status === 'delivered_picked') tempStats.delivered_picked++;
-                    
-                    // Optimization: Cache these orders individually for future "View Details" speed
-                    if (!customerOrdersCacheRef.current.has(order.customer?.id)) {
-                        customerOrdersCacheRef.current.set(order.customer?.id, { data: [], timestamp: Date.now() });
-                    }
-                    // Note: We aren't fully populating the order list cache here to save memory, 
-                    // just counting. If the user clicks view, we fetch fresh or merge.
-                });
+                const normalizedOrders = response.results.map(order => ({
+                    ...order,
+                    customer: assertCustomer(order.customer)
+                }));
 
-                count += response.results.length;
+                const customerOnlyOrders = normalizedOrders.filter(order => order.customer.id === customer.id);
+                matchedOrders = [...matchedOrders, ...customerOnlyOrders];
                 nextUrl = response.next;
+                pageCount++;
             }
-            setDashboardStats(tempStats);
+
+            customerOrdersCacheRef.current.set(customer.id, {
+                data: matchedOrders,
+                timestamp: Date.now()
+            });
+
+            const stats = deriveCustomerStats(matchedOrders);
+            setCustomerStatsById(prev => ({ ...prev, [customer.id]: stats }));
+
+            return matchedOrders;
         } catch (err) {
-            console.warn("Could not fetch dashboard stats:", err);
+            console.error(`Failed to fetch orders for ${customer.id}`, err);
+            return [];
         }
     }, []);
 
-    // --- Logic: Fetchers ---
+    // --- Data Fetching ---
 
     const fetchAllCustomers = useCallback(async (forceRefresh = false): Promise<Customer[]> => {
         const cached = allCustomersCacheRef.current;
-        if (!forceRefresh && cached && isCacheFresh(cached.timestamp)) return cached.data;
+        if (!forceRefresh && cached && isCacheFresh(cached.timestamp)) {
+            return cached.data;
+        }
 
         try {
-            let loaded: Customer[] = [];
+            let loadedCustomers: Customer[] = [];
             let nextUrl: string | null = `${API_CUSTOMERS_URL}?page_size=100`;
+
             while (nextUrl) {
-                const res = await apiFetch<PaginatedCustomersResponse>(nextUrl);
-                if (res.results) {
-                    loaded = [...loaded, ...res.results.map(assertCustomer)];
-                    nextUrl = res.next;
+                const response = await apiFetch<PaginatedCustomersResponse>(nextUrl);
+                if (response.results && Array.isArray(response.results)) {
+                    loadedCustomers = [...loadedCustomers, ...response.results.map(assertCustomer)];
+                    nextUrl = response.next;
                 } else break;
-                if (loaded.length > 2000) break; // Safety limit
+                if (loadedCustomers.length > 1000) break;
             }
-            allCustomersCacheRef.current = { data: loaded, timestamp: Date.now() };
-            return loaded;
-        } catch (e) { console.error(e); throw e; }
+
+            allCustomersCacheRef.current = { data: loadedCustomers, timestamp: Date.now() };
+            return loadedCustomers;
+        } catch (err: any) {
+            console.error("Error fetching all customers:", err);
+            throw err;
+        }
     }, []);
 
     const fetchCustomers = useCallback(async (page = 1, search = '') => {
         const trimmedSearch = search.trim();
-        const cacheKey = `${page}|${pagination.pageSize}|${trimmedSearch}`;
-        const cached = customersPageCacheRef.current.get(cacheKey);
-        if (cached && isCacheFresh(cached.timestamp)) {
-            setCustomers(cached.data.customers);
-            setPagination(cached.data.pagination);
+        const cacheKey = `${page}|${pagination.pageSize}|${trimmedSearch.toLowerCase()}`;
+        const cachedPage = customersPageCacheRef.current.get(cacheKey);
+
+        if (cachedPage && isCacheFresh(cachedPage.timestamp)) {
+            setCustomers(cachedPage.data.customers);
+            setPagination(cachedPage.data.pagination);
+            setError(null);
             setLoading(false);
             return;
         }
 
         setLoading(true);
         setError(null);
+
         try {
             if (trimmedSearch) {
-                let source = allCustomers.length ? allCustomers : await fetchAllCustomers();
-                if (!allCustomers.length) setAllCustomers(source);
+                let searchableCustomers = allCustomers;
+                if (searchableCustomers.length === 0) searchableCustomers = await fetchAllCustomers();
 
-                const query = trimmedSearch.toLowerCase();
-                const filtered = source.filter(c => 
-                    (c.name || '').toLowerCase().includes(query) || 
-                    (c.phone || '').toLowerCase().includes(query)
-                );
-                const totalItems = filtered.length;
+                const queryText = trimmedSearch.toLowerCase();
+                const queryDigits = trimmedSearch.replace(/\D/g, '');
+
+                const filteredCustomers = searchableCustomers.filter((customer) => {
+                    const customerName = (customer.name || '').toLowerCase();
+                    const customerPhone = (customer.phone || '').toLowerCase();
+                    const customerPhoneDigits = (customer.phone || '').replace(/\D/g, '');
+                    return customerName.includes(queryText) || customerPhone.includes(queryText) || 
+                           (queryDigits && customerPhoneDigits.includes(queryDigits));
+                });
+
+                const totalItems = filteredCustomers.length;
                 const totalPages = Math.max(1, Math.ceil(totalItems / pagination.pageSize));
-                const start = (page - 1) * pagination.pageSize;
-                const paged = filtered.slice(start, start + pagination.pageSize);
+                const currentPage = Math.min(Math.max(page, 1), totalPages);
+                const startIndex = (currentPage - 1) * pagination.pageSize;
+                const paginatedData = filteredCustomers.slice(startIndex, startIndex + pagination.pageSize);
                 
-                const localPag: PaginationState = {
-                    currentPage: page, totalPages, totalItems, pageSize: pagination.pageSize,
-                    next: page < totalPages ? `local:${page+1}` : null,
-                    previous: page > 1 ? `local:${page-1}` : null
+                const localPagination: PaginationState = {
+                    currentPage, totalPages, totalItems, pageSize: pagination.pageSize,
+                    next: currentPage < totalPages ? `local:${currentPage + 1}` : null,
+                    previous: currentPage > 1 ? `local:${currentPage - 1}` : null
                 };
 
-                setCustomers(paged);
-                setPagination(localPag);
-                customersPageCacheRef.current.set(cacheKey, { data: { customers: paged, pagination: localPag }, timestamp: Date.now() });
+                setCustomers(paginatedData);
+                setPagination(localPagination);
+                customersPageCacheRef.current.set(cacheKey, {
+                    data: { customers: paginatedData, pagination: localPagination },
+                    timestamp: Date.now()
+                });
             } else {
                 const params = new URLSearchParams({ page: page.toString(), page_size: pagination.pageSize.toString() });
-                const res = await apiFetch<PaginatedCustomersResponse>(`${API_CUSTOMERS_URL}?${params}`);
-                const pageCustomers = res.results.map(assertCustomer);
-                const remotePag: PaginationState = {
-                    currentPage: res.current_page || page,
-                    totalPages: res.total_pages || 1,
-                    totalItems: res.count || 0,
-                    pageSize: res.page_size || pagination.pageSize,
-                    next: res.next, previous: res.previous
+                const url = `${API_CUSTOMERS_URL}?${params}`;
+                const response = await apiFetch<PaginatedCustomersResponse>(url);
+
+                if (!response.results || !Array.isArray(response.results)) throw new Error('Invalid response format');
+
+                const pageCustomers = response.results.map(assertCustomer);
+                const remotePagination: PaginationState = {
+                    currentPage: response.current_page || page,
+                    totalPages: response.total_pages || Math.ceil((response.count || 0) / pagination.pageSize) || 1,
+                    totalItems: response.count || 0,
+                    pageSize: response.page_size || pagination.pageSize,
+                    next: response.next,
+                    previous: response.previous
                 };
+
                 setCustomers(pageCustomers);
-                setPagination(remotePag);
-                customersPageCacheRef.current.set(cacheKey, { data: { customers: pageCustomers, pagination: remotePag }, timestamp: Date.now() });
+                setPagination(remotePagination);
+                customersPageCacheRef.current.set(cacheKey, {
+                    data: { customers: pageCustomers, pagination: remotePagination },
+                    timestamp: Date.now()
+                });
             }
-        } catch (e) {
-            setError("Failed to load customers");
-        } finally { setLoading(false); }
+        } catch (err: any) {
+            console.error("Error fetching customers:", err);
+            setError(err.message === "Unauthorized" ? "Session expired." : "Could not load customers.");
+            setCustomers([]);
+        } finally {
+            setLoading(false);
+        }
     }, [allCustomers, fetchAllCustomers, pagination.pageSize]);
 
-    const fetchOrdersForCustomer = useCallback(async (customer: Customer, forceRefresh = false): Promise<Order[]> => {
-        const cached = customerOrdersCacheRef.current.get(customer.id);
-        if (!forceRefresh && cached && isCacheFresh(cached.timestamp)) return cached.data;
+    // --- Effects ---
 
-        // Search orders by customer name or phone
-        const term = (customer.phone || customer.name).trim();
-        const params = new URLSearchParams({ search: term, page_size: '100' });
-        
-        try {
-            let nextUrl: string | null = `${API_ORDERS_URL}?${params.toString()}`;
-            let orders: Order[] = [];
-            
-            while(nextUrl) {
-                const res = await apiFetch<PaginatedOrdersResponse>(nextUrl);
-                if(res.results) {
-                    const matches = res.results.filter(o => o.customer?.id === customer.id);
-                    orders = [...orders, ...matches];
-                    nextUrl = res.next;
-                } else break;
+    // 1. Initial Load
+    useEffect(() => {
+        let isMounted = true;
+        const loadInitialData = async () => {
+            try {
+                await fetchCustomers(1, '');
+                fetchAllCustomers().then(allCust => {
+                    if (isMounted) setAllCustomers(allCust);
+                }).catch(console.error);
+            } catch (err) {
+                setError("Failed to load initial data.");
+            } finally {
+                if (isMounted) setLoading(false);
             }
-            
-            customerOrdersCacheRef.current.set(customer.id, { data: orders, timestamp: Date.now() });
-            return orders;
-        } catch(e) {
-            console.error(e);
-            return [];
-        }
+        };
+        loadInitialData();
+        return () => { isMounted = false; };
     }, []);
+
+    // 2. Handle Search/Pagination changes
+    useEffect(() => {
+        if (!loading) fetchCustomers(pagination.currentPage, searchQuery);
+    }, [pagination.currentPage, searchQuery]);
+
+    // 3. CRITICAL: Auto-fetch stats for customers on the CURRENT PAGE
+    // This ensures the table is populated without clicking "View"
+    useEffect(() => {
+        if (customers.length === 0) return;
+
+        // Mark this page as being processed to avoid race conditions
+        const pageId = pagination.currentPage;
+        if (isFetchingPageStatsRef.current.has(pageId)) return;
+        isFetchingPageStatsRef.current.add(pageId);
+
+        const fetchVisibleStats = async () => {
+            // Only fetch if we don't have the stats yet
+            const customersToFetch = customers.filter(c => !customerStatsById[c.id]);
+            
+            if (customersToFetch.length > 0) {
+                // Fetch in parallel for speed
+                await Promise.all(customersToFetch.map(c => fetchOrdersForCustomer(c)));
+            }
+            isFetchingPageStatsRef.current.delete(pageId);
+        };
+
+        fetchVisibleStats();
+    }, [customers, pagination.currentPage, customerStatsById, fetchOrdersForCustomer]);
+
+    // 4. Calculate Global Dashboard Stats from known detailed stats
+    // As we fetch details for customers, the dashboard updates automatically
+    useEffect(() => {
+        const statsIds = Object.keys(customerStatsById).map(Number);
+        if (statsIds.length === 0) return;
+
+        const totalBalance = statsIds.reduce((sum, id) => sum + (customerStatsById[id]?.totalBalance || 0), 0);
+        const totalPending = statsIds.reduce((sum, id) => sum + (customerStatsById[id]?.pending || 0), 0);
+        const totalCompleted = statsIds.reduce((sum, id) => sum + (customerStatsById[id]?.completed || 0), 0);
+        const totalDelivered = statsIds.reduce((sum, id) => sum + (customerStatsById[id]?.delivered || 0), 0);
+
+        setGlobalStats({ totalBalance, totalPending, totalCompleted, totalDelivered });
+    }, [customerStatsById]);
 
     // --- Handlers ---
 
-    const handleSearch = (e: React.FormEvent) => { e.preventDefault(); setPagination(p => ({ ...p, currentPage: 1 })); };
-    
-    const saveCustomer = async (data: Customer) => {
-        setLoading(true);
-        const isNew = !data.id;
-        try {
-            await apiFetch(isNew ? API_CUSTOMERS_URL : `${API_CUSTOMERS_URL}${data.id}/`, {
-                method: isNew ? 'POST' : 'PUT',
-                body: JSON.stringify({ name: data.name, phone: data.phone })
-            });
-            // Clear cache
-            customersPageCacheRef.current.clear();
-            allCustomersCacheRef.current = null;
-            await fetchCustomers(pagination.currentPage, searchQuery);
-            if(!isNew) await fetchAllCustomers(true); // Refresh all for dashboard
-            setIsModalOpen(false);
-        } catch(e) {
-            setError("Failed to save customer");
-        } finally { setLoading(false); }
-    };
-
-    const deleteCustomer = async (id: number, name: string) => {
-        if(!confirm(`Delete ${name}?`)) return;
-        try {
-            await apiFetch(`${API_CUSTOMERS_URL}${id}/`, { method: 'DELETE' });
-            customersPageCacheRef.current.clear();
-            allCustomersCacheRef.current = null;
-            await fetchCustomers(pagination.currentPage, searchQuery);
-            await fetchAllCustomers(true);
-            setIsDetailModalOpen(false);
-        } catch(e) { setError("Failed to delete"); }
-    };
+    const formatCurrency = (amount: number) => `KSh ${amount.toLocaleString('en-KE', { minimumFractionDigits: 2 })}`;
 
     const viewCustomerDetails = async (customer: Customer) => {
         setCurrentCustomer(customer);
-        setIsDetailModalOpen(true);
-        setCustomerOrdersLoading(true);
+        setCurrentCustomerOrders([]);
         setCustomerOrdersError(null);
+        setIsDetailModalOpen(true);
+        
+        // Force refresh even if cached to ensure modal has latest data
+        const orders = await fetchOrdersForCustomer(customer, true);
+        setCurrentCustomerOrders(orders);
+    };
+
+    const saveCustomer = async (customerData: Customer) => {
+        setLoading(true);
+        const isNew = customerData.id === 0;
+        const url = isNew ? API_CUSTOMERS_URL : `${API_CUSTOMERS_URL}${customerData.id}/`;
+        const method = isNew ? 'POST' : 'PUT';
+
         try {
-            const orders = await fetchOrdersForCustomer(customer);
-            setCurrentCustomerOrders(orders);
-        } catch(e) {
-            setCustomerOrdersError("Failed to load orders");
+            const response = await apiFetch<Customer>(url, {
+                method,
+                body: JSON.stringify({ name: customerData.name, phone: customerData.phone, created_by: 1 })
+            });
+
+            const savedCustomer: Customer = assertCustomer(response || customerData);
+            clearCustomerListCaches();
+
+            if (isNew) setAllCustomers(prev => [savedCustomer, ...prev]);
+            else {
+                setAllCustomers(prev => prev.map(c => c.id === savedCustomer.id ? savedCustomer : c));
+                customerOrdersCacheRef.current.delete(savedCustomer.id);
+                setCustomerStatsById(prev => {
+                    const next = { ...prev };
+                    delete next[savedCustomer.id];
+                    return next;
+                });
+            }
+
+            await fetchCustomers(pagination.currentPage, searchQuery);
+            setIsModalOpen(false);
+            alert(`Customer ${isNew ? 'created' : 'updated'} successfully!`);
+        } catch (err: any) {
+            setError(err.message);
         } finally {
-            setCustomerOrdersLoading(false);
+            setLoading(false);
+        }
+    };
+
+    const deleteCustomer = async (id: number, name: string) => {
+        if (!window.confirm(`Delete ${name}?`)) return;
+        setLoading(true);
+        try {
+            await apiFetch<void>(`${API_CUSTOMERS_URL}${id}/`, { method: 'DELETE' });
+            clearCustomerListCaches();
+            customerOrdersCacheRef.current.delete(id);
+            setCustomerStatsById(prev => { const n = { ...prev }; delete n[id]; return n; });
+            setAllCustomers(prev => prev.filter(c => c.id !== id));
+            await fetchCustomers(pagination.currentPage, searchQuery);
+            setIsDetailModalOpen(false);
+        } catch (err: any) {
+            setError(err.message);
+        } finally {
+            setLoading(false);
         }
     };
 
     const sendBulkSMS = async (message: string) => {
         setIsSendingSMS(true);
         try {
-            // Use allCustomers
-            const list = allCustomers.length ? allCustomers : await fetchAllCustomers();
-            if(!allCustomers.length) setAllCustomers(list);
+            let smsCustomers = allCustomers.length ? allCustomers : await fetchAllCustomers();
+            const phoneNumbers = [...new Set(smsCustomers.map(c => c.phone).filter(p => p))];
             
-            const phones = [...new Set(list.map(c => c.phone).filter(Boolean))];
-            const token = localStorage.getItem('access_token');
+            if (!phoneNumbers.length) return alert("No valid phone numbers.");
             
+            const token = getAuthToken();
             await fetch(API_SMS_URL, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                body: JSON.stringify({ to_number: phones.slice(0, 100), message })
+                body: JSON.stringify({ to_number: phoneNumbers, message })
             });
-            alert("SMS Sent!");
+            alert("SMS sent!");
             setIsSMSModalOpen(false);
-        } catch(e) {
-            alert("SMS Failed");
-        } finally { setIsSendingSMS(false); }
+        } catch (err) {
+            alert("Failed to send SMS.");
+        } finally {
+            setIsSendingSMS(false);
+        }
     };
 
-    // --- Effects ---
+    // --- Render Helpers ---
 
-    useEffect(() => {
-        let mounted = true;
-        const init = async () => {
-            try {
-                await fetchCustomers(1, '');
-                const all = await fetchAllCustomers();
-                if(mounted) {
-                    setAllCustomers(all);
-                    // Once we have all customers, fetch dashboard stats
-                    fetchDashboardOrderStats();
-                }
-            } catch(e) { console.error(e); }
-            finally { if(mounted) setLoading(false); }
+    const resolveStats = (customer: Customer) => {
+        return customerStatsById[customer.id] || {
+            orderCount: customer.order_count || 0,
+            totalBilled: parseFloat(customer.total_spent || '0'),
+            totalBalance: 0, // Unknown until fetched
+            pending: 0, completed: 0, delivered: 0,
+            lastOrderDate: customer.last_order_date
         };
-        init();
-        return () => { mounted = false; };
-    }, []);
+    };
 
-    useEffect(() => {
-        if (!loading) fetchCustomers(pagination.currentPage, searchQuery);
-    }, [pagination.currentPage, searchQuery]);
+    // Dashboard Calculations
+    // Use globalStats if we have detailed data, otherwise fall back to list data for basic counts
+    const displayTotalBalance = globalStats.totalBalance > 0 
+        ? globalStats.totalBalance 
+        : allCustomers.reduce((sum, c) => sum + parseFloat(c.total_spent || '0'), 0);
 
-    // --- Derived Data for Dashboard ---
-    
-    // 1. Total Customers: Use the accurate count from pagination (server-side) or loaded all
-    const totalSystemCustomers = pagination.totalItems || allCustomers.length;
-
-    // 2. Total Orders: Sum of order_count from allCustomers
-    const totalSystemOrders = allCustomers.reduce((sum, c) => sum + (c.order_count || 0), 0);
-
-    // 3. Total Balance (Total Billed): Sum of total_spent from allCustomers
-    const totalSystemBalance = allCustomers.reduce((sum, c) => sum + parseFloat(c.total_spent || '0'), 0);
-
-    // Helper to get stats for a specific row (always fall back to customer data)
-    const getRowStats = (c: Customer) => ({
-        totalBilled: parseFloat(c.total_spent || '0'),
-        orderCount: c.order_count || 0,
-        lastDate: c.last_order_date
-    });
+    const displayTotalOrders = allCustomers.reduce((sum, c) => sum + (c.order_count || 0), 0);
+    const displayTotalCustomers = allCustomers.length || pagination.totalItems;
 
     if (loading && customers.length === 0) return (
-        <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-            <RefreshCw className="animate-spin text-blue-500 w-8 h-8" />
+        <div className="min-h-screen bg-gray-50 py-8 flex items-center justify-center">
+            <RefreshCw className="animate-spin h-8 w-8 text-blue-500" />
         </div>
     );
 
     return (
         <div className="min-h-screen bg-gray-50 py-8">
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                {/* Search */}
+                {/* Search & Actions */}
                 <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 mb-8">
                     <div className="flex flex-col sm:flex-row gap-4">
                         <button onClick={() => { setCurrentCustomer(null); setIsModalOpen(true); }} className="inline-flex items-center justify-center px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-sm">
                             <PlusCircle className="w-5 h-5 mr-2" /> Add New Customer
                         </button>
                         <button onClick={() => setIsSMSModalOpen(true)} className="inline-flex items-center justify-center px-6 py-3 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-lg shadow-sm" disabled={loading}>
-                            <MessageSquare className="w-5 h-5 mr-2" /> Send SMS
+                            <MessageSquare className="w-5 h-5 mr-2" /> Send SMS ({allCustomers.length})
                         </button>
-                        <form onSubmit={handleSearch} className="flex-1 flex gap-2">
+                        <form onSubmit={(e) => { e.preventDefault(); setPagination(p => ({...p, currentPage: 1})); }} className="flex-1 flex gap-2">
                             <div className="flex-1 relative">
-                                <input type="text" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} className="w-full px-4 py-3 pl-10 border border-gray-300 rounded-lg" placeholder="Search..." />
-                                <Search className="absolute left-3 top-3.5 text-gray-400 w-4 h-4" />
+                                <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full px-4 py-3 pl-10 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent" placeholder="Search by name or phone..." />
+                                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
                             </div>
-                            <button type="submit" className="px-6 py-3 bg-blue-600 text-white rounded-lg">Search</button>
+                            <button type="submit" className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg flex items-center">
+                                <Search className="w-4 h-4 mr-2" /> Search
+                            </button>
                         </form>
                     </div>
                 </div>
 
-                {error && <div className="mb-4 p-4 bg-red-100 text-red-700 rounded-lg">{error}</div>}
+                {error && <div className="mb-8 p-4 bg-red-100 border border-red-400 text-red-700 rounded-lg">{error}</div>}
 
                 {/* Dashboard Cards */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-                    {/* Card 1: Total Customers */}
-                    <Card 
-                        icon={Users} 
-                        title="Total Customers" 
-                        value={totalSystemCustomers} 
-                        colorClass="blue" 
-                    />
+                    <Card icon={Users} title="Total Customers" value={displayTotalCustomers} colorClass="blue" />
                     
-                    {/* Card 2: Total Orders + Status Sub-metrics */}
                     <Card 
                         icon={ShoppingBag} 
                         title="Total Orders" 
-                        value={totalSystemOrders} 
+                        value={displayTotalOrders} 
                         colorClass="green"
                         subMetrics={[
-                            { label: 'Pending', value: dashboardStats.pending, icon: Clock, color: 'text-yellow-600' },
-                            { label: 'Completed', value: dashboardStats.completed, icon: CheckCircle, color: 'text-green-600' },
-                            { label: 'Delivered', value: dashboardStats.delivered_picked, icon: Truck, color: 'text-purple-600' }
+                            { label: 'Pending', value: globalStats.totalPending || '-', icon: Clock, color: 'text-yellow-600' },
+                            { label: 'Completed', value: globalStats.totalCompleted || '-', icon: CheckCircle, color: 'text-green-600' },
+                            { label: 'Delivered', value: globalStats.totalDelivered || '-', icon: Truck, color: 'text-purple-600' }
                         ]}
                     />
                     
-                    {/* Card 3: Total Balance (Total Billed) */}
-                    <Card 
-                        icon={DollarSign} 
-                        title="Total Balance" 
-                        value={`KSh ${totalSystemBalance.toFixed(2)}`} 
-                        colorClass="purple" 
-                    />
+                    <Card icon={DollarSign} title="Total Balance" value={formatCurrency(displayTotalBalance)} colorClass="purple" />
                 </div>
 
-                {/* Table */}
+                {/* Customers Table */}
                 <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
                     <div className="px-6 py-4 border-b border-gray-200 bg-gray-50 flex justify-between items-center">
                         <h2 className="text-xl font-semibold text-gray-900">Customers List</h2>
-                        <span className="text-sm text-gray-600">Total: {pagination.totalItems}</span>
+                        <span className="text-sm text-gray-500">Page {pagination.currentPage} of {pagination.totalPages}</span>
                     </div>
+
                     <div className="overflow-x-auto">
                         <table className="w-full">
                             <thead className="bg-gray-50">
                                 <tr>
-                                    {['Customer', 'Contact', 'Orders', 'Total Billed', 'Last Order', 'Actions'].map(h => (
-                                        <th key={h} className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{h}</th>
-                                    ))}
+                                    <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Customer</th>
+                                    <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Orders</th>
+                                    <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status Breakdown</th>
+                                    <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Total Billed</th>
+                                    <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Last Order</th>
+                                    <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                                 </tr>
                             </thead>
                             <tbody className="bg-white divide-y divide-gray-200">
                                 {customers.map((customer) => {
-                                    const stats = getRowStats(customer);
+                                    const stats = resolveStats(customer);
+                                    
                                     return (
                                         <tr key={customer.id} className="hover:bg-gray-50">
                                             <td className="px-6 py-4 whitespace-nowrap">
                                                 <div className="flex items-center">
-                                                    <div className="w-10 h-10 bg-blue-500 rounded-full flex items-center justify-center mr-3 text-white"><User className="w-5 h-5"/></div>
+                                                    <div className="w-10 h-10 bg-blue-500 rounded-full flex items-center justify-center mr-3 text-white font-bold">
+                                                        {customer.name.charAt(0).toUpperCase()}
+                                                    </div>
                                                     <div>
                                                         <div className="text-sm font-medium text-gray-900">{customer.name}</div>
-                                                        <div className="text-xs text-gray-500">ID: {customer.id}</div>
+                                                        <div className="text-xs text-gray-500">{customer.phone}</div>
                                                     </div>
                                                 </div>
                                             </td>
-                                            <td className="px-6 py-4 text-sm text-gray-900">{customer.phone}</td>
-                                            <td className="px-6 py-4">
-                                                <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                                                    <ShoppingBag className="w-3 h-3 mr-1" /> {stats.orderCount}
-                                                </span>
-                                            </td>
+                                            
                                             <td className="px-6 py-4 whitespace-nowrap">
-                                                {/* Displays immediately using customer.total_spent */}
-                                                <span className="text-sm font-semibold text-green-600">
-                                                    KSh {stats.totalBilled.toLocaleString('en-KE', { minimumFractionDigits: 2 })}
-                                                </span>
+                                                <div className="text-sm font-bold text-gray-900">{stats.orderCount}</div>
+                                                <div className="text-xs text-gray-500">Orders</div>
                                             </td>
-                                            <td className="px-6 py-4 text-sm text-gray-900">
-                                                {stats.lastDate ? new Date(stats.lastDate).toLocaleDateString() : <span className="text-gray-400">Never</span>}
-                                            </td>
+
                                             <td className="px-6 py-4 whitespace-nowrap">
-                                                <div className="flex space-x-2">
-                                                    <button onClick={() => viewCustomerDetails(customer)} className="p-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200" title="View"><Eye className="w-4 h-4"/></button>
-                                                    <button onClick={() => { setCurrentCustomer(customer); setIsModalOpen(true); }} className="p-2 bg-amber-100 text-amber-700 rounded-lg hover:bg-amber-200" title="Edit"><Edit className="w-4 h-4"/></button>
-                                                    <button onClick={() => deleteCustomer(customer.id, customer.name)} className="p-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200" title="Delete"><Trash2 className="w-4 h-4"/></button>
+                                                <div className="flex gap-2 text-xs">
+                                                    <span className="px-2 py-1 bg-yellow-100 text-yellow-800 rounded-full flex items-center">
+                                                        <Clock className="w-3 h-3 mr-1" /> {stats.pending}
+                                                    </span>
+                                                    <span className="px-2 py-1 bg-green-100 text-green-800 rounded-full flex items-center">
+                                                        <CheckCircle className="w-3 h-3 mr-1" /> {stats.completed}
+                                                    </span>
+                                                    <span className="px-2 py-1 bg-purple-100 text-purple-800 rounded-full flex items-center">
+                                                        <Truck className="w-3 h-3 mr-1" /> {stats.delivered}
+                                                    </span>
+                                                </div>
+                                            </td>
+
+                                            <td className="px-6 py-4 whitespace-nowrap">
+                                                <div className="text-sm font-bold text-green-600">{formatCurrency(stats.totalBilled)}</div>
+                                                {stats.totalBalance > 0 && (
+                                                    <div className="text-xs text-red-500">Bal: {formatCurrency(stats.totalBalance)}</div>
+                                                )}
+                                            </td>
+
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                                {stats.lastOrderDate 
+                                                    ? new Date(stats.lastOrderDate).toLocaleDateString() 
+                                                    : 'Never'}
+                                            </td>
+
+                                            <td className="px-6 py-4 whitespace-nowrap">
+                                                <div className="flex items-center space-x-2">
+                                                    <button onClick={() => viewCustomerDetails(customer)} className="p-2 bg-blue-100 hover:bg-blue-200 text-blue-700 rounded-lg" title="View Details"><Eye className="w-4 h-4" /></button>
+                                                    <button onClick={() => { setCurrentCustomer(customer); setIsModalOpen(true); }} className="p-2 bg-amber-100 hover:bg-amber-200 text-amber-700 rounded-lg" title="Edit"><Edit className="w-4 h-4" /></button>
+                                                    <button onClick={() => deleteCustomer(customer.id, customer.name)} className="p-2 bg-red-100 hover:bg-red-200 text-red-700 rounded-lg" title="Delete"><Trash2 className="w-4 h-4" /></button>
                                                 </div>
                                             </td>
                                         </tr>
                                     );
                                 })}
-                                {customers.length === 0 && (
-                                    <tr><td colSpan={6} className="px-6 py-12 text-center text-gray-500">No customers found.</td></tr>
-                                )}
                             </tbody>
                         </table>
                     </div>
-                    {/* Pagination Controls */}
-                    <div className="px-6 py-4 border-t border-gray-200 flex justify-between items-center bg-gray-50">
-                        <span className="text-sm text-gray-700">Page {pagination.currentPage} of {pagination.totalPages}</span>
-                        <div className="flex space-x-2">
-                            <button onClick={() => setPagination(p => ({ ...p, currentPage: p.currentPage - 1 }))} disabled={!pagination.previous} className="px-4 py-2 border rounded-md text-sm disabled:opacity-50">Previous</button>
-                            <button onClick={() => setPagination(p => ({ ...p, currentPage: p.currentPage + 1 }))} disabled={!pagination.next} className="px-4 py-2 border rounded-md text-sm disabled:opacity-50">Next</button>
-                        </div>
-                    </div>
-                </div>
 
-                {/* Modals */}
-                {isModalOpen && <CustomerFormModal customer={currentCustomer} onSave={saveCustomer} onClose={() => setIsModalOpen(false)} />}
-                {isDetailModalOpen && currentCustomer && (
-                    <CustomerDetailModal 
-                        customer={currentCustomer} 
-                        orders={currentCustomerOrders} 
-                        isLoadingOrders={customerOrdersLoading}
-                        ordersError={customerOrdersError}
-                        onRetryLoadOrders={() => viewCustomerDetails(currentCustomer)}
-                        onClose={() => setIsDetailModalOpen(false)} 
-                        onEdit={() => { setIsDetailModalOpen(false); setIsModalOpen(true); }} 
-                        onDelete={() => deleteCustomer(currentCustomer.id, currentCustomer.name)} 
-                    />
-                )}
-                <SMSModal isOpen={isSMSModalOpen} onClose={() => setIsSMSModalOpen(false)} onSend={sendBulkSMS} customerCount={allCustomers.length} isSending={isSendingSMS} />
+                    {/* Pagination */}
+                    {pagination.totalPages > 1 && (
+                        <div className="px-6 py-4 bg-gray-50 border-t border-gray-200 flex justify-between items-center">
+                            <button onClick={() => setPagination(p => ({...p, currentPage: p.currentPage - 1}))} disabled={!pagination.previous} className="px-4 py-2 bg-white border rounded disabled:opacity-50">Previous</button>
+                            <span className="text-sm text-gray-700">Page {pagination.currentPage} of {pagination.totalPages}</span>
+                            <button onClick={() => setPagination(p => ({...p, currentPage: p.currentPage + 1}))} disabled={!pagination.next} className="px-4 py-2 bg-white border rounded disabled:opacity-50">Next</button>
+                        </div>
+                    )}
+                </div>
             </div>
+
+            {isModalOpen && (
+                <CustomerFormModal
+                    customer={currentCustomer}
+                    onSave={saveCustomer}
+                    onClose={() => { setIsModalOpen(false); setCurrentCustomer(null); }}
+                />
+            )}
+
+            {isDetailModalOpen && currentCustomer && (
+                <CustomerDetailModal
+                    customer={currentCustomer}
+                    orders={currentCustomerOrders}
+                    isLoadingOrders={customerOrdersLoading}
+                    ordersError={customerOrdersError}
+                    onRetryLoadOrders={() => viewCustomerDetails(currentCustomer)}
+                    onClose={() => setIsDetailModalOpen(false)}
+                    onEdit={() => { setIsDetailModalOpen(false); setIsModalOpen(true); }}
+                    onDelete={() => deleteCustomer(currentCustomer.id, currentCustomer.name)}
+                />
+            )}
+
+            <SMSModal
+                isOpen={isSMSModalOpen}
+                onClose={() => setIsSMSModalOpen(false)}
+                onSend={sendBulkSMS}
+                customerCount={allCustomers.length}
+                isSending={isSendingSMS}
+            />
         </div>
     );
 }
