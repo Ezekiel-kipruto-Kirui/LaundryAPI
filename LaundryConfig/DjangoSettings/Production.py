@@ -17,7 +17,6 @@ ALLOWED_HOSTS = [
 CSRF_TRUSTED_ORIGINS = [
     'https://www.cleanpage.shop',
     'https://cleanpage.shop',
-    'https://clean-page-laundry:10000',
     'https://cluster-calculation.vercel.app'
     # 'https://elite-laundry0010.onrender.com',
 ]
