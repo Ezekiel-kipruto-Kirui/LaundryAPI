@@ -260,11 +260,6 @@ REST_FRAMEWORK = {
 # Disable APPEND_SLASH to prevent issues with API endpoints
 APPEND_SLASH = False
 
-
-DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
-# The Mpesa environment to use
-# Possible values: sandbox, production
-
 MPESA_ENVIRONMENT = 'sandbox'
 
 # Credentials for the daraja app
