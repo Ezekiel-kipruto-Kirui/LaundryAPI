@@ -104,9 +104,29 @@ class UserProfileSerializer(serializers.ModelSerializer):
 
 
 class CustomerSerializer(serializers.ModelSerializer):    
+    order_count = serializers.IntegerField(read_only=True)
+    pending_orders = serializers.IntegerField(read_only=True)
+    completed_orders = serializers.IntegerField(read_only=True)
+    delivered_orders = serializers.IntegerField(read_only=True)
+    total_spent = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
+    total_balance = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
+    last_order_date = serializers.DateTimeField(read_only=True)
+
     class Meta:
         model = Customer
-        fields = ['id', 'name', 'phone', 'created_by']
+        fields = [
+            'id',
+            'name',
+            'phone',
+            'created_by',
+            'order_count',
+            'pending_orders',
+            'completed_orders',
+            'delivered_orders',
+            'total_spent',
+            'total_balance',
+            'last_order_date',
+        ]
     
     def get_phone(self, obj):
         """Convert PhoneNumberField to string format"""

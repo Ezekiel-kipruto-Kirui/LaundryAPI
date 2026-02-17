@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Customer, Order } from '../services/types';
+import { millify} from "millify";
 import {
     Users,
     Edit,
@@ -30,11 +31,13 @@ import { API_BASE_URL } from '@/services/url';
 // --- API Endpoints ---
 const API_CUSTOMERS_URL = `${API_BASE_URL}/Laundry/customers/`;
 const API_ORDERS_URL = `${API_BASE_URL}/Laundry/orders/`;
+const API_ORDERS_SUMMARY_URL = `${API_BASE_URL}/Laundry/orders/summary/`;
 const API_SMS_URL = `${API_BASE_URL}/Laundry/send-sms/`;
 
 // --- Types for Pagination ---
 interface PaginatedResponse<T> {
-    count: number;
+    count?: number;
+    total_items?: number;
     next: string | null;
     previous: string | null;
     results: T[];
@@ -51,6 +54,14 @@ interface PaginatedOrdersResponse extends PaginatedResponse<Order> {
     results: Order[];
 }
 
+interface OrdersSummaryResponse {
+    total_orders?: number;
+    pending_orders?: number;
+    completed_orders?: number;
+    delivered_orders?: number;
+    total_balance?: number;
+}
+
 // Type assertion helper for customer objects
 const assertCustomer = (customer: any): Customer => {
     return {
@@ -58,7 +69,11 @@ const assertCustomer = (customer: any): Customer => {
         name: customer?.name || 'Unknown',
         phone: customer?.phone || '',
         order_count: customer?.order_count || 0,
+        pending_orders: customer?.pending_orders || 0,
+        completed_orders: customer?.completed_orders || 0,
+        delivered_orders: customer?.delivered_orders || 0,
         total_spent: customer?.total_spent || '0',
+        total_balance: customer?.total_balance || '0',
         last_order_date: customer?.last_order_date || null
     };
 };
@@ -550,29 +565,36 @@ interface CachedCustomersPage {
 const CACHE_TTL_MS = 5 * 60 * 1000;
 const isCacheFresh = (timestamp: number) => Date.now() - timestamp < CACHE_TTL_MS;
 
-const getAuthToken = (): string | null => localStorage.getItem("accessToken");
+const getAuthToken = (): string | null =>
+    localStorage.getItem("access_token") || localStorage.getItem("accessToken");
+
+const parseNumericValue = (value: unknown): number => {
+    const parsed = typeof value === 'string' ? parseFloat(value) : Number(value ?? 0);
+    return Number.isFinite(parsed) ? parsed : 0;
+};
 
 export default function CustomersPage() {
     const [customers, setCustomers] = useState<Customer[]>([]);
     const [allCustomers, setAllCustomers] = useState<Customer[]>([]);
+    const [overallCustomerCount, setOverallCustomerCount] = useState(0);
     const [currentCustomerOrders, setCurrentCustomerOrders] = useState<Order[]>([]);
     const [customerOrdersLoading, setCustomerOrdersLoading] = useState(false);
     const [customerOrdersError, setCustomerOrdersError] = useState<string | null>(null);
+    const [dashboardTotals, setDashboardTotals] = useState({
+        totalOrders: 0,
+        pendingOrders: 0,
+        completedOrders: 0,
+        deliveredOrders: 0,
+        totalBalance: 0,
+    });
     
-    // Stats by ID for immediate UI updates
+    // Stats by ID for immediate UI updates (Table Breakdowns)
     const [customerStatsById, setCustomerStatsById] = useState<Record<number, CustomerStats>>({});
     
-    // Global Aggregates for Dashboard
-    const [globalStats, setGlobalStats] = useState({
-        totalBalance: 0,
-        totalPending: 0,
-        totalCompleted: 0,
-        totalDelivered: 0
-    });
-
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [searchQuery, setSearchQuery] = useState('');
+    const [searchInput, setSearchInput] = useState('');
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
     const [isSMSModalOpen, setIsSMSModalOpen] = useState(false);
@@ -591,7 +613,7 @@ export default function CustomersPage() {
     const customersPageCacheRef = useRef<Map<string, CacheEntry<CachedCustomersPage>>>(new Map());
     const allCustomersCacheRef = useRef<CacheEntry<Customer[]> | null>(null);
     const customerOrdersCacheRef = useRef<Map<number, CacheEntry<Order[]>>>(new Map());
-    const isFetchingPageStatsRef = useRef<Set<number>>(new Set()); // Prevent duplicate fetches for same page
+    const hasLoadedInitialDataRef = useRef(false);
 
     const clearCustomerListCaches = useCallback(() => {
         customersPageCacheRef.current.clear();
@@ -629,7 +651,6 @@ export default function CustomersPage() {
     const fetchOrdersForCustomer = useCallback(async (customer: Customer, forceRefresh = false): Promise<Order[]> => {
         const cached = customerOrdersCacheRef.current.get(customer.id);
         if (!forceRefresh && cached && isCacheFresh(cached.timestamp)) {
-            // Ensure stats are updated even from cache
             const stats = deriveCustomerStats(cached.data);
             setCustomerStatsById(prev => {
                 if (prev[customer.id]?.orderCount !== stats.orderCount) {
@@ -640,9 +661,10 @@ export default function CustomersPage() {
             return cached.data;
         }
 
-        const searchTerm = (customer.phone || customer.name || `${customer.id}`).trim();
-        const params = new URLSearchParams({ page_size: '100' });
-        if (searchTerm) params.append('search', searchTerm);
+        const params = new URLSearchParams({
+            page_size: '100',
+            customer: customer.id.toString(),
+        });
 
         let nextUrl: string | null = `${API_ORDERS_URL}?${params.toString()}`;
         let pageCount = 0;
@@ -659,8 +681,7 @@ export default function CustomersPage() {
                     customer: assertCustomer(order.customer)
                 }));
 
-                const customerOnlyOrders = normalizedOrders.filter(order => order.customer.id === customer.id);
-                matchedOrders = [...matchedOrders, ...customerOnlyOrders];
+                matchedOrders = [...matchedOrders, ...normalizedOrders];
                 nextUrl = response.next;
                 pageCount++;
             }
@@ -698,7 +719,6 @@ export default function CustomersPage() {
                     loadedCustomers = [...loadedCustomers, ...response.results.map(assertCustomer)];
                     nextUrl = response.next;
                 } else break;
-                if (loadedCustomers.length > 1000) break;
             }
 
             allCustomersCacheRef.current = { data: loadedCustomers, timestamp: Date.now() };
@@ -706,6 +726,21 @@ export default function CustomersPage() {
         } catch (err: any) {
             console.error("Error fetching all customers:", err);
             throw err;
+        }
+    }, []);
+
+    const fetchOrdersSummary = useCallback(async () => {
+        try {
+            const response = await apiFetch<OrdersSummaryResponse>(API_ORDERS_SUMMARY_URL);
+            setDashboardTotals({
+                totalOrders: parseNumericValue(response.total_orders),
+                pendingOrders: parseNumericValue(response.pending_orders),
+                completedOrders: parseNumericValue(response.completed_orders),
+                deliveredOrders: parseNumericValue(response.delivered_orders),
+                totalBalance: parseNumericValue(response.total_balance),
+            });
+        } catch (err) {
+            console.error("Error fetching orders summary:", err);
         }
     }, []);
 
@@ -726,63 +761,41 @@ export default function CustomersPage() {
         setError(null);
 
         try {
-            if (trimmedSearch) {
-                let searchableCustomers = allCustomers;
-                if (searchableCustomers.length === 0) searchableCustomers = await fetchAllCustomers();
+            const params = new URLSearchParams({
+                page: page.toString(),
+                page_size: pagination.pageSize.toString(),
+            });
+            if (trimmedSearch) params.append('search', trimmedSearch);
 
-                const queryText = trimmedSearch.toLowerCase();
-                const queryDigits = trimmedSearch.replace(/\D/g, '');
+            const url = `${API_CUSTOMERS_URL}?${params}`;
+            const response = await apiFetch<PaginatedCustomersResponse>(url);
 
-                const filteredCustomers = searchableCustomers.filter((customer) => {
-                    const customerName = (customer.name || '').toLowerCase();
-                    const customerPhone = (customer.phone || '').toLowerCase();
-                    const customerPhoneDigits = (customer.phone || '').replace(/\D/g, '');
-                    return customerName.includes(queryText) || customerPhone.includes(queryText) || 
-                           (queryDigits && customerPhoneDigits.includes(queryDigits));
-                });
+            if (!response.results || !Array.isArray(response.results)) throw new Error('Invalid response format');
 
-                const totalItems = filteredCustomers.length;
-                const totalPages = Math.max(1, Math.ceil(totalItems / pagination.pageSize));
-                const currentPage = Math.min(Math.max(page, 1), totalPages);
-                const startIndex = (currentPage - 1) * pagination.pageSize;
-                const paginatedData = filteredCustomers.slice(startIndex, startIndex + pagination.pageSize);
-                
-                const localPagination: PaginationState = {
-                    currentPage, totalPages, totalItems, pageSize: pagination.pageSize,
-                    next: currentPage < totalPages ? `local:${currentPage + 1}` : null,
-                    previous: currentPage > 1 ? `local:${currentPage - 1}` : null
-                };
+            const pageCustomers = response.results.map(assertCustomer);
+            const totalItems = parseNumericValue(response.total_items ?? response.count ?? 0);
+            const pageSize = response.page_size || pagination.pageSize;
+            const totalPages = response.total_pages || Math.max(1, Math.ceil(totalItems / pageSize));
 
-                setCustomers(paginatedData);
-                setPagination(localPagination);
-                customersPageCacheRef.current.set(cacheKey, {
-                    data: { customers: paginatedData, pagination: localPagination },
-                    timestamp: Date.now()
-                });
-            } else {
-                const params = new URLSearchParams({ page: page.toString(), page_size: pagination.pageSize.toString() });
-                const url = `${API_CUSTOMERS_URL}?${params}`;
-                const response = await apiFetch<PaginatedCustomersResponse>(url);
+            const remotePagination: PaginationState = {
+                currentPage: response.current_page || page,
+                totalPages,
+                totalItems,
+                pageSize,
+                next: response.next,
+                previous: response.previous
+            };
 
-                if (!response.results || !Array.isArray(response.results)) throw new Error('Invalid response format');
-
-                const pageCustomers = response.results.map(assertCustomer);
-                const remotePagination: PaginationState = {
-                    currentPage: response.current_page || page,
-                    totalPages: response.total_pages || Math.ceil((response.count || 0) / pagination.pageSize) || 1,
-                    totalItems: response.count || 0,
-                    pageSize: response.page_size || pagination.pageSize,
-                    next: response.next,
-                    previous: response.previous
-                };
-
-                setCustomers(pageCustomers);
-                setPagination(remotePagination);
-                customersPageCacheRef.current.set(cacheKey, {
-                    data: { customers: pageCustomers, pagination: remotePagination },
-                    timestamp: Date.now()
-                });
+            if (!trimmedSearch) {
+                setOverallCustomerCount(totalItems);
             }
+
+            setCustomers(pageCustomers);
+            setPagination(remotePagination);
+            customersPageCacheRef.current.set(cacheKey, {
+                data: { customers: pageCustomers, pagination: remotePagination },
+                timestamp: Date.now()
+            });
         } catch (err: any) {
             console.error("Error fetching customers:", err);
             setError(err.message === "Unauthorized" ? "Session expired." : "Could not load customers.");
@@ -790,7 +803,7 @@ export default function CustomersPage() {
         } finally {
             setLoading(false);
         }
-    }, [allCustomers, fetchAllCustomers, pagination.pageSize]);
+    }, [pagination.pageSize]);
 
     // --- Effects ---
 
@@ -799,62 +812,26 @@ export default function CustomersPage() {
         let isMounted = true;
         const loadInitialData = async () => {
             try {
-                await fetchCustomers(1, '');
-                fetchAllCustomers().then(allCust => {
-                    if (isMounted) setAllCustomers(allCust);
-                }).catch(console.error);
+                await Promise.all([
+                    fetchCustomers(1, ''),
+                    fetchOrdersSummary(),
+                ]);
             } catch (err) {
                 setError("Failed to load initial data.");
             } finally {
+                hasLoadedInitialDataRef.current = true;
                 if (isMounted) setLoading(false);
             }
         };
-        loadInitialData();
+        void loadInitialData();
         return () => { isMounted = false; };
-    }, []);
+    }, [fetchCustomers, fetchOrdersSummary]);
 
     // 2. Handle Search/Pagination changes
     useEffect(() => {
-        if (!loading) fetchCustomers(pagination.currentPage, searchQuery);
-    }, [pagination.currentPage, searchQuery]);
-
-    // 3. CRITICAL: Auto-fetch stats for customers on the CURRENT PAGE
-    // This ensures the table is populated without clicking "View"
-    useEffect(() => {
-        if (customers.length === 0) return;
-
-        // Mark this page as being processed to avoid race conditions
-        const pageId = pagination.currentPage;
-        if (isFetchingPageStatsRef.current.has(pageId)) return;
-        isFetchingPageStatsRef.current.add(pageId);
-
-        const fetchVisibleStats = async () => {
-            // Only fetch if we don't have the stats yet
-            const customersToFetch = customers.filter(c => !customerStatsById[c.id]);
-            
-            if (customersToFetch.length > 0) {
-                // Fetch in parallel for speed
-                await Promise.all(customersToFetch.map(c => fetchOrdersForCustomer(c)));
-            }
-            isFetchingPageStatsRef.current.delete(pageId);
-        };
-
-        fetchVisibleStats();
-    }, [customers, pagination.currentPage, customerStatsById, fetchOrdersForCustomer]);
-
-    // 4. Calculate Global Dashboard Stats from known detailed stats
-    // As we fetch details for customers, the dashboard updates automatically
-    useEffect(() => {
-        const statsIds = Object.keys(customerStatsById).map(Number);
-        if (statsIds.length === 0) return;
-
-        const totalBalance = statsIds.reduce((sum, id) => sum + (customerStatsById[id]?.totalBalance || 0), 0);
-        const totalPending = statsIds.reduce((sum, id) => sum + (customerStatsById[id]?.pending || 0), 0);
-        const totalCompleted = statsIds.reduce((sum, id) => sum + (customerStatsById[id]?.completed || 0), 0);
-        const totalDelivered = statsIds.reduce((sum, id) => sum + (customerStatsById[id]?.delivered || 0), 0);
-
-        setGlobalStats({ totalBalance, totalPending, totalCompleted, totalDelivered });
-    }, [customerStatsById]);
+        if (!hasLoadedInitialDataRef.current) return;
+        void fetchCustomers(pagination.currentPage, searchQuery);
+    }, [fetchCustomers, pagination.currentPage, searchQuery]);
 
     // --- Handlers ---
 
@@ -865,8 +842,6 @@ export default function CustomersPage() {
         setCurrentCustomerOrders([]);
         setCustomerOrdersError(null);
         setIsDetailModalOpen(true);
-        
-        // Force refresh even if cached to ensure modal has latest data
         const orders = await fetchOrdersForCustomer(customer, true);
         setCurrentCustomerOrders(orders);
     };
@@ -886,7 +861,10 @@ export default function CustomersPage() {
             const savedCustomer: Customer = assertCustomer(response || customerData);
             clearCustomerListCaches();
 
-            if (isNew) setAllCustomers(prev => [savedCustomer, ...prev]);
+            if (isNew) {
+                setAllCustomers(prev => [savedCustomer, ...prev]);
+                setOverallCustomerCount(prev => prev + 1);
+            }
             else {
                 setAllCustomers(prev => prev.map(c => c.id === savedCustomer.id ? savedCustomer : c));
                 customerOrdersCacheRef.current.delete(savedCustomer.id);
@@ -916,6 +894,7 @@ export default function CustomersPage() {
             customerOrdersCacheRef.current.delete(id);
             setCustomerStatsById(prev => { const n = { ...prev }; delete n[id]; return n; });
             setAllCustomers(prev => prev.filter(c => c.id !== id));
+            setOverallCustomerCount(prev => Math.max(prev - 1, 0));
             await fetchCustomers(pagination.currentPage, searchQuery);
             setIsDetailModalOpen(false);
         } catch (err: any) {
@@ -929,10 +908,9 @@ export default function CustomersPage() {
         setIsSendingSMS(true);
         try {
             let smsCustomers = allCustomers.length ? allCustomers : await fetchAllCustomers();
+            setAllCustomers(smsCustomers);
             const phoneNumbers = [...new Set(smsCustomers.map(c => c.phone).filter(p => p))];
-            
             if (!phoneNumbers.length) return alert("No valid phone numbers.");
-            
             const token = getAuthToken();
             await fetch(API_SMS_URL, {
                 method: 'POST',
@@ -953,21 +931,16 @@ export default function CustomersPage() {
     const resolveStats = (customer: Customer) => {
         return customerStatsById[customer.id] || {
             orderCount: customer.order_count || 0,
-            totalBilled: parseFloat(customer.total_spent || '0'),
-            totalBalance: 0, // Unknown until fetched
-            pending: 0, completed: 0, delivered: 0,
+            totalBilled: parseNumericValue(customer.total_spent),
+            totalBalance: parseNumericValue(customer.total_balance),
+            pending: customer.pending_orders || 0,
+            completed: customer.completed_orders || 0,
+            delivered: customer.delivered_orders || 0,
             lastOrderDate: customer.last_order_date
         };
     };
 
-    // Dashboard Calculations
-    // Use globalStats if we have detailed data, otherwise fall back to list data for basic counts
-    const displayTotalBalance = globalStats.totalBalance > 0 
-        ? globalStats.totalBalance 
-        : allCustomers.reduce((sum, c) => sum + parseFloat(c.total_spent || '0'), 0);
-
-    const displayTotalOrders = allCustomers.reduce((sum, c) => sum + (c.order_count || 0), 0);
-    const displayTotalCustomers = allCustomers.length || pagination.totalItems;
+    const displayTotalCustomers = overallCustomerCount || pagination.totalItems || 0;
 
     if (loading && customers.length === 0) return (
         <div className="min-h-screen bg-gray-50 py-8 flex items-center justify-center">
@@ -985,11 +958,24 @@ export default function CustomersPage() {
                             <PlusCircle className="w-5 h-5 mr-2" /> Add New Customer
                         </button>
                         <button onClick={() => setIsSMSModalOpen(true)} className="inline-flex items-center justify-center px-6 py-3 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-lg shadow-sm" disabled={loading}>
-                            <MessageSquare className="w-5 h-5 mr-2" /> Send SMS ({allCustomers.length})
+                            <MessageSquare className="w-5 h-5 mr-2" /> Send SMS ({displayTotalCustomers})
                         </button>
-                        <form onSubmit={(e) => { e.preventDefault(); setPagination(p => ({...p, currentPage: 1})); }} className="flex-1 flex gap-2">
+                        <form
+                            onSubmit={(e) => {
+                                e.preventDefault();
+                                setPagination(p => ({ ...p, currentPage: 1 }));
+                                setSearchQuery(searchInput.trim());
+                            }}
+                            className="flex-1 flex gap-2"
+                        >
                             <div className="flex-1 relative">
-                                <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full px-4 py-3 pl-10 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent" placeholder="Search by name or phone..." />
+                                <input
+                                    type="text"
+                                    value={searchInput}
+                                    onChange={(e) => setSearchInput(e.target.value)}
+                                    className="w-full px-4 py-3 pl-10 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                    placeholder="Search by name or phone..."
+                                />
                                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
                             </div>
                             <button type="submit" className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg flex items-center">
@@ -1008,16 +994,16 @@ export default function CustomersPage() {
                     <Card 
                         icon={ShoppingBag} 
                         title="Total Orders" 
-                        value={displayTotalOrders} 
+                        value={dashboardTotals.totalOrders}
                         colorClass="green"
                         subMetrics={[
-                            { label: 'Pending', value: globalStats.totalPending || '-', icon: Clock, color: 'text-yellow-600' },
-                            { label: 'Completed', value: globalStats.totalCompleted || '-', icon: CheckCircle, color: 'text-green-600' },
-                            { label: 'Delivered', value: globalStats.totalDelivered || '-', icon: Truck, color: 'text-purple-600' }
+                            { label: 'Pending', value: dashboardTotals.pendingOrders, icon: Clock, color: 'text-yellow-600' },
+                            { label: 'Completed', value: dashboardTotals.completedOrders, icon: CheckCircle, color: 'text-green-600' },
+                            { label: 'Delivered', value: dashboardTotals.deliveredOrders, icon: Truck, color: 'text-purple-600' }
                         ]}
                     />
                     
-                    <Card icon={DollarSign} title="Total Balance" value={formatCurrency(displayTotalBalance)} colorClass="purple" />
+                    <Card icon={DollarSign} title="Total Balance" value={`Ksh ${millify(dashboardTotals.totalBalance)}`} colorClass="purple" />
                 </div>
 
                 {/* Customers Table */}
@@ -1139,7 +1125,7 @@ export default function CustomersPage() {
                 isOpen={isSMSModalOpen}
                 onClose={() => setIsSMSModalOpen(false)}
                 onSend={sendBulkSMS}
-                customerCount={allCustomers.length}
+                customerCount={displayTotalCustomers}
                 isSending={isSendingSMS}
             />
         </div>

@@ -52,7 +52,7 @@ def update_food_revenue(request):
 class FoodCategoryViewSet(viewsets.ModelViewSet):
     queryset = FoodCategory.objects.all()
     serializer_class = FoodCategorySerializer
-    #permission_classes = [AllowAny]
+   
     permission_classes = [permissions.IsAuthenticated]
     """permissions.IsAuthenticated"""
 
@@ -64,7 +64,7 @@ class FoodCategoryViewSet(viewsets.ModelViewSet):
 class FoodItemViewSet(viewsets.ModelViewSet):
     queryset = FoodItem.objects.all()
     serializer_class = FoodItemSerializer
-    permission_classes = [AllowAny]  # Or your preferred permissions
+    permission_classes = [permissions.IsAuthenticated]  # Or your preferred permissions
 
     def perform_create(self, serializer):
         # Automatically set created_by to current user
@@ -110,7 +110,7 @@ class HotelOrderItemViewSet(viewsets.ModelViewSet):
 class HotelOrderViewSet(viewsets.ModelViewSet):
     queryset = HotelOrder.objects.all().order_by('-created_at')
     serializer_class = HotelOrderSerializer
-    permission_classes = [AllowAny]
+    permission_classes = [permissions.IsAuthenticated]
     filter_backends = [
         DjangoFilterBackend,
         SearchFilter,

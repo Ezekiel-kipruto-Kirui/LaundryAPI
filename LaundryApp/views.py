@@ -24,7 +24,8 @@ from .pagination import CustomPageNumberPagination
 from .sms_utility import send_sms   
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter
-from django.db.models import Sum, Count, Q,F
+from django.db.models import Sum, Count, Q, F, Max, DecimalField, Value
+from django.db.models.functions import Coalesce
 
 class CurrentUserView(APIView):
     permission_classes = [IsAuthenticated]
@@ -49,10 +50,30 @@ class CustomerViewSet(viewsets.ModelViewSet):
     """
     Full CRUD for customers.
     """
-    queryset = Customer.objects.all().order_by("-id")
     serializer_class = CustomerSerializer
     permission_classes = [AllowAny]
     pagination_class=CustomPageNumberPagination
+    filter_backends = [SearchFilter]
+    search_fields = ["name", "phone"]
+
+    def get_queryset(self):
+        return Customer.objects.annotate(
+            order_count=Count("orders", distinct=True),
+            total_spent=Coalesce(
+                Sum("orders__total_price"),
+                Value(0),
+                output_field=DecimalField(max_digits=12, decimal_places=2),
+            ),
+            total_balance=Coalesce(
+                Sum("orders__balance"),
+                Value(0),
+                output_field=DecimalField(max_digits=12, decimal_places=2),
+            ),
+            pending_orders=Count("orders", filter=Q(orders__order_status="pending"), distinct=True),
+            completed_orders=Count("orders", filter=Q(orders__order_status="Completed"), distinct=True),
+            delivered_orders=Count("orders", filter=Q(orders__order_status="Delivered_picked"), distinct=True),
+            last_order_date=Max("orders__created_at"),
+        ).order_by("-id")
 
     @action(detail=False, methods=['get'])
     def by_phone(self, request):
@@ -107,7 +128,7 @@ class OrderViewSet(viewsets.ModelViewSet):
     """
     queryset = Order.objects.all().order_by("-id")
     serializer_class = OrderSerializer
-    permission_classes = [AllowAny]
+    permission_classes = [IsAuthenticated]
     pagination_class=CustomPageNumberPagination
 
     # @transaction.atomic
@@ -134,6 +155,7 @@ class OrderViewSet(viewsets.ModelViewSet):
 
     filterset_fields = {
         "created_at": ["date__gte", "date__lte"],
+        "customer": ["exact"],
         "order_status": ["exact"],
         "payment_status": ["exact"],
         "shop": ["exact"],
@@ -173,8 +195,10 @@ class OrderViewSet(viewsets.ModelViewSet):
 
         total_orders = queryset.count()
         total_revenue = queryset.aggregate(total=Sum('total_price'))['total'] or 0
+        total_balance = queryset.aggregate(total=Sum('balance'))['total'] or 0
         pending_orders = queryset.filter(order_status='pending').count()
         completed_orders = queryset.filter(order_status='Completed').count()
+        delivered_orders = queryset.filter(order_status='Delivered_picked').count()
         pending_revenue = queryset.filter(payment_status='pending').aggregate(total=Sum('total_price'))['total'] or 0
         completed_revenue = queryset.filter(payment_status='completed').aggregate(total=Sum('total_price'))['total'] or 0
 
@@ -189,8 +213,10 @@ class OrderViewSet(viewsets.ModelViewSet):
         return Response({
             'total_orders': total_orders,
             'total_revenue': float(total_revenue),
+            'total_balance': float(total_balance),
             'pending_orders': pending_orders,
             'completed_orders': completed_orders,
+            'delivered_orders': delivered_orders,
             'pending_revenue': float(pending_revenue),
             'completed_revenue': float(completed_revenue),
             'shop_breakdown': list(shop_stats)

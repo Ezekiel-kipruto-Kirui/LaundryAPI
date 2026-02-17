@@ -3,7 +3,11 @@ export interface Customer {
   name: string;
   phone: string;
   order_count?: number;
+  pending_orders?: number;
+  completed_orders?: number;
+  delivered_orders?: number;
   total_spent?: string;
+  total_balance?: string;
   last_order_date?: string | null;
   created_by?:any;
 }
