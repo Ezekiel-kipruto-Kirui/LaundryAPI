@@ -8,14 +8,17 @@ SECRET_KEY = env("SECRET_KEY")  # MUST be stored in Render env vars
 ALLOWED_HOSTS = [
     'www.cleanpage.shop',
     'cleanpage.shop',
-    'clean-page-laundry:10000'
+    'clean-page-laundry:10000',
+    'cluster-calculation.vercel.app'
+
     # 'elite-laundry0010.onrender.com',
 ]
 
 CSRF_TRUSTED_ORIGINS = [
     'https://www.cleanpage.shop',
     'https://cleanpage.shop',
-    'https://clean-page-laundry:10000'
+    'https://clean-page-laundry:10000',
+    'https://cluster-calculation.vercel.app'
     # 'https://elite-laundry0010.onrender.com',
 ]
 
