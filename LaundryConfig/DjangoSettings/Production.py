@@ -9,7 +9,8 @@ ALLOWED_HOSTS = [
     'www.cleanpage.shop',
     'cleanpage.shop',
     'clean-page-laundry:10000',
-    'cluster-calculation.vercel.app'
+    'cluster-calculation.vercel.app',
+    'localhost:5173'
 
     # 'elite-laundry0010.onrender.com',
 ]
@@ -17,7 +18,9 @@ ALLOWED_HOSTS = [
 CSRF_TRUSTED_ORIGINS = [
     'https://www.cleanpage.shop',
     'https://cleanpage.shop',
-    'https://cluster-calculation.vercel.app'
+    'https://cluster-calculation.vercel.app',
+    'http://localhost:5173'
+    
     # 'https://elite-laundry0010.onrender.com',
 ]
 
@@ -25,6 +28,7 @@ CORS_ALLOWED_ORIGINS = [
     'https://www.cleanpage.shop',
     'https://cleanpage.shop',
     'https://cluster-calculation.vercel.app',
+    'http://localhost:5173'
 ]
 
 # Keep this enabled when the frontend sends cookies/authorization across origins.
