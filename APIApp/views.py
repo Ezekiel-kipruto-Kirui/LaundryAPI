@@ -1,4 +1,9 @@
-from django_daraja.mpesa.core import MpesaClient
+from django_daraja.models import AccessToken
+from django_daraja.mpesa.utils import (
+    api_base_url,
+    format_phone_number,
+    mpesa_access_token,
+)
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
@@ -6,12 +11,20 @@ from rest_framework import status
 from django.views.decorators.csrf import csrf_exempt
 from django.core.mail import get_connection, send_mail
 from django.conf import settings
+from django.urls import reverse
 import smtplib
+from urllib.parse import urlparse
+from datetime import datetime
+import base64
+import requests
+import logging
 
+
+logger = logging.getLogger(__name__)
 
 
 @api_view(["GET", "POST"])
-@permission_classes([AllowAny])  # Testing only
+@permission_classes([AllowAny])
 def send_email_api(request):
     """
     Expected JSON:
@@ -147,58 +160,172 @@ def send_email_api(request):
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
 
-@csrf_exempt
-@api_view(['POST'])
-@permission_classes([AllowAny])  # 👈 Allow any request
-def stk_push(request):
-    try:
-        phone_number = request.data.get('phone_number')
-        amount = request.data.get('amount')
 
-        if not phone_number or not amount:
+@csrf_exempt
+@api_view(["GET", "POST"])
+@permission_classes([AllowAny])
+def stk_push(request):
+    """
+    Initiate STK Push using only:
+    - phone_number
+    - amount
+    """
+
+    if request.method == "GET":
+        return Response(
+            {
+                "message": "Send a POST request to initiate STK Push to a user.",
+                "required_fields": ["phone_number", "amount"],
+               
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    try:
+        phone_number = request.data.get("phone_number")
+        amount = request.data.get("amount")
+
+        if not phone_number:
             return Response(
-                {"error": "Phone number and amount are required"},
-                status=status.HTTP_400_BAD_REQUEST
+                {"error": "phone_number is required"},
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
-        cl = MpesaClient()
+        if amount in (None, ""):
+            return Response(
+                {"error": "amount is required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
-        account_reference = 'reference'
-        transaction_desc = 'Payment Description'
-        callback_url = 'https://yourdomain.com/api/mpesa/callback/'
+        try:
+            amount = int(amount)
+        except (TypeError, ValueError):
+            return Response(
+                {"error": "Amount must be an integer"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
-        response = cl.stk_push(
-            phone_number,
-            amount,
-            account_reference,
-            transaction_desc,
-            callback_url
+        if amount <= 0:
+            return Response(
+                {"error": "Amount must be greater than 0"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        account_reference = "reference"
+        transaction_desc = "LaundryPay"
+
+        configured_callback = str(getattr(settings, "MPESA_CALLBACK_URL", "")).strip()
+        configured_callback = configured_callback.strip("\"'")
+        callback_url = configured_callback or request.build_absolute_uri(
+            reverse("stk_push_callback")
         )
 
-        return Response(response, status=status.HTTP_200_OK)
+        if callback_url.startswith("http://"):
+            callback_url = "https://" + callback_url[len("http://"):]
 
+        parsed_callback = urlparse(callback_url)
+        invalid_host = parsed_callback.hostname in {"localhost", "127.0.0.1"}
+        if parsed_callback.scheme != "https" or invalid_host:
+            return Response(
+                {
+                    "error": (
+                        "Invalid callback URL. Set MPESA_CALLBACK_URL in environment "
+                        "to a public HTTPS endpoint, e.g. "
+                        "https://your-domain/api/daraja-emails/callback/."
+                    )
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        phone_number = format_phone_number(str(phone_number))
+
+        mpesa_environment = str(getattr(settings, "MPESA_ENVIRONMENT", "sandbox")).strip()
+        if mpesa_environment == "sandbox":
+            business_short_code = str(getattr(settings, "MPESA_EXPRESS_SHORTCODE", ""))
+        else:
+            business_short_code = str(getattr(settings, "MPESA_SHORTCODE", ""))
+
+        passkey = str(getattr(settings, "MPESA_PASSKEY", ""))
+        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+        password = base64.b64encode(
+            (business_short_code + passkey + timestamp).encode("ascii")
+        ).decode("utf-8")
+
+        shortcode_type = str(getattr(settings, "MPESA_SHORTCODE_TYPE", "paybill")).strip().lower()
+        transaction_type = (
+            "CustomerBuyGoodsOnline"
+            if shortcode_type == "till_number"
+            else "CustomerPayBillOnline"
+        )
+
+        headers = {
+            "Authorization": f"Bearer {mpesa_access_token()}",
+            "Content-Type": "application/json",
+        }
+        stk_payload = {
+            "BusinessShortCode": business_short_code,
+            "Password": password,
+            "Timestamp": timestamp,
+            "TransactionType": transaction_type,
+            "Amount": amount,
+            "PartyA": phone_number,
+            "PartyB": business_short_code,
+            "PhoneNumber": phone_number,
+            "CallBackURL": callback_url,
+            "AccountReference": account_reference,
+            "TransactionDesc": transaction_desc,
+        }
+
+        response = requests.post(
+            api_base_url() + "mpesa/stkpush/v1/processrequest",
+            json=stk_payload,
+            headers=headers,
+            timeout=30,
+        )
+
+        try:
+            response_payload = response.json()
+        except Exception:
+            response_payload = {"raw_response": response.text}
+
+        if (
+            response.status_code >= 400
+            and response_payload.get("errorCode") == "404.001.03"
+        ):
+            AccessToken.objects.all().delete()
+            headers["Authorization"] = f"Bearer {mpesa_access_token()}"
+            response = requests.post(
+                api_base_url() + "mpesa/stkpush/v1/processrequest",
+                json=stk_payload,
+                headers=headers,
+                timeout=30,
+            )
+            try:
+                response_payload = response.json()
+            except Exception:
+                response_payload = {"raw_response": response.text}
+
+        return Response(response_payload, status=response.status_code)
     except Exception as e:
         return Response(
             {"error": str(e)},
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
 
 
 @csrf_exempt
-@api_view(['POST'])
-@permission_classes([AllowAny])  # 👈 Allow Safaricom callback
+@api_view(["POST"])
+@permission_classes([AllowAny])
 def stk_push_callback(request):
     try:
-        data = request.data
-        print("M-Pesa Callback Data:", data)
-
+        data = request.body.decode("utf-8", errors="replace")
+        logger.info("M-Pesa callback payload: %s", data)
         return Response(
-            {"message": "Callback received successfully"},
-            status=status.HTTP_200_OK
+            {"message": "STK Push in Django", "data": data},
+            status=status.HTTP_200_OK,
         )
-
     except Exception as e:
         return Response(
             {"error": str(e)},
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )

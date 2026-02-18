@@ -260,40 +260,17 @@ REST_FRAMEWORK = {
 # Disable APPEND_SLASH to prevent issues with API endpoints
 APPEND_SLASH = False
 
-MPESA_ENVIRONMENT = env('MPESA_ENVIRONMENT', default='sandbox')
-
-# Credentials for the daraja app
 
 MPESA_CONSUMER_KEY = env('MPESA_CONSUMER_KEY')
 MPESA_CONSUMER_SECRET = env('MPESA_CONSUMER_SECRET')
-
-#Shortcode to use for transactions. For sandbox  use the Shortcode 1 provided on test credentials page
-
 MPESA_SHORTCODE = env('MPESA_SHORTCODE')
-
-# Shortcode to use for Lipa na MPESA Online (MPESA Express) transactions
-# This is only used on sandbox, do not set this variable in production
-# For sandbox use the Lipa na MPESA Online Shorcode provided on test credentials page
-
-MPESA_EXPRESS_SHORTCODE = env('MPESA_EXPRESS_SHORTCODE')
-
-# Type of shortcode
-# Possible values:
-# - paybill (For Paybill)
-# - till_number (For Buy Goods Till Number)
-
-MPESA_SHORTCODE_TYPE = env('MPESA_SHORTCODE_TYPE')
-
-# Lipa na MPESA Online passkey
-# Sandbox passkey is available on test credentials page
-# Production passkey is sent via email once you go live
-
+MPESA_ENVIRONMENT = env('MPESA_ENVIRONMENT', default='sandbox')
+MPESA_EXPRESS_SHORTCODE = env('MPESA_EXPRESS_SHORTCODE', default=MPESA_SHORTCODE)
+MPESA_SHORTCODE_TYPE = env('MPESA_SHORTCODE_TYPE', default='paybill')
 MPESA_PASSKEY = env('MPESA_PASSKEY')
+MPESA_INITIATOR_USERNAME = env('MPESA_INITIATOR_USERNAME', default='')
+MPESA_INITIATOR_SECURITY_CREDENTIAL = env('MPESA_INITIATOR_SECURITY_CREDENTIAL', default='')
+MPESA_CALLBACK_URL = env('MPESA_CALLBACK_URL', default='')
 
-# Username for initiator (to be used in B2C, B2B, AccountBalance and TransactionStatusQuery Transactions)
 
-MPESA_INITIATOR_USERNAME = env('MPESA_INITIATOR_USERNAME')  
 
-# Plaintext password for initiator (to be used in B2C, B2B, AccountBalance and TransactionStatusQuery Transactions)
-
-MPESA_INITIATOR_SECURITY_CREDENTIAL = env('MPESA_INITIATOR_SECURITY_CREDENTIAL')
