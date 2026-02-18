@@ -260,7 +260,7 @@ REST_FRAMEWORK = {
 # Disable APPEND_SLASH to prevent issues with API endpoints
 APPEND_SLASH = False
 
-MPESA_ENVIRONMENT = 'sandbox'
+MPESA_ENVIRONMENT = env('MPESA_ENVIRONMENT', default='sandbox')
 
 # Credentials for the daraja app
 
