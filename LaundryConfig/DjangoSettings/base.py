@@ -261,16 +261,50 @@ REST_FRAMEWORK = {
 APPEND_SLASH = False
 
 
-MPESA_CONSUMER_KEY = env('MPESA_CONSUMER_KEY')
-MPESA_CONSUMER_SECRET = env('MPESA_CONSUMER_SECRET')
-MPESA_SHORTCODE = env('MPESA_SHORTCODE')
-MPESA_ENVIRONMENT = env('MPESA_ENVIRONMENT', default='sandbox')
-MPESA_EXPRESS_SHORTCODE = env('MPESA_EXPRESS_SHORTCODE', default=MPESA_SHORTCODE)
-MPESA_SHORTCODE_TYPE = env('MPESA_SHORTCODE_TYPE', default='paybill')
-MPESA_PASSKEY = env('MPESA_PASSKEY')
-MPESA_INITIATOR_USERNAME = env('MPESA_INITIATOR_USERNAME', default='')
-MPESA_INITIATOR_SECURITY_CREDENTIAL = env('MPESA_INITIATOR_SECURITY_CREDENTIAL', default='')
-MPESA_CALLBACK_URL = env('MPESA_CALLBACK_URL', default='')
+# Daraja / M-PESA configuration
+MPESA_ENVIRONMENT = env("MPESA_ENVIRONMENT", default="sandbox").strip().lower()
+if MPESA_ENVIRONMENT not in {"sandbox", "production"}:
+    MPESA_ENVIRONMENT = "sandbox"
 
+MPESA_CONSUMER_KEY = env("MPESA_CONSUMER_KEY", default="")
+MPESA_CONSUMER_SECRET = env("MPESA_CONSUMER_SECRET", default="")
 
+# Shortcode used for transactions.
+# Sandbox default is 174379. Production must be set in environment.
+MPESA_SHORTCODE = env(
+    "MPESA_SHORTCODE",
+    default="174379" if MPESA_ENVIRONMENT == "sandbox" else "",
+)
+
+# Shortcode for Lipa na M-PESA Online (STK Push).
+# If not set, fallback to MPESA_SHORTCODE.
+MPESA_EXPRESS_SHORTCODE = env("MPESA_EXPRESS_SHORTCODE", default=MPESA_SHORTCODE)
+
+# Valid values: paybill | till_number
+raw_shortcode_type = env("MPESA_SHORTCODE_TYPE", default="paybill")
+MPESA_SHORTCODE_TYPE = (
+    "till_number"
+    if raw_shortcode_type in {"till", "till_number", "buygoods"}
+    else "paybill"
+)
+
+# Sandbox passkey is publicly available; production passkey is issued by Safaricom.
+MPESA_PASSKEY = env(
+    "MPESA_PASSKEY",
+    default=(
+        "bfb279f9aa9bdbcf158e97dd71a467cd2e0c893059b10f78e6b72ada1ed2c919"
+        if MPESA_ENVIRONMENT == "sandbox"
+        else ""
+    ),
+)
+
+# Used by B2C/B2B/TransactionStatus/Reversal APIs.
+MPESA_INITIATOR_USERNAME = env("MPESA_INITIATOR_USERNAME", default="")
+MPESA_INITIATOR_SECURITY_CREDENTIAL = env(
+    "MPESA_INITIATOR_SECURITY_CREDENTIAL",
+    default="",
+)
+
+# Must be a public HTTPS URL reachable by Safaricom API gateway.
+MPESA_CALLBACK_URL = env("MPESA_CALLBACK_URL", default="")
 

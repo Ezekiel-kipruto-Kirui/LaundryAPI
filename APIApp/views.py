@@ -1,182 +1,34 @@
+import base64
+import json
+import logging
+from urllib.parse import urlparse
+
+import requests
+from django.conf import settings
+from django.urls import reverse
+from django.utils import timezone
+from django.views.decorators.csrf import csrf_exempt
 from django_daraja.models import AccessToken
-from django_daraja.mpesa.utils import (
-    api_base_url,
-    format_phone_number,
-    mpesa_access_token,
-)
+from django_daraja.mpesa.utils import api_base_url, format_phone_number, mpesa_access_token
+from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
-from rest_framework import status
-from django.views.decorators.csrf import csrf_exempt
-from django.core.mail import get_connection, send_mail
-from django.conf import settings
-from django.urls import reverse
-import smtplib
-from urllib.parse import urlparse
-from datetime import datetime
-import base64
-import requests
-import logging
 
 
 logger = logging.getLogger(__name__)
-
-
-@api_view(["GET", "POST"])
-@permission_classes([AllowAny])
-def send_email_api(request):
-    """
-    Expected JSON:
-    {
-        "email": "user@gmail.com",
-        "subject": "Your Cluster Code",
-        "message": "Your code is 123456"
-    }
-    """
-
-    if request.method == "GET":
-        return Response(
-            {
-                "message": "Endpoint is active. Send a POST request to send email.",
-                "required_fields": ["email", "subject", "message"],
-                "supported_post_inputs": [
-                    "JSON body",
-                    "query parameters",
-                ],
-            },
-            status=status.HTTP_200_OK,
-        )
-
-    try:
-        def get_input_value(field_name):
-            value = request.data.get(field_name)
-            if value in (None, ""):
-                value = request.query_params.get(field_name)
-            return value.strip() if isinstance(value, str) else value
-
-        email = get_input_value("email")
-        subject = get_input_value("subject")
-        message = get_input_value("message")
-
-        if not email or not subject or not message:
-            return Response(
-                {"error": "Email, subject and message are required"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        smtp_username = str(getattr(settings, "EMAIL_HOST_USER", "")).strip()
-        smtp_username = smtp_username.strip("\"'")
-        from_email = str(getattr(settings, "DEFAULT_FROM_EMAIL", "")).strip() or smtp_username
-
-        if not from_email:
-            return Response(
-                {"error": "Server email sender is not configured"},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            )
-
-        raw_password = str(getattr(settings, "EMAIL_HOST_PASSWORD", "")).strip()
-        raw_password = raw_password.strip("\"'")
-        stripped_password = "".join(raw_password.split())
-
-        password_candidates = []
-        if stripped_password:
-            password_candidates.append(stripped_password)
-        if raw_password and raw_password != stripped_password:
-            password_candidates.append(raw_password)
-
-        if not smtp_username or not password_candidates:
-            return Response(
-                {"error": "Server SMTP credentials are not configured"},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            )
-
-        auth_error = None
-
-        for candidate_password in password_candidates:
-            connection = get_connection(
-                backend=getattr(
-                    settings,
-                    "EMAIL_BACKEND",
-                    "django.core.mail.backends.smtp.EmailBackend",
-                ),
-                host=getattr(settings, "EMAIL_HOST", ""),
-                port=getattr(settings, "EMAIL_PORT", 0),
-                username=smtp_username,
-                password=candidate_password,
-                use_tls=getattr(settings, "EMAIL_USE_TLS", False),
-                use_ssl=getattr(settings, "EMAIL_USE_SSL", False),
-                timeout=15,
-            )
-
-            try:
-                send_mail(
-                    subject=subject,
-                    message=message,
-                    from_email=from_email,
-                    recipient_list=[email],
-                    fail_silently=False,
-                    connection=connection,
-                )
-                auth_error = None
-                break
-            except smtplib.SMTPAuthenticationError as e:
-                auth_error = e
-                continue
-
-        if auth_error is not None:
-            raise auth_error
-
-        return Response(
-            {"message": "Email sent successfully"},
-            status=status.HTTP_200_OK,
-        )
-
-    except smtplib.SMTPAuthenticationError as e:
-        smtp_detail = (
-            e.smtp_error.decode(errors="replace")
-            if isinstance(e.smtp_error, (bytes, bytearray))
-            else str(e.smtp_error)
-        )
-        return Response(
-            {
-                "error": (
-                    "SMTP authentication failed. Check EMAIL_HOST_USER and "
-                    "EMAIL_HOST_PASSWORD (Gmail app password)."
-                ),
-                "smtp_code": e.smtp_code,
-                "smtp_detail": smtp_detail,
-            },
-            status=status.HTTP_502_BAD_GATEWAY,
-        )
-    except smtplib.SMTPException as e:
-        return Response(
-            {"error": f"SMTP error: {str(e)}"},
-            status=status.HTTP_502_BAD_GATEWAY,
-        )
-    except Exception as e:
-        return Response(
-            {"error": str(e)},
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        )
+LOCAL_HOSTS = {"localhost", "127.0.0.1", "0.0.0.0"}
 
 
 @csrf_exempt
 @api_view(["GET", "POST"])
 @permission_classes([AllowAny])
 def stk_push(request):
-    """
-    Initiate STK Push using only:
-    - phone_number
-    - amount
-    """
-
     if request.method == "GET":
         return Response(
             {
-                "message": "Send a POST request to initiate STK Push to a user.",
+                "message": "Send a POST request to initiate STK Push.",
                 "required_fields": ["phone_number", "amount"],
-               
             },
             status=status.HTTP_200_OK,
         )
@@ -190,7 +42,6 @@ def stk_push(request):
                 {"error": "phone_number is required"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-
         if amount in (None, ""):
             return Response(
                 {"error": "amount is required"},
@@ -204,64 +55,79 @@ def stk_push(request):
                 {"error": "Amount must be an integer"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-
         if amount <= 0:
             return Response(
                 {"error": "Amount must be greater than 0"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        account_reference = "reference"
-        transaction_desc = "LaundryPay"
-
-        configured_callback = str(getattr(settings, "MPESA_CALLBACK_URL", "")).strip()
-        configured_callback = configured_callback.strip("\"'")
-        callback_url = configured_callback or request.build_absolute_uri(
-            reverse("stk_push_callback")
-        )
-
-        if callback_url.startswith("http://"):
-            callback_url = "https://" + callback_url[len("http://"):]
+        callback_url = str(getattr(settings, "MPESA_CALLBACK_URL", "") or "").strip().strip("\"'")
+        if not callback_url:
+            callback_url = request.build_absolute_uri(reverse("stk_push_callback"))
 
         parsed_callback = urlparse(callback_url)
-        invalid_host = parsed_callback.hostname in {"localhost", "127.0.0.1"}
-        if parsed_callback.scheme != "https" or invalid_host:
+        invalid_host = (parsed_callback.hostname or "").lower() in LOCAL_HOSTS
+        if parsed_callback.scheme != "https" or invalid_host or not parsed_callback.netloc:
             return Response(
                 {
                     "error": (
-                        "Invalid callback URL. Set MPESA_CALLBACK_URL in environment "
-                        "to a public HTTPS endpoint, e.g. "
-                        "https://your-domain/api/daraja-emails/callback/."
+                        "Invalid callback URL. Set MPESA_CALLBACK_URL to a public HTTPS endpoint."
                     )
                 },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            phone_number = format_phone_number(str(phone_number))
+        except Exception:
+            return Response(
+                {
+                    "error": (
+                        "Invalid phone_number format. Use Kenyan format like "
+                        "0712345678 or 254712345678."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        mpesa_environment = str(getattr(settings, "MPESA_ENVIRONMENT", "sandbox") or "").strip().lower()
+        express_shortcode = str(getattr(settings, "MPESA_EXPRESS_SHORTCODE", "") or "").strip().strip("\"'")
+        shortcode = str(getattr(settings, "MPESA_SHORTCODE", "") or "").strip().strip("\"'")
+        business_short_code = (
+            express_shortcode or shortcode if mpesa_environment == "sandbox" else shortcode or express_shortcode
+        )
+
+        passkey = str(getattr(settings, "MPESA_PASSKEY", "") or "").strip().strip("\"'")
+        consumer_key = str(getattr(settings, "MPESA_CONSUMER_KEY", "") or "").strip().strip("\"'")
+        consumer_secret = str(getattr(settings, "MPESA_CONSUMER_SECRET", "") or "").strip().strip("\"'")
+
+        missing = []
+        if not consumer_key:
+            missing.append("MPESA_CONSUMER_KEY")
+        if not consumer_secret:
+            missing.append("MPESA_CONSUMER_SECRET")
+        if not business_short_code:
+            missing.append("MPESA_SHORTCODE/MPESA_EXPRESS_SHORTCODE")
+        if not passkey:
+            missing.append("MPESA_PASSKEY")
+        if missing:
+            return Response(
+                {"error": "Missing Daraja configuration: " + ", ".join(sorted(missing))},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
-        phone_number = format_phone_number(str(phone_number))
-
-        mpesa_environment = str(getattr(settings, "MPESA_ENVIRONMENT", "sandbox")).strip()
-        if mpesa_environment == "sandbox":
-            business_short_code = str(getattr(settings, "MPESA_EXPRESS_SHORTCODE", ""))
-        else:
-            business_short_code = str(getattr(settings, "MPESA_SHORTCODE", ""))
-
-        passkey = str(getattr(settings, "MPESA_PASSKEY", ""))
-        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-        password = base64.b64encode(
-            (business_short_code + passkey + timestamp).encode("ascii")
-        ).decode("utf-8")
-
-        shortcode_type = str(getattr(settings, "MPESA_SHORTCODE_TYPE", "paybill")).strip().lower()
+        shortcode_type = str(getattr(settings, "MPESA_SHORTCODE_TYPE", "paybill") or "").strip().lower()
         transaction_type = (
             "CustomerBuyGoodsOnline"
-            if shortcode_type == "till_number"
+            if shortcode_type in {"till", "till_number", "buygoods"}
             else "CustomerPayBillOnline"
         )
 
-        headers = {
-            "Authorization": f"Bearer {mpesa_access_token()}",
-            "Content-Type": "application/json",
-        }
+        timestamp = timezone.localtime().strftime("%Y%m%d%H%M%S")
+        password = base64.b64encode(
+            f"{business_short_code}{passkey}{timestamp}".encode("ascii")
+        ).decode("utf-8")
+
         stk_payload = {
             "BusinessShortCode": business_short_code,
             "Password": password,
@@ -269,20 +135,19 @@ def stk_push(request):
             "TransactionType": transaction_type,
             "Amount": amount,
             "PartyA": phone_number,
-            "PartyB": business_short_code,
             "PhoneNumber": phone_number,
             "CallBackURL": callback_url,
-            "AccountReference": account_reference,
-            "TransactionDesc": transaction_desc,
+            "AccountReference": "LaundryPay",
+            "TransactionDesc": "Laundry payment",
         }
 
-        response = requests.post(
-            api_base_url() + "mpesa/stkpush/v1/processrequest",
-            json=stk_payload,
-            headers=headers,
-            timeout=30,
-        )
+        headers = {
+            "Authorization": f"Bearer {mpesa_access_token()}",
+            "Content-Type": "application/json",
+        }
+        url = f"{api_base_url().rstrip('/')}/mpesa/stkpush/v1/processrequest"
 
+        response = requests.post(url, json=stk_payload, headers=headers, timeout=30)
         try:
             response_payload = response.json()
         except Exception:
@@ -290,27 +155,31 @@ def stk_push(request):
 
         if (
             response.status_code >= 400
+            and isinstance(response_payload, dict)
             and response_payload.get("errorCode") == "404.001.03"
         ):
             AccessToken.objects.all().delete()
             headers["Authorization"] = f"Bearer {mpesa_access_token()}"
-            response = requests.post(
-                api_base_url() + "mpesa/stkpush/v1/processrequest",
-                json=stk_payload,
-                headers=headers,
-                timeout=30,
-            )
+            response = requests.post(url, json=stk_payload, headers=headers, timeout=30)
             try:
                 response_payload = response.json()
             except Exception:
                 response_payload = {"raw_response": response.text}
 
+        if response.status_code >= 400:
+            logger.error("Daraja STK push failed (status=%s): %s", response.status_code, response_payload)
+
         return Response(response_payload, status=response.status_code)
-    except Exception as e:
+    except requests.RequestException as exc:
         return Response(
-            {"error": str(e)},
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            {
+                "error": "Could not reach Daraja API. Check internet access and MPESA_ENVIRONMENT.",
+                "details": str(exc),
+            },
+            status=status.HTTP_502_BAD_GATEWAY,
         )
+    except Exception as exc:
+        return Response({"error": str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @csrf_exempt
@@ -318,14 +187,29 @@ def stk_push(request):
 @permission_classes([AllowAny])
 def stk_push_callback(request):
     try:
-        data = request.body.decode("utf-8", errors="replace")
-        logger.info("M-Pesa callback payload: %s", data)
-        return Response(
-            {"message": "STK Push in Django", "data": data},
-            status=status.HTTP_200_OK,
+        payload = request.data if isinstance(request.data, dict) else {}
+        if not payload:
+            raw_body = request.body.decode("utf-8", errors="replace")
+            payload = json.loads(raw_body) if raw_body else {}
+
+        callback = payload.get("Body", {}).get("stkCallback", {})
+        callback_items = callback.get("CallbackMetadata", {}).get("Item", [])
+        callback_metadata = {}
+
+        if isinstance(callback_items, list):
+            for item in callback_items:
+                if isinstance(item, dict) and item.get("Name"):
+                    callback_metadata[item["Name"]] = item.get("Value")
+
+        logger.info(
+            "M-Pesa callback result_code=%s checkout_request_id=%s merchant_request_id=%s metadata=%s",
+            callback.get("ResultCode"),
+            callback.get("CheckoutRequestID"),
+            callback.get("MerchantRequestID"),
+            callback_metadata,
         )
-    except Exception as e:
-        return Response(
-            {"error": str(e)},
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        )
+
+        return Response({"ResultCode": 0, "ResultDesc": "Accepted"}, status=status.HTTP_200_OK)
+    except Exception as exc:
+        logger.exception("Failed to process M-Pesa callback")
+        return Response({"error": str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
