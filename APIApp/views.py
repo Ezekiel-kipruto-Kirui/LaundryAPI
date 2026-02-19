@@ -10,6 +10,7 @@ from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django_daraja.models import AccessToken
 from django_daraja.mpesa.utils import api_base_url, format_phone_number, mpesa_access_token
+from rest_framework.exceptions import ParseError
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny
@@ -128,8 +129,26 @@ def stk_push(request):
             status=status.HTTP_200_OK,
         )
 
-    phone_number = request.data.get("phone_number")
-    amount = request.data.get("amount")
+    try:
+        request_payload = request.data if isinstance(request.data, dict) else {}
+    except ParseError as exc:
+        return Response(
+            {
+                "error": (
+                    "Invalid JSON body. Ensure each key/value uses double quotes "
+                    "and a ':' separator."
+                ),
+                "details": str(exc),
+                "example": {"phone_number": "254712345678", "amount": 1},
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    if not request_payload:
+        request_payload = request.query_params
+
+    phone_number = request_payload.get("phone_number")
+    amount = request_payload.get("amount")
 
     if not phone_number:
         return Response({"error": "phone_number is required"}, status=status.HTTP_400_BAD_REQUEST)
@@ -172,10 +191,19 @@ def stk_push(request):
 @permission_classes([AllowAny])
 def stk_push_callback(request):
     try:
-        payload = request.data if isinstance(request.data, dict) else {}
+        try:
+            payload = request.data if isinstance(request.data, dict) else {}
+        except ParseError:
+            payload = {}
         if not payload:
             raw_body = request.body.decode("utf-8", errors="replace")
-            payload = json.loads(raw_body) if raw_body else {}
+            try:
+                payload = json.loads(raw_body) if raw_body else {}
+            except json.JSONDecodeError:
+                return Response(
+                    {"error": "Invalid callback JSON payload"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
         callback = payload.get("Body", {}).get("stkCallback", {})
         metadata_items = callback.get("CallbackMetadata", {}).get("Item", [])
