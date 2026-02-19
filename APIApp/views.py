@@ -1,6 +1,7 @@
 import base64
 import json
 import logging
+import re
 from urllib.parse import urlparse
 
 import requests
@@ -20,6 +21,7 @@ from rest_framework.response import Response
 logger = logging.getLogger(__name__)
 LOCAL_HOSTS = {"localhost", "127.0.0.1", "0.0.0.0"}
 STK_ENDPOINT = "mpesa/stkpush/v1/processrequest"
+MSISDN_PATTERN = re.compile(r"^2547\d{8}$")
 
 
 def _setting(name, default=""):
@@ -84,10 +86,12 @@ def _build_stk_payload(phone_number, amount, callback_url):
         "Timestamp": timestamp,
         "TransactionType": _transaction_type(),
         "Amount": amount,
+        "PartyA": phone_number,
+        "PartyB": shortcode,
         "PhoneNumber": phone_number,
         "CallBackURL": callback_url,
         "AccountReference": "LaundryPay",
-        "TransactionDesc": "Laundry payment",
+        "TransactionDesc": "Laundry Payment",
     }
 
 
@@ -149,6 +153,8 @@ def stk_push(request):
 
     phone_number = request_payload.get("phone_number")
     amount = request_payload.get("amount")
+    account_reference = str(request_payload.get("account_reference", "LaundryPay") or "").strip()
+    transaction_desc = str(request_payload.get("transaction_desc", "Laundry Payment") or "").strip()
 
     if not phone_number:
         return Response({"error": "phone_number is required"}, status=status.HTTP_400_BAD_REQUEST)
@@ -168,9 +174,28 @@ def stk_push(request):
 
     try:
         callback_url = _resolve_callback_url(request)
-        formatted_phone = format_phone_number(str(phone_number))
+        raw_phone = "".join(ch for ch in str(phone_number).strip() if ch.isdigit())
+        formatted_phone = format_phone_number(raw_phone)
+        if not MSISDN_PATTERN.match(formatted_phone):
+            return Response(
+                {"error": "Invalid phone_number. Use Safaricom format 07XXXXXXXX or 2547XXXXXXXX."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         payload = _build_stk_payload(formatted_phone, amount, callback_url)
+        if account_reference:
+            payload["AccountReference"] = account_reference[:20]
+        if transaction_desc:
+            payload["TransactionDesc"] = transaction_desc[:80]
+
         response, response_payload = _daraja_post(STK_ENDPOINT, payload)
+        if (
+            response.status_code >= 400
+            and isinstance(response_payload, dict)
+            and response_payload.get("errorCode") == "400.002.02"
+        ):
+            response_payload["hint"] = (
+                "PartyA/PhoneNumber must be a valid Safaricom MSISDN in format 2547XXXXXXXX."
+            )
         return Response(response_payload, status=response.status_code)
     except ValueError as exc:
         return Response({"error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)

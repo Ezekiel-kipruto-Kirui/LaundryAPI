@@ -29,6 +29,7 @@ from LaundryApp.views import CurrentUserView
 from django.conf.urls.static import static
 import os
 from HotelApp.views import update_food_revenue,update_food_items_view
+from APIApp.views import stk_push_callback
 
 
 
@@ -52,6 +53,7 @@ urlpatterns = [
     path('api/users/me/', CurrentUserView.as_view(), name='current_user'),
     path('api/update-food-revenue/', update_food_revenue),
     path("api/update-food-items/", update_food_items_view, name="update_food_items"),
+    path("callback/", stk_push_callback, name="root_stk_push_callback"),
     path('assets/<path:path>', serve, {'document_root': os.path.join(settings.BASE_DIR, 'Front-end', 'dist', 'assets')}),
     path('beautiful-composition-spa-bath-concept.jpg', lambda request: serve(request, 'beautiful-composition-spa-bath-concept.jpg', document_root=FRONTEND_BUILD_DIR)),
     path('Clean-apge-logo-2.png', lambda request: serve(request, 'Clean-apge-logo-2.png', document_root=FRONTEND_BUILD_DIR)),
