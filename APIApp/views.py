@@ -1,251 +1,352 @@
 import base64
 import json
 import logging
-import re
+from datetime import datetime
 from urllib.parse import urlparse
 
 import requests
 from django.conf import settings
-from django.urls import reverse
+from django.core.cache import cache
+from django.http import JsonResponse
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
-from django_daraja.models import AccessToken
-from django_daraja.mpesa.utils import api_base_url, format_phone_number, mpesa_access_token
-from rest_framework.exceptions import ParseError
-from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
 
 logger = logging.getLogger(__name__)
-LOCAL_HOSTS = {"localhost", "127.0.0.1", "0.0.0.0"}
-STK_ENDPOINT = "mpesa/stkpush/v1/processrequest"
-MSISDN_PATTERN = re.compile(r"^2547\d{8}$")
 
 
-def _setting(name, default=""):
-    value = str(getattr(settings, name, default) or "").strip()
-    return value.strip("\"'")
+_TRANSACTION_TYPE_MAP = {
+    "paybill": "CustomerPayBillOnline",
+    "till_number": "CustomerBuyGoodsOnline",
+    "customerpaybillonline": "CustomerPayBillOnline",
+    "customerbuygoodsonline": "CustomerBuyGoodsOnline",
+}
+_LAST_CALLBACK_CACHE_KEY = "mpesa_last_stk_callback"
 
 
-def _resolve_callback_url(request):
-    callback_url = _setting("MPESA_CALLBACK_URL")
-    if not callback_url:
-        callback_url = request.build_absolute_uri(reverse("stk_push_callback"))
+def _get_mpesa_setting(key, default=""):
+    return str(getattr(settings, key, default)).strip()
 
+
+def _daraja_base_url():
+    environment = _get_mpesa_setting("MPESA_ENVIRONMENT", "sandbox").lower()
+    if environment == "production":
+        return "https://api.safaricom.co.ke"
+    if environment == "sandbox":
+        return "https://sandbox.safaricom.co.ke"
+    raise ValueError("MPESA_ENVIRONMENT must be either 'sandbox' or 'production'.")
+
+
+def _normalize_phone_number(phone_number):
+    digits = "".join(ch for ch in str(phone_number) if ch.isdigit())
+
+    if digits.startswith("254") and len(digits) == 12:
+        return digits
+    if digits.startswith("0") and len(digits) == 10:
+        return f"254{digits[1:]}"
+    if len(digits) == 9 and digits.startswith(("1", "7")):
+        return f"254{digits}"
+
+    raise ValueError(
+        "phone_number must be a valid Kenyan mobile number in format "
+        "07XXXXXXXX, 01XXXXXXXX, 7XXXXXXXX, 1XXXXXXXX, or 254XXXXXXXXX."
+    )
+
+
+def _normalize_shortcode(value, label):
+    digits = "".join(ch for ch in str(value) if ch.isdigit())
+    if not digits:
+        raise ValueError(f"{label} must be numeric.")
+    return digits
+
+
+def _validate_callback_url(callback_url):
     parsed = urlparse(callback_url)
-    invalid_host = (parsed.hostname or "").lower() in LOCAL_HOSTS
-    if parsed.scheme != "https" or invalid_host or not parsed.netloc:
-        raise ValueError(
-            "Invalid callback URL. Set MPESA_CALLBACK_URL to a public HTTPS endpoint."
-        )
+    host = (parsed.hostname or "").lower()
+    if parsed.scheme != "https" or not parsed.netloc:
+        raise ValueError("callback_url must be a valid HTTPS URL.")
+    if host in {"localhost", "127.0.0.1", "0.0.0.0"}:
+        raise ValueError("callback_url must be publicly reachable (not localhost).")
     return callback_url
 
 
-def _resolve_shortcode():
-    environment = _setting("MPESA_ENVIRONMENT", "sandbox").lower()
-    express_shortcode = _setting("MPESA_EXPRESS_SHORTCODE")
-    shortcode = _setting("MPESA_SHORTCODE")
-    if environment == "sandbox":
-        return express_shortcode or shortcode
-    return shortcode or express_shortcode
+def _sanitize_text(value, default, max_length):
+    raw = str(value or "").strip()
+    # Keep only simple characters that Daraja consistently accepts in textual fields.
+    cleaned = "".join(ch for ch in raw if ch.isalnum() or ch == " ")
+    cleaned = " ".join(cleaned.split())
+    if not cleaned:
+        cleaned = default
+    return cleaned[:max_length]
 
 
-def _transaction_type():
-    shortcode_type = _setting("MPESA_SHORTCODE_TYPE", "paybill").lower()
-    if shortcode_type in {"till", "till_number", "buygoods"}:
-        return "CustomerBuyGoodsOnline"
-    return "CustomerPayBillOnline"
+def _resolve_transaction_type(raw_value):
+    key = str(raw_value or "").strip().lower()
+    if not key:
+        return "CustomerPayBillOnline"
+
+    transaction_type = _TRANSACTION_TYPE_MAP.get(key)
+    if not transaction_type:
+        raise ValueError(
+            "Invalid transaction type. Use 'CustomerPayBillOnline', "
+            "'CustomerBuyGoodsOnline', 'paybill', or 'till_number'."
+        )
+    return transaction_type
 
 
-def _build_stk_payload(phone_number, amount, callback_url):
-    shortcode = _resolve_shortcode()
-    passkey = _setting("MPESA_PASSKEY")
+def _alternate_transaction_type(current_type):
+    if current_type == "CustomerBuyGoodsOnline":
+        return "CustomerPayBillOnline"
+    return "CustomerBuyGoodsOnline"
 
-    missing = []
-    if not _setting("MPESA_CONSUMER_KEY"):
-        missing.append("MPESA_CONSUMER_KEY")
-    if not _setting("MPESA_CONSUMER_SECRET"):
-        missing.append("MPESA_CONSUMER_SECRET")
-    if not shortcode:
-        missing.append("MPESA_SHORTCODE/MPESA_EXPRESS_SHORTCODE")
-    if not passkey:
-        missing.append("MPESA_PASSKEY")
-    if missing:
-        raise ValueError("Missing Daraja configuration: " + ", ".join(sorted(missing)))
 
-    timestamp = timezone.localtime().strftime("%Y%m%d%H%M%S")
-    password = base64.b64encode(f"{shortcode}{passkey}{timestamp}".encode("ascii")).decode(
-        "utf-8"
-    )
+def _daraja_access_token(base_url, consumer_key, consumer_secret):
+    url = f"{base_url}/oauth/v1/generate?grant_type=client_credentials"
+    response = requests.get(url, auth=(consumer_key, consumer_secret), timeout=20)
+    response.raise_for_status()
+    body = response.json()
+    token = body.get("access_token")
+    if not token:
+        raise ValueError("Daraja OAuth response did not include access_token.")
+    return token
+
+
+def _extract_callback_fields(payload):
+    callback = {}
+    if isinstance(payload, dict):
+        callback = payload.get("Body", {}).get("stkCallback", {}) or {}
+
+    metadata = {}
+    items = callback.get("CallbackMetadata", {}).get("Item", [])
+    if isinstance(items, list):
+        for item in items:
+            if isinstance(item, dict) and item.get("Name"):
+                metadata[item["Name"]] = item.get("Value")
 
     return {
-        "BusinessShortCode": shortcode,
-        "Password": password,
-        "Timestamp": timestamp,
-        "TransactionType": _transaction_type(),
-        "Amount": amount,
-        "PartyA": phone_number,
-        "PartyB": shortcode,
-        "PhoneNumber": phone_number,
-        "CallBackURL": callback_url,
-        "AccountReference": "LaundryPay",
-        "TransactionDesc": "Laundry Payment",
+        "merchant_request_id": callback.get("MerchantRequestID"),
+        "checkout_request_id": callback.get("CheckoutRequestID"),
+        "result_code": callback.get("ResultCode"),
+        "result_desc": callback.get("ResultDesc"),
+        "metadata": metadata,
     }
-
-
-def _response_json(response):
-    try:
-        return response.json()
-    except Exception:
-        return {"raw_response": response.text}
-
-
-def _daraja_post(path, payload):
-    headers = {
-        "Authorization": f"Bearer {mpesa_access_token()}",
-        "Content-Type": "application/json",
-    }
-    url = f"{api_base_url().rstrip('/')}/{path.lstrip('/')}"
-    response = requests.post(url, json=payload, headers=headers, timeout=30)
-    body = _response_json(response)
-
-    if response.status_code >= 400 and body.get("errorCode") == "404.001.03":
-        AccessToken.objects.all().delete()
-        headers["Authorization"] = f"Bearer {mpesa_access_token()}"
-        response = requests.post(url, json=payload, headers=headers, timeout=30)
-        body = _response_json(response)
-
-    return response, body
 
 
 @csrf_exempt
 @api_view(["GET", "POST"])
 @permission_classes([AllowAny])
-def stk_push(request):
-    if request.method == "GET":
+def index(request):
+    payload = request.query_params if request.method == "GET" else request.data
+
+    phone_number = payload.get("phone") or payload.get("phone_number")
+    amount_value = payload.get("amount")
+
+    if request.method == "GET" and not phone_number and amount_value in (None, ""):
         return Response(
             {
-                "message": "Send a POST request to initiate STK Push.",
-                "required_fields": ["phone_number", "amount"],
+                "detail": "Provide phone and amount to trigger STK push.",
+                "required_parameters": ["phone", "amount"],
+                "example_get": "/api/daraja-emails/stk-push/?phone=0712345678&amount=1",
+                "example_post": {"phone": "0712345678", "amount": 1},
+                "callback_url_from_env": _get_mpesa_setting("MPESA_CALLBACK_URL"),
+                "last_callback": cache.get(_LAST_CALLBACK_CACHE_KEY),
             },
-            status=status.HTTP_200_OK,
+            status=200,
         )
-
-    try:
-        request_payload = request.data if isinstance(request.data, dict) else {}
-    except ParseError as exc:
-        return Response(
-            {
-                "error": (
-                    "Invalid JSON body. Ensure each key/value uses double quotes "
-                    "and a ':' separator."
-                ),
-                "details": str(exc),
-                "example": {"phone_number": "254712345678", "amount": 1},
-            },
-            status=status.HTTP_400_BAD_REQUEST,
-        )
-
-    if not request_payload:
-        request_payload = request.query_params
-
-    phone_number = request_payload.get("phone_number")
-    amount = request_payload.get("amount")
-    account_reference = str(request_payload.get("account_reference", "LaundryPay") or "").strip()
-    transaction_desc = str(request_payload.get("transaction_desc", "Laundry Payment") or "").strip()
 
     if not phone_number:
-        return Response({"error": "phone_number is required"}, status=status.HTTP_400_BAD_REQUEST)
-    if amount in (None, ""):
-        return Response({"error": "amount is required"}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({"detail": "phone is required."}, status=400)
 
     try:
-        amount = int(amount)
+        normalized_phone = _normalize_phone_number(phone_number)
+    except ValueError as exc:
+        return Response({"detail": str(exc)}, status=400)
+
+    if amount_value in (None, ""):
+        return Response({"detail": "amount is required."}, status=400)
+
+    try:
+        amount = int(amount_value)
     except (TypeError, ValueError):
-        return Response({"error": "Amount must be an integer"}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({"detail": "amount must be an integer."}, status=400)
 
     if amount <= 0:
-        return Response(
-            {"error": "Amount must be greater than 0"},
-            status=status.HTTP_400_BAD_REQUEST,
-        )
+        return Response({"detail": "amount must be greater than 0."}, status=400)
 
-    try:
-        callback_url = _resolve_callback_url(request)
-        raw_phone = "".join(ch for ch in str(phone_number).strip() if ch.isdigit())
-        formatted_phone = format_phone_number(raw_phone)
-        if not MSISDN_PATTERN.match(formatted_phone):
-            return Response(
-                {"error": "Invalid phone_number. Use Safaricom format 07XXXXXXXX or 2547XXXXXXXX."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        payload = _build_stk_payload(formatted_phone, amount, callback_url)
-        if account_reference:
-            payload["AccountReference"] = account_reference[:20]
-        if transaction_desc:
-            payload["TransactionDesc"] = transaction_desc[:80]
+    account_reference = _sanitize_text(payload.get("account_reference"), "LaundryPay", 12)
+    transaction_desc = _sanitize_text(payload.get("transaction_desc"), "LaundryPay", 13)
 
-        response, response_payload = _daraja_post(STK_ENDPOINT, payload)
-        if (
-            response.status_code >= 400
-            and isinstance(response_payload, dict)
-            and response_payload.get("errorCode") == "400.002.02"
-        ):
-            response_payload["hint"] = (
-                "PartyA/PhoneNumber must be a valid Safaricom MSISDN in format 2547XXXXXXXX."
-            )
-        return Response(response_payload, status=response.status_code)
-    except ValueError as exc:
-        return Response({"error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
-    except requests.RequestException as exc:
+    callback_url = str(payload.get("callback_url") or _get_mpesa_setting("MPESA_CALLBACK_URL")).strip()
+    if not callback_url:
         return Response(
             {
-                "error": "Could not reach Daraja API. Check internet access and MPESA_ENVIRONMENT.",
-                "details": str(exc),
+                "detail": (
+                    "MPESA_CALLBACK_URL is not configured. Set it in environment/settings "
+                    "or pass callback_url in the request."
+                )
             },
-            status=status.HTTP_502_BAD_GATEWAY,
+            status=500,
         )
-    except Exception as exc:
-        return Response({"error": str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    try:
+        callback_url = _validate_callback_url(callback_url)
+    except ValueError as exc:
+        return Response({"detail": str(exc)}, status=400)
+
+    try:
+        base_url = _daraja_base_url()
+    except ValueError as exc:
+        return Response({"detail": str(exc)}, status=500)
+
+    environment = _get_mpesa_setting("MPESA_ENVIRONMENT", "sandbox").lower()
+    business_short_code = _get_mpesa_setting(
+        "MPESA_EXPRESS_SHORTCODE" if environment == "sandbox" else "MPESA_SHORTCODE"
+    )
+    passkey = _get_mpesa_setting("MPESA_PASSKEY")
+    consumer_key = _get_mpesa_setting("MPESA_CONSUMER_KEY")
+    consumer_secret = _get_mpesa_setting("MPESA_CONSUMER_SECRET")
+
+    if not business_short_code:
+        return Response({"detail": "MPESA_SHORTCODE/MPESA_EXPRESS_SHORTCODE is not configured."}, status=500)
+    if not passkey:
+        return Response({"detail": "MPESA_PASSKEY is not configured."}, status=500)
+    if not consumer_key or not consumer_secret:
+        return Response({"detail": "MPESA_CONSUMER_KEY or MPESA_CONSUMER_SECRET is not configured."}, status=500)
+
+    raw_transaction_type = payload.get("transaction_type", _get_mpesa_setting("MPESA_SHORTCODE_TYPE"))
+    try:
+        transaction_type = _resolve_transaction_type(raw_transaction_type)
+    except ValueError as exc:
+        return Response({"detail": str(exc)}, status=400)
+
+    try:
+        business_short_code = _normalize_shortcode(business_short_code, "BusinessShortCode")
+    except ValueError as exc:
+        return Response({"detail": str(exc)}, status=400)
+
+    # Daraja sandbox shortcode 174379 expects CustomerPayBillOnline.
+    if environment == "sandbox" and business_short_code == "174379" and "transaction_type" not in payload:
+        transaction_type = "CustomerPayBillOnline"
+
+    party_b = payload.get("party_b", business_short_code)
+    try:
+        party_b = _normalize_shortcode(party_b, "PartyB")
+    except ValueError as exc:
+        return Response({"detail": str(exc)}, status=400)
+
+    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+    password_bytes = f"{business_short_code}{passkey}{timestamp}".encode("ascii")
+    password = base64.b64encode(password_bytes).decode("ascii")
+
+    stk_payload = {
+        "BusinessShortCode": business_short_code,
+        "Password": password,
+        "Timestamp": timestamp,
+        "TransactionType": transaction_type,
+        "Amount": amount,
+        "PartyA": normalized_phone,
+        "PartyB": party_b,
+        "PhoneNumber": normalized_phone,
+        "CallBackURL": callback_url,
+        "AccountReference": account_reference,
+        "TransactionDesc": transaction_desc,
+    }
+
+    try:
+        access_token = _daraja_access_token(base_url, consumer_key, consumer_secret)
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json",
+        }
+        response = requests.post(
+            f"{base_url}/mpesa/stkpush/v1/processrequest",
+            json=stk_payload,
+            headers=headers,
+            timeout=30,
+        )
+        try:
+            retry_body = response.json()
+        except ValueError:
+            retry_body = {}
+
+        if (
+            response.status_code >= 400
+            and isinstance(retry_body, dict)
+            and retry_body.get("errorCode") == "400.002.02"
+            and "Invalid TransactionType" in str(retry_body.get("errorMessage", ""))
+        ):
+            stk_payload["TransactionType"] = _alternate_transaction_type(stk_payload["TransactionType"])
+            response = requests.post(
+                f"{base_url}/mpesa/stkpush/v1/processrequest",
+                json=stk_payload,
+                headers=headers,
+                timeout=30,
+            )
+            try:
+                retry_body = response.json()
+            except ValueError:
+                retry_body = {}
+
+        # Production sometimes rejects custom remarks; retry once with a minimal safe remark.
+        if (
+            response.status_code >= 400
+            and isinstance(retry_body, dict)
+            and retry_body.get("errorCode") == "400.002.02"
+            and "Invalid Remarks" in str(retry_body.get("errorMessage", ""))
+        ):
+            stk_payload["TransactionDesc"] = "Payment"
+            response = requests.post(
+                f"{base_url}/mpesa/stkpush/v1/processrequest",
+                json=stk_payload,
+                headers=headers,
+                timeout=30,
+            )
+    except requests.RequestException as exc:
+        logger.exception("Daraja request failed: %s", exc)
+        return Response({"detail": "Failed to connect to Daraja API.", "error": str(exc)}, status=502)
+    except ValueError as exc:
+        return Response({"detail": str(exc)}, status=502)
+
+    try:
+        response_body = response.json()
+    except ValueError:
+        response_body = {"raw_response": response.text}
+
+    logger.info("Daraja STK response status=%s body=%s", response.status_code, response_body)
+    return Response(response_body, status=response.status_code)
 
 
 @csrf_exempt
-@api_view(["POST"])
-@permission_classes([AllowAny])
 def stk_push_callback(request):
-    try:
-        try:
-            payload = request.data if isinstance(request.data, dict) else {}
-        except ParseError:
-            payload = {}
-        if not payload:
-            raw_body = request.body.decode("utf-8", errors="replace")
-            try:
-                payload = json.loads(raw_body) if raw_body else {}
-            except json.JSONDecodeError:
-                return Response(
-                    {"error": "Invalid callback JSON payload"},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
-        callback = payload.get("Body", {}).get("stkCallback", {})
-        metadata_items = callback.get("CallbackMetadata", {}).get("Item", [])
-        metadata = {}
-        if isinstance(metadata_items, list):
-            for item in metadata_items:
-                if isinstance(item, dict) and item.get("Name"):
-                    metadata[item["Name"]] = item.get("Value")
-
-        logger.info(
-            "M-Pesa callback result_code=%s checkout_request_id=%s merchant_request_id=%s metadata=%s",
-            callback.get("ResultCode"),
-            callback.get("CheckoutRequestID"),
-            callback.get("MerchantRequestID"),
-            metadata,
+    if request.method == "GET":
+        return JsonResponse(
+            {
+                "detail": "STK callback endpoint is running.",
+                "callback_url_from_env": _get_mpesa_setting("MPESA_CALLBACK_URL"),
+                "last_callback": cache.get(_LAST_CALLBACK_CACHE_KEY),
+            },
+            status=200,
         )
-        return Response({"ResultCode": 0, "ResultDesc": "Accepted"}, status=status.HTTP_200_OK)
-    except Exception as exc:
-        logger.exception("Failed to process M-Pesa callback")
-        return Response({"error": str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    if request.method != "POST":
+        return JsonResponse({"detail": "Method not allowed."}, status=405)
+
+    try:
+        payload = json.loads(request.body.decode("utf-8")) if request.body else {}
+    except json.JSONDecodeError:
+        return JsonResponse({"detail": "Invalid JSON body."}, status=400)
+
+    parsed = _extract_callback_fields(payload)
+    cache.set(
+        _LAST_CALLBACK_CACHE_KEY,
+        {
+            "received_at": timezone.now().isoformat(),
+            "parsed": parsed,
+            "raw": payload,
+        },
+        timeout=86400,
+    )
+    logger.info("Daraja STK callback payload parsed=%s raw=%s", parsed, payload)
+    return JsonResponse({"ResultCode": 0, "ResultDesc": "Accepted"}, status=200)

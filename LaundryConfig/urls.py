@@ -53,6 +53,8 @@ urlpatterns = [
     path('api/users/me/', CurrentUserView.as_view(), name='current_user'),
     path('api/update-food-revenue/', update_food_revenue),
     path("api/update-food-items/", update_food_items_view, name="update_food_items"),
+    path("api/callback/", stk_push_callback, name="api_stk_push_callback"),
+    path("api/callback", stk_push_callback, name="api_stk_push_callback_no_slash"),
     path("callback/", stk_push_callback, name="root_stk_push_callback"),
     path('assets/<path:path>', serve, {'document_root': os.path.join(settings.BASE_DIR, 'Front-end', 'dist', 'assets')}),
     path('beautiful-composition-spa-bath-concept.jpg', lambda request: serve(request, 'beautiful-composition-spa-bath-concept.jpg', document_root=FRONTEND_BUILD_DIR)),
