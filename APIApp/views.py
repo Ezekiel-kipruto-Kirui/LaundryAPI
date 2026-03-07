@@ -174,7 +174,7 @@ def index(request):
         return Response({"detail": "amount must be an integer."}, status=400)
 
     if amount <= 0:
-        return Response({"detail": "amount must be greater than 0."}, status=400)
+        return Response({"details": "amount must be greater than 0."}, status=400)
 
     account_reference = _sanitize_text(payload.get("account_reference"), "LaundryPay", 12)
     transaction_desc = _sanitize_text(payload.get("transaction_desc"), "LaundryPay", 13)
